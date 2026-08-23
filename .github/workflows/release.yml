@@ -193,12 +193,15 @@ jobs:
         run: |
           set -euo pipefail
           NOTES="Apple Silicon build, signed with Developer ID and notarized. Bundles Node.js $NODE_VERSION (darwin-arm64). Verify the download against SHA256SUMS.txt."
+          # Spelled out rather than assembled into an array: this runs on a
+          # macOS runner, whose bash is 3.2, where expanding an empty array
+          # under `set -u` is an unbound-variable error.
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" --clobber "$DMG" "$SUMS"
+          elif [ "$PRERELEASE" = "true" ]; then
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" --prerelease "$DMG" "$SUMS"
           else
-            FLAGS=()
-            [ "$PRERELEASE" = "true" ] && FLAGS+=(--prerelease)
-            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "${FLAGS[@]}" "$DMG" "$SUMS"
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "$DMG" "$SUMS"
           fi
 
       - name: Remove the signing keychain
