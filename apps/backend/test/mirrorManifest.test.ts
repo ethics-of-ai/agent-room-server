@@ -104,6 +104,10 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
     for (const path of [
       "apps/visionos/project.yml",
       "apps/visionos/AgentRoom/Resources/Monaco/vs/editor.api.js",
+      // The release-credential wizard drives this operator's own Apple team
+      // and GitHub org. It is operator tooling, not part of the product a
+      // reader of the public repository builds.
+      "scripts/setup-release-credentials.sh",
       "docs/clients/VISIONOS.md",
       "docs/engineering/VISIONOS_DESIGN_PRINCIPLES.md",
       "docs/engineering/VISIONOS_PROFILE_SELECTION.md",

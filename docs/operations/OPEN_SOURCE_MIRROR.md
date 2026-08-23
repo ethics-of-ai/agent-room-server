@@ -346,6 +346,17 @@ backend.
   exported as `.p12`, and an App Store Connect API key with the Developer
   role. Store them as the six secrets named in the Releases section on the
   public repo. They never enter this repo.
+  `scripts/setup-release-credentials.sh` walks all six, including the deploy
+  key, and is the fastest way to do it: it opens each portal page, verifies
+  the exported `.p12` really carries a Developer ID Application identity with
+  its private key, asks Apple to confirm the API key with
+  `xcrun notarytool history`, and writes each secret to the repository that
+  needs it. Two constraints it surfaces because they stop the job dead: only
+  the Apple team's **Account Holder** can create a Developer ID certificate,
+  and the API key must be a **team** key, since `notarytool` takes
+  `--issuer` only for those and `release.yml` always passes it. That script
+  is operator tooling for this org's own accounts and is deliberately not
+  mirrored.
 - Generate an ed25519 keypair. Public half: deploy key with write access on the
   public repo. Private half: `MIRROR_DEPLOY_KEY` secret on this repo. Nothing
   else gets push access.
