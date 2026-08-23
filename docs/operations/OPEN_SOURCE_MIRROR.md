@@ -215,6 +215,45 @@ is not something the first cut has to prove):
 Pin the Xcode major with `xcode-select` and record which 26.x minor the image
 shipped; the app has only ever been built with Xcode 26.6 locally.
 
+## Versioning
+
+One version covers the backend, the macOS app, and the shared client, because
+they ship as one DMG. It is written in four places, and `release.yml` refuses a
+tag that disagrees with three of them.
+
+`release-please` owns all four. It reads the conventional commits landing on
+`main`, keeps one release pull request open that bumps the version and writes
+`CHANGELOG.md`, and tags `vX.Y.Z` when a person merges that pull request. A
+`feat` gives a minor, a `fix` gives a patch, a `!` or a `BREAKING CHANGE`
+footer gives a major. So the version moves when the team decides to ship rather
+than on every merge, which matters here because a tag builds and notarizes a
+public artifact.
+
+Two of the four files update through a JSON updater and two through an
+`x-release-please-version` comment on the line itself
+(`apps/macos/project.yml`, `apps/backend/src/releaseInfo.ts`). The
+`minimumVersion` fields beside `backendVersion` are deliberately not annotated:
+they say which client this backend still talks to, and moving them with the
+release would cut off older clients.
+`apps/backend/test/versionParity.test.ts` pins that the four agree, that each
+is a semantic version, and that exactly one line in `releaseInfo.ts` carries
+the annotation.
+
+The one wrinkle is that GitHub starts no workflow run from a `GITHUB_TOKEN`
+event, so the tag release-please creates would never reach `mirror.yml`.
+`.github/workflows/release-please.yml` therefore publishes that tag itself,
+with the same script, the same gitleaks scan, and the same deploy key, under
+the same `mirror` concurrency group so it cannot race the tree sync the merge
+also triggers. Handing release-please a personal access token would have worked
+too and was rejected: the deploy key can write to one repository and nothing
+else, and it belongs to no person.
+
+The config, the manifest, and `CHANGELOG.md` stay private. The changelog's
+entries link to pull requests in this repository, which a public reader cannot
+open, so the public release notes come from the release workflow instead.
+Improving those notes is the open follow-up, since `--generate-notes` on the
+public side sees only `Sync agent-room@...` commits.
+
 ## Releases and the DMG
 
 `release.yml`, triggered by a `v*` tag on the public repo (which the mirror job

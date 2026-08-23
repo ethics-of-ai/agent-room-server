@@ -121,6 +121,12 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       ".agentroom/state/audit.jsonl",
       "mirror/manifest.json",
       ".github/workflows/mirror.yml",
+      // Versioning automation runs against the private repository alone. The
+      // changelog stays with it too: its entries link to private pull
+      // requests, which would be dead links for a public reader.
+      "release-please-config.json",
+      ".release-please-manifest.json",
+      "CHANGELOG.md",
       ".agents/skills/unslop/SKILL.md",
       "skills-lock.json"
     ]) {

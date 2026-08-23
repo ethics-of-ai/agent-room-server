@@ -65,7 +65,10 @@ jobs:
           MARKETING: ${{ steps.version.outputs.marketing }}
         run: |
           set -euo pipefail
-          grep -q "MARKETING_VERSION: $MARKETING\$" apps/macos/project.yml \
+          # The version fields carry release-please annotations, so the line has
+          # a trailing comment. Dots are escaped so 0.1.0 cannot match 0x1y0.
+          ESCAPED="${MARKETING//./\\.}"
+          grep -qE "^[[:space:]]*MARKETING_VERSION:[[:space:]]+${ESCAPED}([[:space:]]|$)" apps/macos/project.yml \
             || { echo "apps/macos/project.yml MARKETING_VERSION is not $MARKETING" >&2; exit 1; }
           grep -q "\"version\": \"$MARKETING\"" apps/backend/package.json \
             || { echo "apps/backend/package.json version is not $MARKETING" >&2; exit 1; }
