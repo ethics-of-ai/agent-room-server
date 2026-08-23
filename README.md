@@ -17,14 +17,22 @@ turn, but it does not send prompts. With this repository alone you run the
 backend and drive turns through its API with `curl` or a client of your own;
 [Local Mac server](docs/operations/LOCAL_MAC_SERVER.md) walks through that.
 
-```text
-macOS operator app        your client (REST + WebSocket)
-        |                          |
-        +------ Fastify backend ---+
-                     |
-         registered local workspaces
-                     |
-     Codex, Claude Code, DeepSeek, or ACP agent
+```mermaid
+flowchart TB
+    client["your client"]
+
+    subgraph mac["the operator's Mac"]
+        operator["macOS operator app"]
+        backend["Fastify backend"]
+        workspaces["registered local workspaces"]
+        agents["Codex, Claude Code, DeepSeek, or ACP agent"]
+
+        operator -->|launches, supervises, REST| backend
+        backend -->|registers| workspaces
+        backend -->|starts inside a workspace| agents
+    end
+
+    client -->|REST + WebSocket| backend
 ```
 
 ## What is here
