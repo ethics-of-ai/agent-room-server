@@ -17,9 +17,9 @@ jobs:
     name: Backend (typecheck, build, test)
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -32,7 +32,7 @@ jobs:
     name: macOS app (build and unit tests)
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Select the newest Xcode 26 on the image
         run: |
           set -euo pipefail
@@ -61,7 +61,7 @@ jobs:
     name: Shared client (swift test)
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Select the newest Xcode 26 on the image
         run: |
           set -euo pipefail

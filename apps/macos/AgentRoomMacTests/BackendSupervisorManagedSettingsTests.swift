@@ -362,7 +362,9 @@ final class BackendSupervisorManagedSettingsTests: XCTestCase {
             source.distance(from: source.startIndex, to: blockerCheck.lowerBound),
             source.distance(from: source.startIndex, to: legacyCheck.lowerBound)
         )
-        XCTAssertTrue(source.contains("The default runner is \\(displayName), which an older AgentRoom does not know."))
+        XCTAssertTrue(source.contains(
+            "The default runner is \\(displayName). Older AgentRoom versions do not recognize it"
+        ))
     }
 
     func testTheOfflineRunnerPickerPrefersTheCatalogTheBackendLeftBehind() throws {

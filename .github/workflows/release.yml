@@ -40,7 +40,7 @@ jobs:
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref_name }}
 
@@ -72,8 +72,8 @@ jobs:
           grep -q "backendVersion: \"$MARKETING\"" apps/backend/src/releaseInfo.ts \
             || { echo "apps/backend/src/releaseInfo.ts backendVersion is not $MARKETING" >&2; exit 1; }
 
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -174,7 +174,7 @@ jobs:
           spctl -a -vv -t exec "$RUNNER_TEMP/dmg/AgentRoom.app"
           hdiutil detach "$RUNNER_TEMP/dmg" -quiet
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: AgentRoom-${{ steps.version.outputs.version }}-arm64
           path: |

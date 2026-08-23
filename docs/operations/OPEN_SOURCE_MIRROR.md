@@ -1,8 +1,12 @@
 # Open source mirror: macOS app and backend
 
-Status: plan, 2026-08-23. Nothing below is built yet. Decisions marked
-**Decided** were answered on 2026-08-23; the ones still marked **Decide** need
-an answer before the phase that depends on them.
+Status, 2026-08-23: Phase 1 is implemented on `feat/open-source-mirror`;
+Phase 2 began the same day with the repository created and the first manual
+sync pushed (`ethics-of-ai/agent-room-server` `main` at `83b6e24`, from source
+commit `52a082c`). Still to do in Phase 2: the deploy key and
+`MIRROR_DEPLOY_KEY`, the Apple signing secrets, and `MIRROR_ENABLED`. Decisions
+marked **Decided** were answered on 2026-08-23; the ones still marked
+**Decide** need an answer before the phase that depends on them.
 
 ## Goal
 
@@ -396,12 +400,17 @@ backend.
 - The Mac app has only been built with Xcode 26.6. If the `macos-26` image
   lags behind a language feature the app uses, the mac CI job is what finds
   out.
-- On `main` as of 2026-08-23 one Mac unit test fails before any of this work:
-  `BackendSupervisorManagedSettingsTests.testAdvancedPaneNamesTheRollbackBlockerBeforeCallingAFileAlreadyLegacy`.
-  The orchestration engine branch changed that test and the Settings feature
-  it covers, so it is most likely fixed there; until that branch lands, the
-  public mac CI job is red on that one assertion. Decide before the first
-  sync whether to wait for the merge or port the fix.
+- On `main` as of 2026-08-23 one Mac unit test failed before any of this
+  work: `BackendSupervisorManagedSettingsTests.testAdvancedPaneNamesTheRollbackBlockerBeforeCallingAFileAlreadyLegacy`
+  expected the Advanced pane's old wording while the pane already carried the
+  new one. The orchestration engine branch had updated the expectation; the
+  same one-line change is ported here, so the public mac CI job is green and
+  the later merge has nothing to reconcile.
+- The first public CI run (2026-08-23) proved the `macos-26` image: Xcode 26
+  selected, XcodeGen from Homebrew, the backend suite, the Mac app build and
+  tests, and `swift test` on the shared client all ran. Its one warning was
+  the Node 20 deprecation on `actions/*@v4`; the workflows now pin checkout
+  v7, setup-node v7, pnpm/action-setup v6, and upload-artifact v7.
 - Dev tooling binaries ride along in the bundle because `package-macos.mjs`
   copies the whole pnpm virtual store. Each is a notarization surface and a
   download-size cost; the production-only tree (`pnpm deploy --prod`) listed
