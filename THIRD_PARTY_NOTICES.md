@@ -1,0 +1,77 @@
+# Third-party notices
+
+The source code in this repository is licensed under the MIT license
+([`LICENSE`](LICENSE)). The packaged `AgentRoom.app`, and the DMG that carries
+it, also contain software from other parties. This file lists what the package
+step (`scripts/package-macos.mjs`) puts inside the bundle and the terms each
+part ships under. Each component keeps its own license file inside the bundle
+where it has one.
+
+## Node.js runtime
+
+`AgentRoom.app/Contents/Resources/node` is a Node.js macOS distribution (the
+24 LTS line for published releases). Node.js is distributed under the MIT
+license together with the licenses of the components it bundles (V8, OpenSSL,
+ICU, npm, and others). The distribution's own `LICENSE` file, which lists all
+of them, is retained at `Contents/Resources/node/LICENSE`.
+
+## npm dependencies
+
+`AgentRoom.app/Contents/Resources/node_modules` holds the backend's dependency
+tree as installed with pnpm. The authoritative inventory for a given build is
+`pnpm licenses list --prod` run in `apps/backend` at the commit the release was
+cut from. At the time of writing the production set falls under these licenses,
+each package carrying its own license file in its directory:
+
+| License | Packages |
+| --- | --- |
+| MIT | 142 packages, including `fastify` and the `@fastify/*` plugins, `@anthropic-ai/sdk`, `node-pty`, `pino`, `zod`, `yaml`, `@babel/runtime` |
+| BSD-2-Clause | `dotenv`, `json-schema-typed` |
+| BSD-3-Clause | `fast-uri`, `light-my-request`, `qs`, `secure-json-parse` |
+| ISC | 11 packages, including `fastq`, `inherits`, `isexe`, `once`, `semver`, `setprototypeof` |
+| BlueOak-1.0.0 | `glob`, `lru-cache`, `minimatch`, `minipass`, `path-scurry` |
+| Unlicense | `fast-sha256` |
+| Anthropic commercial terms | `@anthropic-ai/claude-agent-sdk`, `@anthropic-ai/claude-agent-sdk-darwin-arm64` (see below) |
+
+The package step copies the pnpm virtual store as installed, so a build may
+also carry development tooling alongside the production set. Those packages
+keep their license files in their own directories too.
+
+## Claude Agent SDK and Claude Code
+
+`@anthropic-ai/claude-agent-sdk` and its `darwin-arm64` platform package are
+"© Anthropic PBC. All rights reserved" and are used subject to the agreements
+at <https://code.claude.com/docs/en/legal-and-compliance>. The platform package
+contains the Claude Code binary, so the DMG ships with Claude Code preinstalled.
+Anthropic's published conditions for that, which AgentRoom follows:
+
+- The Claude Code binary is not modified. AgentRoom runs it as published and
+  does not remove, disable, or restrict any authentication method built into
+  it.
+- Each person authenticates with their own Anthropic credentials. AgentRoom
+  uses the Mac user's own `claude login` session, holds no Anthropic
+  credential of its own, and neither pays for, resells, nor intermediates
+  Claude usage.
+- AgentRoom does not use the Claude Code or Anthropic names or logos in its own
+  name or branding.
+
+The Claude Code binary stays governed by Anthropic's terms wherever it is
+accessed from, including from inside this bundle.
+
+## Editor language catalog
+
+`AgentRoom.app/Contents/Resources/backend/catalog-assets` holds the TextMate
+grammars, language configurations, themes, and the Oniguruma WebAssembly module
+the backend serves to editor clients. The grammars and language configurations
+are redistributed from `microsoft/vscode` (MIT), each pointing at its canonical
+upstream grammar repository; `onig.wasm` comes from `vscode-oniguruma` (MIT,
+built on Oniguruma, BSD). The exact versions, source paths, and license texts
+are in
+[`apps/backend/catalog-assets/vs-textmate/PROVENANCE.md`](apps/backend/catalog-assets/vs-textmate/PROVENANCE.md)
+and the `*.LICENSE.*` files beside it; see also
+[`apps/backend/catalog-assets/README.md`](apps/backend/catalog-assets/README.md).
+
+## Everything else
+
+The macOS app has no third-party Swift dependencies. The backend's `public/`
+debug page is part of this repository and is covered by its MIT license.

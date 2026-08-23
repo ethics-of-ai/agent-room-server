@@ -1,0 +1,14 @@
+{
+  "name": "agentroom",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --filter @agentroom/backend dev",
+    "test": "pnpm --filter @agentroom/backend test",
+    "typecheck": "pnpm --filter @agentroom/backend typecheck",
+    "dist:macos": "node scripts/package-macos.mjs",
+    "install:macos": "node scripts/install-macos.mjs",
+    "mirror:public": "node scripts/mirror-public.mjs"
+  }
+}

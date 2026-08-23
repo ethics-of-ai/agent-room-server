@@ -1,0 +1,72 @@
+# Public CI for agent-room-server. This file is maintained in the private
+# repository under mirror/overlay/.github/workflows/ and arrives here by sync.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (typecheck, build, test)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm --filter @agentroom/backend build
+      - run: pnpm test
+
+  macos-app:
+    name: macOS app (build and unit tests)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode 26 on the image
+        run: |
+          set -euo pipefail
+          XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+      - run: brew install xcodegen
+      - run: xcodegen generate
+        working-directory: apps/macos
+      # Split rather than one `xcodebuild test`: the single-shot form has hung
+      # on this project's test host.
+      - name: Build for testing
+        working-directory: apps/macos
+        run: |
+          xcodebuild -project AgentRoomMac.xcodeproj -scheme AgentRoomMac -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO build-for-testing
+      - name: Run unit tests
+        working-directory: apps/macos
+        run: |
+          xcodebuild -project AgentRoomMac.xcodeproj -scheme AgentRoomMac -configuration Debug \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO test-without-building -only-testing:AgentRoomMacTests
+
+  shared-client:
+    name: Shared client (swift test)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select the newest Xcode 26 on the image
+        run: |
+          set -euo pipefail
+          XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          swift --version
+      - run: swift test
+        working-directory: apps/shared/AgentRoomClient

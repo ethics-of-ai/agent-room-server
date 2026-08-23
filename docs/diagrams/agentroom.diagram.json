@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 2,
+  "kind": "solution",
+  "name": "AgentRoom",
+  "groups": [
+    { "id": "client-apps", "label": "Clients" },
+    { "id": "api-edge", "label": "Backend control plane" },
+    { "id": "runner-adapters", "label": "Agent execution" },
+    { "id": "workspace-access", "label": "Workspace boundary" },
+    { "id": "scene-engine", "label": "Optional services" }
+  ],
+  "nodes": [
+    { "id": "macos-app", "label": "macOS app", "role": "service", "group": "client-apps" },
+    { "id": "operator", "label": "Operator (Mac user)", "role": "actor", "group": "client-apps" },
+    { "id": "visionos-app", "label": "visionOS app", "role": "service", "group": "client-apps" },
+
+    { "id": "rest-routes", "label": "Fastify REST routes", "role": "gateway", "group": "api-edge" },
+    { "id": "bearer-auth", "label": "Bearer auth", "role": "function", "group": "api-edge" },
+    { "id": "events-socket", "label": "WS /api/events", "role": "queue", "group": "api-edge" },
+
+    { "id": "session-service", "label": "AgentSessionService", "role": "service", "group": "api-edge" },
+    { "id": "turn-assembler", "label": "Turn context assembler", "role": "function", "group": "api-edge" },
+    { "id": "attachments", "label": "Session attachments", "role": "datastore", "group": "api-edge" },
+
+    { "id": "runner-boundary", "label": "AgentRunner boundary", "role": "gateway", "group": "api-edge" },
+
+    { "id": "codex-runner", "label": "CodexAppServerRunner", "role": "service", "group": "runner-adapters" },
+    { "id": "claude-runner", "label": "ClaudeCodeRunner", "role": "service", "group": "runner-adapters" },
+
+    { "id": "codex-proc", "label": "codex app-server", "role": "external", "group": "runner-adapters" },
+    { "id": "claude-proc", "label": "claude CLI", "role": "external", "group": "runner-adapters" },
+
+    { "id": "scene-service", "label": "SpatialSceneService", "role": "service", "group": "scene-engine" },
+    { "id": "diagram-compiler", "label": "Validate, lay out, compose", "role": "function", "group": "scene-engine" },
+
+    { "id": "event-bus", "label": "EventBus", "role": "queue", "group": "api-edge" },
+    { "id": "audit-log", "label": "Durable audit", "role": "datastore", "group": "api-edge" },
+    { "id": "artifact-store", "label": "Live artifacts", "role": "cache", "group": "api-edge" },
+
+    { "id": "catalog-manager", "label": "EditorCatalogManager", "role": "service", "group": "scene-engine" },
+    { "id": "catalog-assets", "label": "Grammars, themes, WASM", "role": "datastore", "group": "scene-engine" },
+
+    { "id": "terminal-service", "label": "TerminalSessionService", "role": "service", "group": "scene-engine" },
+    { "id": "pty-shell", "label": "PTY login shell", "role": "external", "group": "scene-engine" },
+
+    { "id": "explorer", "label": "WorkspaceExplorer", "role": "service", "group": "workspace-access" },
+    { "id": "registry", "label": "Workspace registry", "role": "service", "group": "workspace-access" },
+    { "id": "git-service", "label": "WorkspaceGitService", "role": "service", "group": "workspace-access" },
+
+    { "id": "workspace-dir", "label": "Registered folder", "role": "datastore", "group": "workspace-access" },
+    { "id": "diagram-human", "label": "*.diagram.human.json", "role": "datastore", "group": "workspace-access" },
+    { "id": "diagram-base", "label": "*.diagram.json", "role": "datastore", "group": "workspace-access" }
+  ],
+  "edges": [
+    { "id": "op-macos", "from": "operator", "to": "macos-app", "label": "launches backend", "kind": "sync" },
+    { "id": "op-visionos", "from": "operator", "to": "visionos-app", "label": "drives sessions", "kind": "sync" },
+    { "id": "macos-api", "from": "macos-app", "to": "rest-routes", "label": "register + supervise", "kind": "sync" },
+    { "id": "visionos-api", "from": "visionos-app", "to": "rest-routes", "label": "REST", "kind": "sync" },
+    { "id": "visionos-events", "from": "visionos-app", "to": "events-socket", "label": "live updates", "kind": "async" },
+
+    { "id": "api-auth", "from": "rest-routes", "to": "bearer-auth", "label": "gates mutations + content reads", "kind": "sync" },
+    { "id": "events-bus", "from": "events-socket", "to": "event-bus", "label": "subscribes", "kind": "async" },
+    { "id": "api-session", "from": "rest-routes", "to": "session-service", "label": "sessions + turns", "kind": "sync" },
+    { "id": "api-registry", "from": "rest-routes", "to": "registry", "label": "register workspace", "kind": "sync" },
+    { "id": "api-explorer", "from": "rest-routes", "to": "explorer", "label": "tree, preview, index, search", "kind": "sync" },
+    { "id": "api-git", "from": "rest-routes", "to": "git-service", "label": "stage, commit, push", "kind": "sync" },
+    { "id": "api-scene", "from": "rest-routes", "to": "scene-service", "label": "GET spatial-scene", "kind": "sync" },
+    { "id": "api-catalog", "from": "rest-routes", "to": "catalog-manager", "label": "manifest + assets", "kind": "sync" },
+    { "id": "api-terminal", "from": "rest-routes", "to": "terminal-service", "label": "WS terminal", "kind": "sync" },
+
+    { "id": "session-assembler", "from": "session-service", "to": "turn-assembler", "label": "assemble prompt", "kind": "sync" },
+    { "id": "assembler-attachments", "from": "turn-assembler", "to": "attachments", "label": "resolve ids", "kind": "read_write" },
+    { "id": "assembler-context", "from": "turn-assembler", "to": "explorer", "label": "bounded file context", "kind": "sync" },
+    { "id": "assembler-contract", "from": "turn-assembler", "to": "scene-service", "label": "diagram contract", "kind": "sync" },
+    { "id": "session-runner", "from": "session-service", "to": "runner-boundary", "label": "run one turn", "kind": "sync" },
+    { "id": "session-events", "from": "session-service", "to": "event-bus", "label": "coding_* events", "kind": "async" },
+    { "id": "session-artifacts", "from": "session-service", "to": "artifact-store", "label": "in-band sketches", "kind": "read_write" },
+
+    { "id": "runner-codex", "from": "runner-boundary", "to": "codex-runner", "kind": "sync" },
+    { "id": "runner-claude", "from": "runner-boundary", "to": "claude-runner", "kind": "sync" },
+    { "id": "codex-child", "from": "codex-runner", "to": "codex-proc", "label": "app-server JSON-RPC", "kind": "sync" },
+    { "id": "claude-child", "from": "claude-runner", "to": "claude-proc", "label": "Agent SDK", "kind": "sync" },
+    { "id": "codex-writes", "from": "codex-proc", "to": "workspace-dir", "label": "workspace-write sandbox", "kind": "read_write" },
+    { "id": "claude-writes", "from": "claude-proc", "to": "workspace-dir", "label": "bypassPermissions", "kind": "read_write" },
+
+    { "id": "scene-compile", "from": "scene-service", "to": "diagram-compiler", "label": "compose on read", "kind": "sync" },
+    { "id": "scene-preview", "from": "scene-service", "to": "explorer", "label": "bounded preview", "kind": "sync" },
+    { "id": "scene-base", "from": "scene-service", "to": "diagram-base", "label": "base layer", "kind": "sync" },
+    { "id": "scene-human", "from": "scene-service", "to": "diagram-human", "label": "override layer", "kind": "sync" },
+
+    { "id": "registry-folder", "from": "registry", "to": "workspace-dir", "label": "registered path", "kind": "read_write" },
+    { "id": "explorer-files", "from": "explorer", "to": "workspace-dir", "label": "bounded reads + one write", "kind": "read_write" },
+    { "id": "explorer-human", "from": "explorer", "to": "diagram-human", "label": "optimistic-locked PUT", "kind": "read_write" },
+    { "id": "git-repo", "from": "git-service", "to": "workspace-dir", "label": "fixed argv git", "kind": "read_write" },
+
+    { "id": "bus-audit", "from": "event-bus", "to": "audit-log", "label": "sanitized entries", "kind": "async" },
+    { "id": "catalog-files", "from": "catalog-manager", "to": "catalog-assets", "label": "hash-verified blobs", "kind": "read_write" },
+    { "id": "terminal-pty", "from": "terminal-service", "to": "pty-shell", "label": "spawns login shell", "kind": "sync" },
+    { "id": "pty-workspace", "from": "pty-shell", "to": "workspace-dir", "label": "starts in realpath", "kind": "read_write" }
+  ],
+  "flows": [
+    {
+      "id": "send-a-turn",
+      "label": "Send a turn",
+      "edges": [
+        "visionos-api",
+        "api-session",
+        "session-assembler",
+        "assembler-context",
+        "session-runner",
+        "runner-codex",
+        "codex-child",
+        "codex-writes",
+        "session-events",
+        "events-bus"
+      ]
+    },
+    {
+      "id": "render-a-diagram",
+      "label": "Render a diagram",
+      "edges": ["visionos-api", "api-scene", "scene-preview", "scene-base", "scene-human", "scene-compile"]
+    },
+    {
+      "id": "save-a-placement",
+      "label": "Save a human placement",
+      "edges": ["visionos-api", "api-explorer", "explorer-human"]
+    },
+    {
+      "id": "commit-and-push",
+      "label": "Commit and push",
+      "edges": ["visionos-api", "api-git", "git-repo"]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "grammars": [
+    { "languageId": "swift", "scopeName": "source.swift", "grammar": "grammars/swift.tmLanguage.json", "languageConfig": "language-configs/swift.json" },
+    { "languageId": "typescript", "scopeName": "source.tsx", "grammar": "grammars/typescriptreact.tmLanguage.json", "languageConfig": "language-configs/typescript.json" },
+    { "languageId": "javascript", "scopeName": "source.js", "grammar": "grammars/javascript.tmLanguage.json", "languageConfig": "language-configs/javascript.json" },
+    { "languageId": "json", "scopeName": "source.json", "grammar": "grammars/json.tmLanguage.json", "languageConfig": "language-configs/json.json" },
+    { "languageId": "markdown", "scopeName": "text.html.markdown", "grammar": "grammars/markdown.tmLanguage.json", "languageConfig": "language-configs/markdown.json" },
+    { "languageId": "yaml", "scopeName": "source.yaml", "grammar": "grammars/yaml.tmLanguage.json", "languageConfig": "language-configs/yaml.json" },
+    { "languageId": "shell", "scopeName": "source.shell", "grammar": "grammars/shell.tmLanguage.json", "languageConfig": "language-configs/shell.json" }
+  ]
+}

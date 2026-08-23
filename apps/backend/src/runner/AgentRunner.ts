@@ -1,0 +1,239 @@
+import type { AgentRunnerKind, CodingAgentCapabilities, CodingAgentTurnSettings } from "../domain/models";
+import type {
+  PermissionAnswerResult,
+  PermissionDecisionAuthority,
+  PermissionRequestOption
+} from "./shared/PendingPermissionRequests";
+
+export type CanonicalPermissionOption = PermissionRequestOption;
+
+export type AgentRunnerInputPart =
+  | {
+      type: "localImage";
+      path: string;
+      // Image media type (e.g. "image/png"). Codex reads the file itself, but
+      // the Claude Agent SDK needs a base64 block with an explicit media_type.
+      contentType?: string;
+    };
+
+export class AgentRunnerInputError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode = 400
+  ) {
+    super(message);
+  }
+}
+
+export interface AgentRunnerInput {
+  runId: string;
+  sessionId?: string;
+  workspacePath: string;
+  prompt: string;
+  inputParts?: AgentRunnerInputPart[];
+  title?: string;
+  settings?: CodingAgentTurnSettings;
+}
+
+export interface RunnerAudit {
+  phase: "started" | "completed";
+  runnerKind: AgentRunnerKind;
+  runId: string;
+  command: {
+    executableName: string;
+    argsCount: number;
+  };
+  status?: "succeeded" | "failed";
+  exitStatus?: {
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  };
+  durationMs?: number;
+  timeToFirstEventMs?: number;
+  timeToFirstOutputMs?: number;
+  streamDurationMs?: number;
+  maxOutputGapMs?: number;
+  eventCount?: number;
+  outputEventCount?: number;
+  outputBytes?: number;
+  activityEventCount?: number;
+  failureCategory?: "process_error" | "process_exit" | "process_signal";
+}
+
+export interface CanonicalPlanStep {
+  step: string;
+  status: string;
+}
+
+export interface CanonicalDiffFile {
+  path: string;
+  /** The pre-rename path, when the runner's diff reports one. */
+  oldPath?: string;
+  status: string;
+  additions?: number;
+  deletions?: number;
+}
+
+/**
+ * The runner-agnostic payload of one activity. An adapter maps its own protocol
+ * into this discriminated union; nothing above the `AgentRunner` boundary reads
+ * a native kind to decide what an activity *is*.
+ *
+ * This is deliberately a payload union and not a tag beside vendor-shaped
+ * content: a tag alone would only move the conditional from `runnerKind` to
+ * content inspection. Native detail is preserved beside it — the activity's
+ * `kind`/`content` and the `native` blob on {@link RunnerMetadata} — so
+ * generalizing the dispatch never costs the payload.
+ */
+export type CanonicalActivity =
+  | { kind: "session_started" }
+  | { kind: "turn_started" }
+  | { kind: "plan_updated"; explanation?: string; steps: CanonicalPlanStep[] }
+  | { kind: "diff_updated"; summary?: string; files: CanonicalDiffFile[]; truncated?: boolean }
+  | { kind: "reasoning"; delta?: string }
+  | { kind: "tool_started"; toolId?: string }
+  | { kind: "tool_output"; toolId?: string; delta?: string }
+  | { kind: "tool_completed"; toolId?: string }
+  | {
+      kind: "permission_requested";
+      /**
+       * The id a client answers this request at. Backend-minted rather than the
+       * agent's own, because the answer route addresses it and an agent's id
+       * space is its own business.
+       */
+      requestId?: string;
+      /** Only options the agent itself offered; a client may choose no other. */
+      options?: CanonicalPermissionOption[];
+      request: Record<string, unknown>;
+    }
+  | {
+      kind: "permission_resolved";
+      requestId?: string;
+      status?: string;
+      /** The option that was selected, when one was. */
+      optionId?: string;
+      /** Who decided it — a person, the configured policy, or the bounded wait. */
+      decidedBy?: PermissionDecisionAuthority;
+    };
+
+export type CanonicalActivityKind = CanonicalActivity["kind"];
+
+/**
+ * Correlation and display metadata an adapter attaches to what it emits.
+ *
+ * The named fields are canonical: a client correlates and renders from these
+ * alone, without knowing which runner produced them. `native` carries the
+ * richer per-runner detail that has no canonical home (a JSON-RPC method name,
+ * an SDK message uuid) and is bounded on construction — it is never required
+ * for baseline correlation or rendering, and the legacy `codex`/`claudeCode`
+ * wire blocks are rebuilt from it by the compatibility shim in
+ * `protocol/coding/legacyMetadata.ts`.
+ *
+ * `posture` is display metadata, deliberately not a universal permission enum:
+ * an adapter supplies its runner's own label and value, so a Codex approval
+ * policy and a Claude Code permission mode stay distinct rather than being
+ * flattened into a lossy common denominator.
+ */
+export interface RunnerMetadata {
+  nativeSessionId?: string;
+  nativeTurnId?: string;
+  nativeItemId?: string;
+  model?: string;
+  cwd?: string;
+  posture?: { label: string; value: string };
+  sandbox?: unknown;
+  native?: Record<string, unknown>;
+}
+
+export interface AgentRunnerActivity {
+  /**
+   * The adapter's own name for this activity. Display and diagnostic only —
+   * `canonical` is what decides behavior.
+   */
+  kind: string;
+  title: string;
+  description?: string;
+  content: Record<string, unknown>;
+  /**
+   * Absent means the adapter has no canonical reading of this activity: it
+   * still rides the legacy `agent_turn_activity` event, but produces no
+   * `coding_*` event. That is how a runner keeps an activity out of the
+   * canonical stream without the core mapper knowing why.
+   */
+  canonical?: CanonicalActivity;
+  runner?: RunnerMetadata;
+}
+
+export type AgentRunnerEvent =
+  | {
+      type: "runner_audit";
+      audit: RunnerAudit;
+    }
+  | {
+      type: "agent_activity";
+      activity: AgentRunnerActivity;
+    }
+  | {
+      type: "agent_update";
+      message: string;
+      runner?: RunnerMetadata;
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    }
+  | {
+      type: "token_usage_updated";
+      runner?: RunnerMetadata;
+      inputTokens?: number;
+      cachedInputTokens?: number;
+      outputTokens?: number;
+      reasoningOutputTokens?: number;
+      totalTokens?: number;
+      /**
+       * Live context-window occupancy: the most recent model request's token
+       * footprint, not the cumulative billed totals above. Cumulative totals
+       * re-count the (cached) conversation on every tool round-trip, so they
+       * overstate occupancy by roughly a factor of the request count.
+       */
+      contextWindowUsedTokens?: number;
+      modelContextWindowTokens?: number;
+    }
+  | {
+      type: "run_succeeded";
+      message?: string;
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    }
+  | {
+      type: "run_failed";
+      error: string;
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+
+export interface AgentRunner {
+  getCapabilities(): Promise<CodingAgentCapabilities>;
+  validateInputParts(inputParts: AgentRunnerInputPart[] | undefined): void;
+  run(input: AgentRunnerInput): AsyncIterable<AgentRunnerEvent>;
+  cancel(runId: string): Promise<void>;
+  /**
+   * Answer an outstanding permission request with an option the runner is
+   * currently holding for it.
+   *
+   * Optional, because a runner that never asks — or that answers from a stored
+   * policy alone — has nothing to answer. Its absence is what the answer route
+   * reports as "no such outstanding request", rather than anything about which
+   * runner this is.
+   */
+  answerPermissionRequest?(input: {
+    sessionId: string;
+    requestId: string;
+    optionId: string;
+  }): PermissionAnswerResult;
+  // Release per-session runner resources (persistent child processes, queues)
+  // when the AgentRoom session is deleted.
+  closeSession?(sessionId: string): Promise<void>;
+  dispose?(): Promise<void>;
+}

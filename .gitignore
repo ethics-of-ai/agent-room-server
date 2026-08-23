@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# AgentRoom local runtime state and workspaces
+.agentroom/
+
+# Backend build and test output
+apps/backend/dist/
+coverage/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS and editor state
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# XcodeGen/Xcode generated files
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+.derivedData/
+.swift-module-cache/
+build/
+.build/
+*.xcuserstate
+*.rcuserdata
+
+# Spatial document placement (the human override layer)
+#
+# The base `*.diagram.json` / `*.scene.json` is committed; this layer is not.
+# A diagram's layout is a deterministic function of its base document, so
+# everyone opening one sees the same geometry without this file — what it holds
+# is one person's deviation from that shared default, and drag coordinates have
+# no meaningful merge resolution. Leaving it merely untracked is worse than
+# either choice: AgentRoom's own dirty check runs
+# `git status --untracked-files=all`, so an uncommitted placement file blocks a
+# branch switch and the session-branch restore before a turn.
+#
+# Safe for the engine, which resolves this path from the base file and reads it
+# directly rather than through the `git ls-files` index. The cost is that a
+# curated arrangement cannot be shared at all: coordinates never enter the base
+# document by design, so a diagram needing curation to be readable wants a
+# narrower base diagram instead.
+*.diagram.human.json
+*.scene.human.json
+
+# Temporary files
+tmp/
+temp/
+.cache/

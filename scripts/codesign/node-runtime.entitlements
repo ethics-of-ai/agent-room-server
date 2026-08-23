@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the Node.js binary that
+  scripts/package-macos.mjs bundles under AgentRoom.app/Contents/Resources/node.
+
+  Notarization requires the hardened runtime, and under it V8 cannot map its
+  JIT pages without allow-jit and allow-unsigned-executable-memory. Library
+  validation is disabled so node can dlopen the node-pty addon, which is
+  signed with the same identity in the same pass but is not part of the node
+  binary's own signature.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

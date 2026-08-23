@@ -1,0 +1,50 @@
+{
+  "AgentRoom-Light": {
+    "base": "vs",
+    "inherit": true,
+    "rules": [
+      { "token": "comment", "foreground": "6E7781", "fontStyle": "italic" },
+      { "token": "keyword", "foreground": "CF222E" },
+      { "token": "string", "foreground": "0A7D33" },
+      { "token": "number", "foreground": "8250DF" },
+      { "token": "type", "foreground": "0550AE" },
+      { "token": "function", "foreground": "6639BA" },
+      { "token": "variable", "foreground": "1D1F24" },
+      { "token": "constant", "foreground": "8250DF" }
+    ],
+    "colors": {
+      "editor.background": "#FBFBFD",
+      "editor.foreground": "#1D1F24",
+      "editorLineNumber.foreground": "#A0A6AD",
+      "editorLineNumber.activeForeground": "#3A3F45",
+      "editor.lineHighlightBackground": "#EFF1F4",
+      "editor.selectionBackground": "#CCE2FF",
+      "editorCursor.foreground": "#0A66C2",
+      "editorIndentGuide.background1": "#E6E8EB"
+    }
+  },
+  "AgentRoom-Dark": {
+    "base": "vs-dark",
+    "inherit": true,
+    "rules": [
+      { "token": "comment", "foreground": "8B98A5", "fontStyle": "italic" },
+      { "token": "keyword", "foreground": "FF7AB2" },
+      { "token": "string", "foreground": "9DE29D" },
+      { "token": "number", "foreground": "E5C07B" },
+      { "token": "type", "foreground": "5FC9F8" },
+      { "token": "function", "foreground": "82AAFF" },
+      { "token": "variable", "foreground": "E6E6E6" },
+      { "token": "constant", "foreground": "E5C07B" }
+    ],
+    "colors": {
+      "editor.background": "#1B1D21",
+      "editor.foreground": "#E6E6E6",
+      "editorLineNumber.foreground": "#6B7177",
+      "editorLineNumber.activeForeground": "#C9D1D9",
+      "editor.lineHighlightBackground": "#24272C",
+      "editor.selectionBackground": "#33445E",
+      "editorCursor.foreground": "#4FA3FF",
+      "editorIndentGuide.background1": "#2A2E34"
+    }
+  }
+}

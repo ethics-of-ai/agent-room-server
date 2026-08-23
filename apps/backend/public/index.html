@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentRoom Debug</title>
+    <style>
+      body { margin: 0; font: 14px system-ui, sans-serif; background: #101418; color: #eef3f7; }
+      header { padding: 18px 22px; border-bottom: 1px solid #26323b; display: flex; justify-content: space-between; align-items: center; }
+      main { padding: 22px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      section { border: 1px solid #26323b; border-radius: 8px; padding: 14px; background: #151b21; min-height: 160px; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; }
+      .wide { grid-column: 1 / -1; }
+      @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>AgentRoom Debug</strong>
+      <span id="connection">connecting</span>
+    </header>
+    <main>
+      <section>
+        <h2>Sessions</h2>
+        <pre id="sessions">[]</pre>
+      </section>
+      <section>
+        <h2>Metrics</h2>
+        <pre id="metrics">{}</pre>
+      </section>
+      <section class="wide">
+        <h2>Recent Events</h2>
+        <pre id="events">[]</pre>
+      </section>
+    </main>
+    <script>
+      const events = [];
+      const $ = (id) => document.getElementById(id);
+
+      async function refresh() {
+        const status = await fetch("/api/status").then((res) => res.json());
+        $("sessions").textContent = JSON.stringify(status.sessions, null, 2);
+        $("metrics").textContent = JSON.stringify(status.metrics, null, 2);
+        $("events").textContent = JSON.stringify(events.slice(-30), null, 2);
+      }
+
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      const socket = new WebSocket(`${scheme}://${location.host}/api/events`);
+      socket.onopen = () => { $("connection").textContent = "connected"; };
+      socket.onclose = () => { $("connection").textContent = "closed"; };
+      socket.onmessage = (message) => {
+        events.push(JSON.parse(message.data));
+        refresh();
+      };
+      refresh();
+    </script>
+  </body>
+</html>

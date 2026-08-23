@@ -1,0 +1,35 @@
+name: AgentRoomMac
+options:
+  bundleIdPrefix: dev.agentroom
+settings:
+  MARKETING_VERSION: 0.1.0
+  CURRENT_PROJECT_VERSION: 1
+targets:
+  AgentRoomMac:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    settings:
+      PRODUCT_NAME: AgentRoom
+      PRODUCT_MODULE_NAME: AgentRoomMac
+      PRODUCT_BUNDLE_IDENTIFIER: dev.agentroom.AgentRoomMac
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      GENERATE_INFOPLIST_FILE: YES
+      INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+    sources:
+      - path: AgentRoomMac
+      - path: ../shared/AgentRoomClient/Sources/AgentRoomClient
+        group: Shared/AgentRoomClient
+  AgentRoomMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - AgentRoomMacTests
+    dependencies:
+      - target: AgentRoomMac
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: dev.agentroom.AgentRoomMacTests
+      GENERATE_INFOPLIST_FILE: YES
+      TEST_HOST: $(BUILT_PRODUCTS_DIR)/AgentRoom.app/Contents/MacOS/AgentRoom
+      BUNDLE_LOADER: $(TEST_HOST)
