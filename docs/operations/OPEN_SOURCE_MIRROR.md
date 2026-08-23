@@ -89,9 +89,13 @@ owner's.
    architecture, trust, and orchestration records) travel whole, because a
    second hand-maintained copy of `TRUST_AND_SAFETY.md` would rot within a
    week. Kept documents that link to the stripped ones dangle in the mirror
-   and the public README says so. `README.md`, `docs/README.md`, `AGENTS.md`,
-   and `CLAUDE.md` are not mirrored; the overlay carries public versions of
-   all four, written for the public tree. The exclude list names
+   and the public README says so. `README.md` and `docs/README.md` are not
+   mirrored; the overlay carries public versions of both, written for the
+   public tree. `AGENTS.md` and `CLAUDE.md` are not mirrored and have no
+   public counterpart (decided 2026-08-23, after a first version of the overlay
+   carried trimmed copies): the public docs are the rules for anyone working
+   there, and a hand-maintained second copy of the agent guidance was the most
+   drift-prone file in the overlay. The exclude list names
    `VISIONOS_PROFILE_SELECTION.md` although `main` does not hold it yet; it
    arrives with the orchestration engine branch and is excluded from that
    day on.
@@ -134,7 +138,6 @@ allowlisted tree (overlay wins):
 | --- | --- |
 | `README.md` | Public README: what this is, what is and is not included, clone-and-build, download-the-DMG, trust posture summary, link back to the docs. Replaces this repo's README, which documents the whole monorepo. |
 | `docs/README.md` | Public docs index without the visionOS entries. |
-| `AGENTS.md`, `CLAUDE.md` | Public agent guidance: the backend, Mac, shared-client, configuration, and documentation rules from this repo's files, without the visionOS sections, the `$swiftui-pro` requirement, and the Apple reference manifest. Maintained by hand; the documentation rule here gains a line saying a change to a mirrored rule updates the overlay too. |
 | `LICENSE` | Decision 2. |
 | `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `SECURITY.md` | Decisions 5 and 6. |
 | `.github/workflows/ci.yml` | Public CI (below). |
@@ -143,11 +146,11 @@ allowlisted tree (overlay wins):
 
 Never mirrored: `apps/visionos/`, `docs/reference/`, `docs/clients/VISIONOS.md`,
 `docs/engineering/VISIONOS_DESIGN_PRINCIPLES.md`,
-`docs/engineering/VISIONOS_PROFILE_SELECTION.md`, this repo's `README.md`,
-`docs/README.md`, `AGENTS.md`, and `CLAUDE.md` (overlay versions replace
-them), `.agents/`, `.codex/`, `.claude/`, `skills-lock.json` (third-party
-skills with their own licenses; revisit later), `mirror/` itself, and this
-repo's `.github/workflows/mirror.yml`.
+`docs/engineering/VISIONOS_PROFILE_SELECTION.md`, this repo's `README.md` and
+`docs/README.md` (overlay versions replace them), `AGENTS.md` and `CLAUDE.md`
+(no public counterpart), `.agents/`, `.codex/`, `.claude/`,
+`skills-lock.json` (third-party skills with their own licenses; revisit
+later), `mirror/` itself, and this repo's `.github/workflows/mirror.yml`.
 
 ## How the sync works
 
@@ -419,7 +422,8 @@ backend.
   `GET /api/harness`. With Decision 8 that file is not in the mirror, so the
   public build advertises a path its own checkout does not hold. It is a
   metadata string about a registered workspace, not a file the backend reads;
-  acceptable, and noted in the overlay `AGENTS.md`.
+  acceptable, and covered by the public README's note that some links point
+  at visionOS documents kept private.
 - `apps/backend/scripts/sync-catalog-assets.mjs` reads the visionOS tree, but
   `apps/backend/catalog-assets` is committed, so nothing at runtime or in the
   package step depends on it. The parity test skips; the script is a dev tool.

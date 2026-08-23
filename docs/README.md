@@ -42,6 +42,3 @@ useful when changing the contracts, but they are not setup guides.
 
 - [Universal runner boundary](engineering/UNIVERSAL_RUNNER_BOUNDARY.md)
 - [Registered runner completeness](engineering/REGISTERED_RUNNER_COMPLETENESS.md)
-
-Repository instructions for coding agents live in [`AGENTS.md`](../AGENTS.md)
-and [`CLAUDE.md`](../CLAUDE.md).

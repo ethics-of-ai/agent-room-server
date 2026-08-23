@@ -217,8 +217,9 @@ Start with the [documentation index](docs/README.md), or go directly to:
 - [Trust and safety](docs/safety/TRUST_AND_SAFETY.md)
 - [Runner capability matrix](docs/engineering/RUNNER_CAPABILITY_MATRIX.md)
 
-Guidance for coding agents working in this tree is in [`AGENTS.md`](AGENTS.md)
-and [`CLAUDE.md`](CLAUDE.md).
+There is no separate agent guidance file in this tree; the documents above,
+starting with [Trust and safety](docs/safety/TRUST_AND_SAFETY.md), are the
+rules for anyone working here, person or agent.
 
 ## License
 

@@ -23,8 +23,6 @@ const requiredOverlayFiles = [
   "CONTRIBUTING.md",
   "SECURITY.md",
   "THIRD_PARTY_NOTICES.md",
-  "AGENTS.md",
-  "CLAUDE.md",
   "docs/README.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/workflows/ci.yml",
@@ -151,6 +149,10 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
     for (const required of requiredOverlayFiles) {
       expect(files, `${required} is missing from mirror/overlay`).toContain(required);
     }
+    // Decided 2026-08-23: the public tree carries no agent guidance file; the
+    // docs are the rules there, and the private AGENTS.md/CLAUDE.md stay here.
+    expect(files).not.toContain("AGENTS.md");
+    expect(files).not.toContain("CLAUDE.md");
     expect(readFileSync(resolve(overlayRoot, "LICENSE"), "utf8").startsWith("MIT License")).toBe(true);
   });
 

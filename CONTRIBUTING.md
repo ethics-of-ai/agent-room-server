@@ -45,11 +45,13 @@ then build the `AgentRoomMac` scheme in Xcode or with `xcodebuild`. Edit
 [`apps/macos/project.yml`](apps/macos/project.yml), never the generated
 `.xcodeproj`, which is not committed.
 
-Read [`AGENTS.md`](AGENTS.md) before touching the backend, the runners, the
-configuration layer, or the workspace routes. Each rule there points at the
-document that explains it, and most are pinned by a test. A PR that relaxes a
-documented trust default without updating the document, the rule, and the test
-together will not be ported.
+Read [Architecture](docs/architecture/ARCHITECTURE.md),
+[Moving parts](docs/architecture/MOVING_PARTS.md), and
+[Trust and safety](docs/safety/TRUST_AND_SAFETY.md) before touching the
+backend, the runners, the configuration layer, or the workspace routes. Most
+documented defaults are pinned by a test. A PR that relaxes a documented trust
+default without updating the document and the test together will not be
+ported.
 
 Keep the docs in step with the code: routes, event names, config variables,
 safety posture, packaging behavior, and client responsibilities are all

@@ -18,7 +18,7 @@
 - [ ] Docs updated where a route, event, config variable, safety posture,
       packaging step, or client responsibility changed.
 - [ ] No documented trust default relaxed without its document, rule, and test
-      changing together (see `AGENTS.md`).
+      changing together (see `docs/safety/TRUST_AND_SAFETY.md`).
 - [ ] No generated `.xcodeproj` edited; `apps/macos/project.yml` is the source.
 
 ---
