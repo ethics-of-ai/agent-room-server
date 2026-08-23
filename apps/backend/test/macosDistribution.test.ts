@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
@@ -134,6 +135,37 @@ describe("macOS distribution packaging", () => {
 
     expect(distribution.notarySubmitCommand("/tmp/AgentRoom.dmg", {})).toBeNull();
     expect(distribution.notaryLogCommand("sub-123", {})).toBeNull();
+  });
+
+  it("stages the DMG without rewriting the signed bundle's relative symlinks", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    const root = await mkdtemp(join(tmpdir(), "agentroom-dmg-staging-"));
+
+    try {
+      // The shape that matters: a relative link from the bundled backend's
+      // node_modules into the bundled pnpm store, exactly what
+      // rewriteBundledDependencySymlinks produces before signing.
+      const appPath = join(root, "AgentRoom.app");
+      const store = join(appPath, "Contents/Resources/node_modules/.pnpm/fastify@5.8.5/node_modules/fastify");
+      const linkDir = join(appPath, "Contents/Resources/backend/node_modules");
+      await mkdir(store, { recursive: true });
+      await mkdir(linkDir, { recursive: true });
+      await writeFile(join(store, "index.js"), "module.exports = {};\n");
+      const relativeTarget = "../../node_modules/.pnpm/fastify@5.8.5/node_modules/fastify";
+      await symlink(relativeTarget, join(linkDir, "fastify"));
+
+      const stagingPath = join(root, "dmg-staging");
+      await distribution.createDmgStaging(stagingPath, appPath);
+
+      // fs.cp resolves symlink targets unless told not to, which would point
+      // this at an absolute build path and break the signature seal on the copy
+      // that ships. See scripts/package-macos.mjs.
+      const staged = join(stagingPath, "AgentRoom.app/Contents/Resources/backend/node_modules/fastify");
+      expect(await readlink(staged)).toBe(relativeTarget);
+      expect(await readlink(join(stagingPath, "Applications"))).toBe("/Applications");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("reads the notarization verdict rather than trusting notarytool's exit code", async () => {

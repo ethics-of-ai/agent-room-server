@@ -237,6 +237,14 @@ async function main() {
   }
 
   await createDmgStaging(dmgStagingPath, appPath);
+  if (signingIdentity) {
+    // Verify the copy that actually goes into the DMG, not just the original the
+    // signing pass checked. Anything the staging copy disturbs shows up here as
+    // a local failure instead of as an opaque notarization rejection minutes later.
+    run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", resolve(dmgStagingPath, "AgentRoom.app")], {
+      cwd: repoRoot
+    });
+  }
   run("hdiutil", [
     "create",
     "-volname",
@@ -415,10 +423,23 @@ async function copyNodeRuntime(destination, env) {
   );
 }
 
-async function createDmgStaging(stagingPath, appPath) {
+/**
+ * Copies the signed app into the DMG staging directory.
+ *
+ * `verbatimSymlinks` is the whole point. `fs.cp` resolves symlink targets by
+ * default, so the bundle's relative pnpm links — the ones
+ * `rewriteBundledDependencySymlinks` just pointed inside the bundle — would be
+ * rewritten to absolute paths back into the build directory. That breaks the
+ * signature seal (which covers symlink targets) on the copy that actually ships,
+ * while the original the signing pass verified stays intact, and it would ship
+ * an app whose links point at a build path no user has. The other tree copies
+ * here can take the default because `rewriteBundledDependencySymlinks` repairs
+ * them afterwards; this one runs after signing, so nothing repairs it.
+ */
+export async function createDmgStaging(stagingPath, appPath) {
   await rm(stagingPath, { recursive: true, force: true });
   await mkdir(stagingPath, { recursive: true });
-  await cp(appPath, resolve(stagingPath, "AgentRoom.app"), { recursive: true });
+  await cp(appPath, resolve(stagingPath, "AgentRoom.app"), { recursive: true, verbatimSymlinks: true });
   try {
     await symlink("/Applications", resolve(stagingPath, "Applications"));
   } catch {
