@@ -106,10 +106,51 @@ describe("macOS distribution packaging", () => {
       "TEAM123456",
       "--password",
       "app-specific-password",
-      "--wait"
+      "--wait",
+      "--output-format",
+      "json"
     ]);
     expect(command.display).not.toContain("app-specific-password");
     expect(command.display).toContain("<redacted>");
+
+    const logCommand = distribution.notaryLogCommand("sub-123", {
+      AGENTROOM_NOTARY_APPLE_ID: "developer@example.com",
+      AGENTROOM_NOTARY_TEAM_ID: "TEAM123456",
+      AGENTROOM_NOTARY_PASSWORD: "app-specific-password"
+    });
+
+    expect(logCommand.args).toEqual([
+      "notarytool",
+      "log",
+      "sub-123",
+      "--apple-id",
+      "developer@example.com",
+      "--team-id",
+      "TEAM123456",
+      "--password",
+      "app-specific-password"
+    ]);
+    expect(logCommand.display).not.toContain("app-specific-password");
+
+    expect(distribution.notarySubmitCommand("/tmp/AgentRoom.dmg", {})).toBeNull();
+    expect(distribution.notaryLogCommand("sub-123", {})).toBeNull();
+  });
+
+  it("reads the notarization verdict rather than trusting notarytool's exit code", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+
+    // `submit --wait` exits 0 for a completed-but-rejected submission, so the
+    // status is what decides whether the build may be stapled.
+    expect(distribution.parseNotarySubmission('{"id":"abc","status":"Accepted"}')).toEqual({
+      id: "abc",
+      status: "Accepted"
+    });
+    expect(distribution.parseNotarySubmission('{"id":"abc","status":"Invalid"}')).toEqual({
+      id: "abc",
+      status: "Invalid"
+    });
+    expect(distribution.parseNotarySubmission("not json")).toEqual({ id: null, status: "unreadable" });
+    expect(distribution.parseNotarySubmission("{}")).toEqual({ id: null, status: "unknown" });
   });
 
   it("rewrites copied pnpm package symlinks to stay inside the app resources", async () => {

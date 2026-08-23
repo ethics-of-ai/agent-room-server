@@ -5,6 +5,22 @@ import { join } from "node:path";
 import { buildServer } from "../src/server";
 import type { ServiceConfig } from "../src/domain/models";
 
+// release-please rewrites backendVersion in src/releaseInfo.ts on every
+// release, so pinning it here fails CI the moment a release lands. What a
+// supervisor needs is that the field is present and is a version; the release
+// workflow is what checks it against the tag and the two other annotated
+// files. The minimumVersion fields carry no annotation and do not move with a
+// release, so those stay pinned.
+const expectedRelease = {
+  backendVersion: expect.stringMatching(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/),
+  apiVersion: "2026-05-12",
+  minimumSupportedClientApiVersion: "2026-05-12",
+  compatibleClients: {
+    macos: { minimumVersion: "0.1.0" },
+    visionos: { minimumVersion: "0.1.0" }
+  }
+};
+
 const config = async (overrides: Partial<ServiceConfig> = {}): Promise<ServiceConfig> => {
   const root = await mkdtemp(join(tmpdir(), "agentroom-supervision-"));
   return {
@@ -40,15 +56,7 @@ describe("supervision endpoints", () => {
       ok: true,
       runnerKind: "codex",
       mode: "agent-bridge",
-      release: {
-        backendVersion: "0.1.0",
-        apiVersion: "2026-05-12",
-        minimumSupportedClientApiVersion: "2026-05-12",
-        compatibleClients: {
-          macos: { minimumVersion: "0.1.0" },
-          visionos: { minimumVersion: "0.1.0" }
-        }
-      }
+      release: expectedRelease
     });
     expect(health.json().uptimeSeconds).toEqual(expect.any(Number));
 
@@ -70,15 +78,7 @@ describe("supervision endpoints", () => {
       workspaceRoot: join(agentRoomHome, "workspaces"),
       stateDir: join(agentRoomHome, "state"),
       requireAuth: false,
-      release: {
-        backendVersion: "0.1.0",
-        apiVersion: "2026-05-12",
-        minimumSupportedClientApiVersion: "2026-05-12",
-        compatibleClients: {
-          macos: { minimumVersion: "0.1.0" },
-          visionos: { minimumVersion: "0.1.0" }
-        }
-      }
+      release: expectedRelease
     });
 
     await app.close();

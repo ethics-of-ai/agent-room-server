@@ -84,16 +84,15 @@ export async function findMachOFiles(root) {
   return found.sort();
 }
 
-export function notarySubmitCommand(artifactPath, env = process.env) {
+/**
+ * The credential flags for one `notarytool` invocation, or null when neither a
+ * keychain profile nor an Apple ID triple is configured. Split out of the
+ * command builders below so `submit` and `log` can never authenticate
+ * differently.
+ */
+function notaryCredentialArgs(env = process.env) {
   if (env.AGENTROOM_NOTARY_PROFILE) {
-    return commandWithDisplay([
-      "notarytool",
-      "submit",
-      artifactPath,
-      "--keychain-profile",
-      env.AGENTROOM_NOTARY_PROFILE,
-      "--wait"
-    ]);
+    return { args: ["--keychain-profile", env.AGENTROOM_NOTARY_PROFILE], redacted: new Set() };
   }
 
   const appleId = env.AGENTROOM_NOTARY_APPLE_ID;
@@ -103,18 +102,41 @@ export function notarySubmitCommand(artifactPath, env = process.env) {
     return null;
   }
 
+  return {
+    args: ["--apple-id", appleId, "--team-id", teamId, "--password", password],
+    redacted: new Set([password])
+  };
+}
+
+export function notarySubmitCommand(artifactPath, env = process.env) {
+  const credentials = notaryCredentialArgs(env);
+  if (!credentials) return null;
+
+  // `--output-format json` so the caller can read the verdict. `submit --wait`
+  // exits 0 for a submission that completed with `status: Invalid`, so the exit
+  // code alone would let a rejected build go on to be stapled.
   return commandWithDisplay([
     "notarytool",
     "submit",
     artifactPath,
-    "--apple-id",
-    appleId,
-    "--team-id",
-    teamId,
-    "--password",
-    password,
-    "--wait"
-  ], new Set([password]));
+    ...credentials.args,
+    "--wait",
+    "--output-format",
+    "json"
+  ], credentials.redacted);
+}
+
+/** Apple's per-issue rejection report for a finished submission. */
+export function notaryLogCommand(submissionId, env = process.env) {
+  const credentials = notaryCredentialArgs(env);
+  if (!credentials) return null;
+
+  return commandWithDisplay([
+    "notarytool",
+    "log",
+    submissionId,
+    ...credentials.args
+  ], credentials.redacted);
 }
 
 export function relocatedPnpmSymlinkTarget({ linkPath, originalTarget, sourceVirtualStore, bundledVirtualStore }) {
@@ -234,7 +256,23 @@ async function main() {
   const notaryCommand = notarySubmitCommand(dmgPath, process.env);
   if (notaryCommand) {
     await requireExecutable("xcrun");
-    run("xcrun", notaryCommand.args, { cwd: repoRoot }, notaryCommand.display);
+    const submission = runCapture("xcrun", notaryCommand.args, { cwd: repoRoot }, notaryCommand.display);
+    const verdict = parseNotarySubmission(submission);
+
+    if (verdict.status !== "Accepted") {
+      // Stapling a rejected submission fails with "Record not found", which
+      // reads as a stapler problem and hides Apple's actual reason. Print the
+      // per-issue log instead and stop here.
+      const logCommand = notaryLogCommand(verdict.id, process.env);
+      if (verdict.id && logCommand) {
+        console.log(`Notarization returned ${verdict.status}. Apple's report:`);
+        spawnSync("xcrun", logCommand.args, { cwd: repoRoot, stdio: "inherit" });
+      }
+      throw new Error(
+        `Notarization was not accepted (status: ${verdict.status}${verdict.id ? `, submission ${verdict.id}` : ""}).`
+      );
+    }
+
     run("xcrun", ["stapler", "staple", dmgPath], { cwd: repoRoot });
   } else {
     console.log("Skipping notarization because no AgentRoom notary profile or Apple ID credentials are configured.");
@@ -445,6 +483,47 @@ function run(command, args, options = {}, displayOverride) {
   }
   if (result.status !== 0) {
     throw new Error(`${command} exited with status ${result.status}`);
+  }
+}
+
+/**
+ * Like `run`, but returns stdout as well as echoing it, for a command whose
+ * output the caller has to read. stderr still streams to the console.
+ */
+function runCapture(command, args, options = {}, displayOverride) {
+  const display = displayOverride ?? [command, ...args].map(shellQuote).join(" ");
+  console.log(`$ ${display}`);
+  const result = spawnSync(command, args, {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    encoding: "utf8",
+    stdio: ["inherit", "pipe", "inherit"]
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  const stdout = result.stdout ?? "";
+  if (stdout) {
+    process.stdout.write(stdout.endsWith("\n") ? stdout : `${stdout}\n`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`${command} exited with status ${result.status}`);
+  }
+  return stdout;
+}
+
+/**
+ * The `{ id, status }` of a `notarytool submit --output-format json` reply.
+ * Unparseable output is reported as an unknown status rather than assumed good,
+ * so a notarytool that changes its output shape fails the release instead of
+ * stapling a build nobody checked.
+ */
+export function parseNotarySubmission(stdout) {
+  try {
+    const parsed = JSON.parse(stdout);
+    return { id: parsed?.id ?? null, status: parsed?.status ?? "unknown" };
+  } catch {
+    return { id: null, status: "unreadable" };
   }
 }
 

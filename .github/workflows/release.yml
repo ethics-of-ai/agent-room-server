@@ -154,6 +154,19 @@ jobs:
           CI: "1"
         run: node scripts/package-macos.mjs
 
+      # A rejected notarization surfaces as a stapler "Record not found", which
+      # names the wrong step. Apple's per-issue report is the only thing that
+      # says why, and the credentials to fetch it live only on this runner.
+      - name: Report why notarization was rejected
+        if: ${{ failure() && !inputs.unsigned && env.AGENTROOM_NOTARY_PROFILE != '' }}
+        run: |
+          set -uo pipefail
+          ID="$(xcrun notarytool history --keychain-profile "$AGENTROOM_NOTARY_PROFILE" \
+            --output-format json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["history"][0]["id"])' 2>/dev/null)"
+          [ -n "$ID" ] || { echo "no notarization submission found for this account"; exit 0; }
+          echo "Newest submission: $ID"
+          xcrun notarytool log "$ID" --keychain-profile "$AGENTROOM_NOTARY_PROFILE" || true
+
       - name: Name the artifacts
         id: artifacts
         env:
