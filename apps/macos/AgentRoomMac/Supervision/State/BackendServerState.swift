@@ -43,7 +43,7 @@ enum BackendServerState: String {
         case .running:
             return "AgentRoom is listening for local and LAN clients."
         case .externalRunning:
-            return "AgentRoom is reachable, but this app did not start the backend process."
+            return "AgentRoom is reachable on this port, but this app did not start it. Stop it where it was started, then press Start."
         case .starting:
             return "Starting the backend sidecar process."
         case .stopping:

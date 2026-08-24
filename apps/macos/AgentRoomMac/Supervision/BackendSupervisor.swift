@@ -59,6 +59,16 @@ final class BackendSupervisor {
     private(set) var sourceCheckoutOutcomes: [String: RunnerBootstrapSourceCheckoutOutcome] = [:]
     private(set) var editorCatalogStatus: EditorCatalogStatus?
     private(set) var editorCatalogActionStatus: EditorCatalogActionStatus?
+    /// Whether a backend this app supervises exists right now — spawned this
+    /// session or adopted from an earlier one.
+    ///
+    /// Observed rather than checked on demand, because the live answer is a
+    /// syscall on a pid and a view that read it in a body would neither be
+    /// cheap nor re-render when it changed. It is what keeps Stop honest in the
+    /// states `serverState` alone cannot describe: a process that is running
+    /// while its health check fails reads as `failed`, and refusing to stop it
+    /// there is the same dead end as refusing to stop an orphan.
+    private(set) var hasSupervisedProcess = false
 
     private let defaults: UserDefaults
     private let secretStore: BackendSecretStore
@@ -72,8 +82,19 @@ final class BackendSupervisor {
     private let appSupportMigrator: AppSupportDataMigrator
     private let managedSettingsStore: ManagedSettingsFileStore
     private let runnerCatalogStore: RunnerCatalogFileStore
+    private let processInspector: any BackendProcessInspecting
+    private let sidecarRecordStore: BackendSidecarRecordStore
     @ObservationIgnored private var secretLoadError: Error?
     @ObservationIgnored private var backendProcess: Process?
+    /// A sidecar this app launched in an earlier session and has recognised
+    /// again. It is supervised exactly like `backendProcess` — the operator
+    /// sees "running" and can stop or restart it — because it *is* this app's
+    /// backend; only the handle differs, since `Process` cannot attach to a pid
+    /// it did not spawn. See `BackendProcessIdentity`.
+    @ObservationIgnored private var adoptedProcess: AdoptedBackendProcess?
+    /// An adopted process has no `terminationHandler`, so its exit is noticed by
+    /// polling. Runs only while one is adopted.
+    @ObservationIgnored private var adoptedProcessWatchTask: Task<Void, Never>?
     @ObservationIgnored private var stdoutPipe: Pipe?
     @ObservationIgnored private var stderrPipe: Pipe?
     // Immutable + internally locked, so the nonisolated readability handlers can
@@ -100,7 +121,9 @@ final class BackendSupervisor {
         launchAtLoginController: any LaunchAtLoginManaging = LaunchAtLoginController(),
         appSupportMigrator: AppSupportDataMigrator? = nil,
         managedSettingsStore: ManagedSettingsFileStore = ManagedSettingsFileStore(),
-        runnerCatalogStore: RunnerCatalogFileStore = RunnerCatalogFileStore()
+        runnerCatalogStore: RunnerCatalogFileStore = RunnerCatalogFileStore(),
+        processInspector: any BackendProcessInspecting = DarwinProcessInspector(),
+        sidecarRecordStore: BackendSidecarRecordStore? = nil
     ) {
         self.defaults = defaults
         self.secretStore = secretStore
@@ -114,6 +137,8 @@ final class BackendSupervisor {
         self.appSupportMigrator = appSupportMigrator ?? AppSupportDataMigrator(fileManager: fileManager)
         self.managedSettingsStore = managedSettingsStore
         self.runnerCatalogStore = runnerCatalogStore
+        self.processInspector = processInspector
+        self.sidecarRecordStore = sidecarRecordStore ?? BackendSidecarRecordStore(defaults: defaults)
         var loadedSettings = Self.loadSettings(from: defaults)
         loadedSettings.launchAtLoginEnabled = launchAtLoginController.isEnabled
         self.settings = loadedSettings
@@ -653,6 +678,21 @@ final class BackendSupervisor {
         }
     }
 
+    /// What the lifecycle controls render from. Each folds the reported state
+    /// together with whether a process is actually there, so a button is
+    /// offered exactly when pressing it would do something.
+    var canStartBackend: Bool {
+        serverState.canStart && !hasSupervisedProcess
+    }
+
+    var canStopBackend: Bool {
+        serverState.canStop || hasSupervisedProcess
+    }
+
+    var canRestartBackend: Bool {
+        serverState.canRestart || hasSupervisedProcess
+    }
+
     func startServer() {
         Task { await startServerIfNeeded() }
     }
@@ -680,19 +720,169 @@ final class BackendSupervisor {
     }
 
     func shutdownNow() {
-        guard let process = backendProcess, process.isRunning else {
-            return
-        }
-        isGracefullyStopping = true
-        process.interrupt()
-        Thread.sleep(forTimeInterval: 0.5)
-        if process.isRunning {
-            process.terminate()
+        if let process = supervisedProcessController {
+            isGracefullyStopping = true
+            stopImmediately(process)
         }
     }
 
-    private func startServerIfNeeded() async {
+    // MARK: - Sidecar adoption
+
+    /// Whether a backend this app supervises is running — spawned in this
+    /// session, or adopted from an earlier one.
+    private var supervisedProcessIsRunning: Bool {
+        backendProcess?.isRunning == true || adoptedProcess?.isRunning == true
+    }
+
+    private var supervisedProcessController: (any BackendProcessControlling)? {
         if let process = backendProcess, process.isRunning {
+            return process
+        }
+        if let adopted = adoptedProcess, adopted.isRunning {
+            return adopted
+        }
+        return nil
+    }
+
+    /// Republishes `supervisedProcessIsRunning` for the views. Called at each
+    /// point a supervised process starts or stops existing, which is the whole
+    /// set of moments the answer can change.
+    private func refreshSupervisedProcessFlag() {
+        hasSupervisedProcess = supervisedProcessIsRunning
+    }
+
+    /// Recognise a sidecar left behind by a previous app session.
+    ///
+    /// Quitting normally stops the sidecar, but a force quit, a crash, or
+    /// Xcode's stop button never reaches `applicationWillTerminate`: the child
+    /// is reparented to launchd and keeps the port. Without this the next
+    /// launch could only report a healthy backend it did not own and refuse to
+    /// stop it, which left the operator no way out of the app at all.
+    ///
+    /// Only this app's own launch record is adopted. A backend the operator
+    /// started themselves stays foreign, because stopping someone's `pnpm dev`
+    /// from a button labelled Stop Backend is not this app's call.
+    @discardableResult
+    private func adoptRecordedSidecarIfPossible() -> Bool {
+        if let adopted = adoptedProcess, adopted.isRunning {
+            return true
+        }
+        guard backendProcess == nil, let recorded = sidecarRecordStore.load() else {
+            return false
+        }
+        // A record written for a different port does not describe whatever is
+        // answering on the one this app is configured for now.
+        guard recorded.port == settings.serverPort else {
+            return false
+        }
+        guard processInspector.isAlive(recorded) else {
+            sidecarRecordStore.clear()
+            return false
+        }
+        guard processInspector.ownsListeningTCPPort(recorded.port, for: recorded) else {
+            appendDiagnostic(
+                "warning",
+                "The recorded sidecar (pid \(recorded.pid)) does not own the listening socket on port \(recorded.port); leaving the healthy backend external."
+            )
+            return false
+        }
+
+        adoptedProcess = AdoptedBackendProcess(identity: recorded, inspector: processInspector)
+        isGracefullyStopping = false
+        refreshSupervisedProcessFlag()
+        startAdoptedProcessWatch()
+        appendDiagnostic(
+            "info",
+            "Adopted the backend sidecar started by an earlier app session (pid \(recorded.pid)). "
+                + "Its output went to that session, so process logs start here; use /api/logs for the backend's own log."
+        )
+        return true
+    }
+
+    private func recordLaunchedSidecar(_ process: Process) {
+        guard let identity = processInspector.describe(
+            pid: process.processIdentifier,
+            port: settings.serverPort
+        ) else {
+            appendDiagnostic(
+                "warning",
+                "Could not record the backend sidecar's process identity; if this app is force quit, a new session will not be able to stop the sidecar."
+            )
+            sidecarRecordStore.clear()
+            return
+        }
+        sidecarRecordStore.save(identity)
+    }
+
+    private func forgetSupervisedSidecar() {
+        adoptedProcessWatchTask?.cancel()
+        adoptedProcessWatchTask = nil
+        adoptedProcess = nil
+        sidecarRecordStore.clear()
+        refreshSupervisedProcessFlag()
+    }
+
+    /// An adopted process was never this app's child, so there is no
+    /// `terminationHandler` to fire and no exit status to read. Polling is the
+    /// only way to notice it went away.
+    private func startAdoptedProcessWatch() {
+        adoptedProcessWatchTask?.cancel()
+        adoptedProcessWatchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+                guard let self else {
+                    return
+                }
+                guard settleAdoptedProcessIfExited() else {
+                    continue
+                }
+                return
+            }
+        }
+    }
+
+    /// Reports an adopted process's exit exactly once, whether the watch task
+    /// or the stop path notices it first. Returns whether it had exited.
+    @discardableResult
+    private func settleAdoptedProcessIfExited() -> Bool {
+        guard let adopted = adoptedProcess else {
+            return true
+        }
+        guard !adopted.isRunning else {
+            return false
+        }
+        adoptedProcessDidExit()
+        return true
+    }
+
+    private func adoptedProcessDidExit() {
+        let wasStopping = isGracefullyStopping
+        forgetSupervisedSidecar()
+        isGracefullyStopping = false
+        if wasStopping {
+            serverState = .stopped
+            resetCachedBackendSnapshot(connectionState: .unknown)
+            appendDiagnostic("info", "Backend sidecar stopped.")
+            return
+        }
+        // No exit status exists for a process this app did not spawn, so an exit
+        // nobody asked for is read the way an owned crash is — including the
+        // auto-restart the operator configured. That is also what settles the
+        // narrow race where a relaunched app adopts a sidecar whose own
+        // exit-with-parent watchdog is about to stop it: the backend goes, and
+        // this app starts a fresh one it fully owns.
+        serverState = .failed
+        resetCachedBackendSnapshot(connectionState: .unreachable)
+        appendDiagnostic("error", "Adopted backend sidecar exited.")
+        scheduleCrashRestartIfAllowed()
+    }
+
+    private func startServerIfNeeded() async {
+        if supervisedProcessIsRunning {
             serverState = .running
             appendDiagnostic("info", "App-owned backend process is already running.")
             await refreshConnectionStatus()
@@ -712,8 +902,12 @@ final class BackendSupervisor {
             if let response, response.ok {
                 health = response
                 connectionState = .reachable
-                serverState = .externalRunning
-                appendDiagnostic("info", "Backend is already reachable on port \(settings.serverPort), but it was not started by this app.")
+                if adoptRecordedSidecarIfPossible() {
+                    serverState = .running
+                } else {
+                    serverState = .externalRunning
+                    appendDiagnostic("info", "Backend is already reachable on port \(settings.serverPort), but it was not started by this app.")
+                }
             } else {
                 serverState = .failed
                 connectionState = .unreachable
@@ -742,22 +936,47 @@ final class BackendSupervisor {
 
     private func stopServerGracefully() async {
         cancelPendingCrashRestart()
-        guard let process = backendProcess, process.isRunning else {
-            if serverState == .externalRunning {
-                appendDiagnostic("info", "Backend is running outside this app; stop it from the process that started it.")
-            } else {
-                appendDiagnostic("info", "No app-owned backend process is running.")
-            }
-            if serverState != .failed && serverState != .externalRunning {
-                serverState = .stopped
-                resetCachedBackendSnapshot(connectionState: .unknown)
-            }
+        if let process = backendProcess, process.isRunning {
+            await requestGracefulStop(of: process, message: "Stopping backend sidecar.")
             return
         }
 
+        if let adopted = adoptedProcess {
+            // Stop is a user-requested outcome even if the process died between
+            // the two-second watch ticks. Mark that intent before inspecting it
+            // so settlement cannot classify the already-finished process as a
+            // crash and schedule an unwanted restart.
+            isGracefullyStopping = true
+            if settleAdoptedProcessIfExited() {
+                return
+            }
+            await requestGracefulStop(of: adopted, message: "Stopping the adopted backend sidecar.")
+            try? await Task.sleep(for: .milliseconds(500))
+            // Settling here rather than waiting for the next poll is what keeps
+            // a restart from sitting on the watch interval; whichever notices
+            // first reports the exit, and only once.
+            settleAdoptedProcessIfExited()
+            return
+        }
+
+        if serverState == .externalRunning {
+            appendDiagnostic("info", "Backend is running outside this app; stop it from the process that started it.")
+        } else {
+            appendDiagnostic("info", "No app-owned backend process is running.")
+        }
+        if serverState != .failed && serverState != .externalRunning {
+            serverState = .stopped
+            resetCachedBackendSnapshot(connectionState: .unknown)
+        }
+    }
+
+    private func requestGracefulStop(
+        of process: any BackendProcessControlling,
+        message: String
+    ) async {
         serverState = .stopping
         isGracefullyStopping = true
-        appendDiagnostic("info", "Stopping backend sidecar.")
+        appendDiagnostic("info", message)
         process.interrupt()
 
         try? await Task.sleep(for: .seconds(3))
@@ -767,8 +986,19 @@ final class BackendSupervisor {
         }
     }
 
+    private func stopImmediately(_ process: any BackendProcessControlling) {
+        // The launch record stays in place until termination is observed. If
+        // neither signal lands, the next app session can still recognise the
+        // sidecar instead of meeting an orphan it cannot stop.
+        process.interrupt()
+        Thread.sleep(forTimeInterval: 0.5)
+        if process.isRunning {
+            process.terminate()
+        }
+    }
+
     private func restartServerIfPossible() async {
-        guard serverState == .running || serverState == .starting else {
+        guard canRestartBackend else {
             if serverState == .externalRunning {
                 appendDiagnostic("warning", "Cannot restart a backend that was started outside this app.")
             } else {
@@ -780,12 +1010,12 @@ final class BackendSupervisor {
         appendDiagnostic("info", "Restarting app-owned backend sidecar.")
         await stopServerGracefully()
         for _ in 0..<20 {
-            if backendProcess == nil {
+            if backendProcess == nil && adoptedProcess == nil {
                 break
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        if backendProcess != nil {
+        if backendProcess != nil || adoptedProcess != nil {
             serverState = .failed
             appendDiagnostic("error", "Backend restart timed out while waiting for the current process to stop.")
             return
@@ -802,7 +1032,12 @@ final class BackendSupervisor {
             connectionState = response.ok ? .reachable : .unreachable
             if response.ok {
                 if serverState != .stopping {
-                    serverState = backendProcess?.isRunning == true ? .running : .externalRunning
+                    // A healthy backend this app can recognise as its own is
+                    // running, not foreign — which is the whole point of the
+                    // launch record. See `adoptRecordedSidecarIfPossible`.
+                    serverState = supervisedProcessIsRunning || adoptRecordedSidecarIfPossible()
+                        ? .running
+                        : .externalRunning
                 }
                 appendDiagnostic("info", "Backend reachable. Runner: \(response.runnerKind), mode: \(response.mode).")
                 startBackendSettingsEventMonitor()
@@ -1111,6 +1346,11 @@ final class BackendSupervisor {
         self.stderrPipe = stderrPipe
         isGracefullyStopping = false
         try process.run()
+        // Written after the spawn succeeds, so the record always describes a
+        // process that existed. It is what lets the next app session recognise
+        // this sidecar if this one never gets to stop it.
+        recordLaunchedSidecar(process)
+        refreshSupervisedProcessFlag()
     }
 
     private nonisolated func captureAvailableOutput(from handle: FileHandle, stream: BackendProcessStream) {
@@ -1152,6 +1392,10 @@ final class BackendSupervisor {
         if backendProcess === process {
             backendProcess = nil
         }
+        // The sidecar this app was supervising is gone, so the record that
+        // describes it is stale; leaving it would have a later session try to
+        // adopt a dead pid.
+        forgetSupervisedSidecar()
         stdoutPipe = nil
         stderrPipe = nil
 

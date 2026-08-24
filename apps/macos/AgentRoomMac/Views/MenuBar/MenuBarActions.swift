@@ -9,19 +9,19 @@ struct MenuBarActions: View {
             MenuBarAction(
                 label: "Start Server",
                 systemImage: "play.fill",
-                isDisabled: !supervisor.serverState.canStart,
+                isDisabled: !supervisor.canStartBackend,
                 action: supervisor.startServer
             )
             MenuBarAction(
                 label: "Stop Server",
                 systemImage: "stop.fill",
-                isDisabled: !supervisor.serverState.canStop,
+                isDisabled: !supervisor.canStopBackend,
                 action: supervisor.stopServer
             )
             MenuBarAction(
                 label: "Restart Server",
                 systemImage: "arrow.clockwise.circle",
-                isDisabled: !supervisor.serverState.canRestart,
+                isDisabled: !supervisor.canRestartBackend,
                 action: supervisor.restartServer
             )
         }

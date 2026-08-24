@@ -56,7 +56,8 @@ reach. Precedence is environment, else the file, else the code default, and
 everything managed applies on the next backend restart. `AUTH_TOKEN`, the
 executable paths, `CODEX_ARGS`, `CODEX_RUNNER_PROTOCOL`, `TERMINAL_SHELL`,
 `REMOTE_SETTINGS_ADMIN`, and the host/port/storage variables are
-environment-only and never enter that file. See
+environment-only and never enter that file. The macOS-only sidecar controls
+`AGENTROOM_EXIT_WITH_PARENT` and `AGENTROOM_PARENT_PID` are also env-only. See
 `docs/safety/TRUST_AND_SAFETY.md`.
 
 - `HOST`: defaults to `0.0.0.0`.
@@ -102,6 +103,12 @@ environment-only and never enter that file. See
   Lets paired clients change the trust-posture settings through
   `PATCH /api/config`; preference settings are always client-editable.
   Environment-only, so this decision stays on the Mac.
+- `AGENTROOM_EXIT_WITH_PARENT`: optional `true` or `false`, defaults to
+  `false`. The macOS app sets it for the child sidecar; leave it off for a
+  backend started by an operator.
+- `AGENTROOM_PARENT_PID`: expected launcher pid used only with the preceding
+  switch. The macOS app supplies it so a child reparented before Node startup is
+  detected immediately; do not set it for an operator-started backend.
 
 Generate an optional bearer token:
 

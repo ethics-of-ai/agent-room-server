@@ -63,7 +63,58 @@ DEEPSEEK_ARGS=<from Keychain, when a source checkout supplies the entrypoint>
 DEEPSEEK_CORDIS_CONFIG=<from Keychain, when configured>
 DEEPSEEK_API_KEY=<from Keychain, when configured>
 REMOTE_SETTINGS_ADMIN=<from the Advanced settings toggle; default false>
+AGENTROOM_EXIT_WITH_PARENT=true
+AGENTROOM_PARENT_PID=<the current app process id>
 ```
+
+## Backend Sidecar Ownership
+
+The sidecar is a child process, and quitting the app stops it:
+`applicationWillTerminate` sends SIGINT and escalates to SIGTERM. That is the
+whole story only for a normal quit. A force quit, a crash, and Xcode's stop
+button never reach it, and the backend is then reparented to launchd and keeps
+holding the port with nobody supervising it. Two things answer that, one on
+each side, because neither alone is enough.
+
+The backend stops when its launcher does. `AGENTROOM_EXIT_WITH_PARENT` and the
+launcher's `AGENTROOM_PARENT_PID` are set only here. The sidecar checks that
+expected pid before backend startup begins, then polls its live parent pid and
+exits when it changes (`apps/backend/src/util/parentExitWatchdog.ts`). The
+initial check covers an app that dies before Node can arm the timer; after that,
+the polling window is at most a couple of seconds. A backend an operator starts
+themselves has no parent whose death should end it, so `pnpm dev` is untouched.
+
+The app recognises its own sidecar across launches. Every successful launch
+records the child's pid, its kernel start time, its executable path, and the
+port, in the app's own defaults. A later session adopts that process only when
+all of it still matches, that exact process owns a listening TCP socket on the
+configured port, and the backend is healthy there. It then supervises the
+process exactly as if it had spawned it: the status reads running, and
+Stop and Restart work. The start time is what makes this safe — pids are
+recycled, and the pair is unique for the life of the machine — and the
+inspector re-checks the identity immediately before the signal call. Darwin
+does not expose an atomic identity-check-and-signal handle for an arbitrary
+process, so a residual pid-reuse race remains between that check and `kill`;
+the narrow limit and rationale are recorded in the trust posture. An adopted
+sidecar's stdout and stderr belonged to the session that spawned it, so its
+process log starts empty and `/api/logs` is where its output is read.
+
+Both exist because either can miss. The watchdog cannot help an operator whose
+orphan predates it, and adoption cannot help one whose backend is hung. What
+adoption deliberately does **not** cover is a backend this app did not start:
+without a matching launch record the state stays *Running Outside App* with the
+lifecycle controls disabled, because stopping an operator's own `pnpm dev` from
+a button labelled Stop Backend is not this app's call. The status detail says
+so and says what to do instead.
+
+The lifecycle controls render from `canStartBackend`, `canStopBackend`, and
+`canRestartBackend` rather than from the reported state alone, because the state
+does not say whether a process exists. A backend that is running but has stopped
+answering `/health` reads as *Failed*, and refusing to stop it there is the same
+corner the orphan put the operator in. Each control folds the state together
+with the observed `hasSupervisedProcess`, so a button is offered exactly when
+pressing it would do something: Stop whenever a supervised process is there,
+Start only when one is not.
 
 ## Managed Backend Settings
 

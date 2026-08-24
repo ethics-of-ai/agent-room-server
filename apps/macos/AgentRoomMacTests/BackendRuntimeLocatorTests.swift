@@ -54,6 +54,11 @@ final class BackendRuntimeLocatorTests: XCTestCase {
         XCTAssertNil(configuration.environment["CODEX_RUNNER_PROTOCOL"])
         XCTAssertEqual(configuration.environment.values.contains("/opt/tools/acp"), false)
         XCTAssertEqual(configuration.environment["REMOTE_SETTINGS_ADMIN"], "true")
+        XCTAssertEqual(configuration.environment["AGENTROOM_EXIT_WITH_PARENT"], "true")
+        XCTAssertEqual(
+            configuration.environment["AGENTROOM_PARENT_PID"],
+            String(ProcessInfo.processInfo.processIdentifier)
+        )
         XCTAssertNil(configuration.environment["SOURCE_REPO_PATH"])
     }
 
@@ -102,7 +107,9 @@ final class BackendRuntimeLocatorTests: XCTestCase {
                 "CODEX_WORKSPACE_NETWORK_ACCESS": "true",
                 "TERMINAL_ENABLED": "true",
                 "SCENE_ENGINE_ENABLED": "false",
-                "REMOTE_SETTINGS_ADMIN": "true"
+                "REMOTE_SETTINGS_ADMIN": "true",
+                "AGENTROOM_EXIT_WITH_PARENT": "false",
+                "AGENTROOM_PARENT_PID": "999999"
             ]
         )
 
@@ -116,6 +123,11 @@ final class BackendRuntimeLocatorTests: XCTestCase {
         XCTAssertNil(configuration.environment["SCENE_ENGINE_ENABLED"])
         // The master switch is app state, so an inherited value never grants it.
         XCTAssertEqual(configuration.environment["REMOTE_SETTINGS_ADMIN"], "false")
+        XCTAssertEqual(configuration.environment["AGENTROOM_EXIT_WITH_PARENT"], "true")
+        XCTAssertEqual(
+            configuration.environment["AGENTROOM_PARENT_PID"],
+            String(ProcessInfo.processInfo.processIdentifier)
+        )
     }
 
     func testLaunchConfigurationAddsCommonDeveloperToolPaths() {

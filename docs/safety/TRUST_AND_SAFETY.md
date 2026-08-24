@@ -1537,6 +1537,34 @@ Current posture:
   Keychain lookup for the `claude login` credential (service
   `Claude Code-credentials`). It requests no item data, never reads, returns, or
   logs the credential value, and runs only locally on the operator's Mac.
+- The macOS app can signal a backend sidecar it did not spawn, and what bounds
+  that is the identity it recorded rather than the pid alone. A sidecar outlives
+  an app that was force quit or crashed — `applicationWillTerminate` never runs,
+  and the child is reparented to launchd — so the app records each launch's pid,
+  kernel process start time, executable path, and port, and a later session
+  adopts that process only when every field still matches **and the same process
+  owns a listening TCP socket on the configured backend port**. `Process` cannot
+  attach to a pid it did not create, so the stop is `kill(pid, SIGINT)` and then
+  SIGTERM, the same ladder the owned path uses. Pids are recycled, so the
+  identity is re-checked immediately before `kill` inside the signal call rather
+  than at the call site. That rejects a record already known to be stale.
+  Darwin does not provide this app a stable process handle that atomically binds
+  an arbitrary pid's start identity to signal delivery, so there remains a
+  narrow race if the recorded process exits and its pid is reused between that
+  re-check and `kill`; this recovery path accepts that local residual risk
+  rather than granting a broader helper or privileged process-control surface.
+  The record is the app's own local supervision state, in its defaults and
+  nowhere the backend reads; it holds no secret and describes a process on the
+  operator's own Mac.
+  A backend the app did not start has no record, is never adopted, and is never
+  signalled — the app reports it as running outside itself and leaves it alone,
+  because the operator's own `pnpm dev` is not this app's to stop. The sidecar
+  also stops itself when its launcher goes away
+  (`AGENTROOM_EXIT_WITH_PARENT` plus the app's `AGENTROOM_PARENT_PID`, set by
+  the macOS app and nothing else), which is prevention rather than a bound: it
+  ends the app's own child, on the authority of having launched it. The backend
+  arms that check before asynchronous startup and compares once immediately, so
+  an app that dies before Node reaches the watchdog is still detected.
 - Backend sidecar crash restarts are capped.
 - Stopping an active turn records only that turn as cancelled. Restorable
   runners return to idle for a follow-up steering turn; stopping DeepSeek kills

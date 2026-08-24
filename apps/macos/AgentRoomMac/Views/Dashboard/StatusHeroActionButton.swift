@@ -7,11 +7,11 @@ struct StatusHeroActionButton: View {
     @State private var confirmingRestart = false
 
     var body: some View {
-        if supervisor.serverState.canStart {
+        if supervisor.canStartBackend {
             Button("Start Backend", systemImage: "play.fill", action: supervisor.startServer)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-        } else if supervisor.serverState.canRestart {
+        } else if supervisor.canRestartBackend {
             Button("Restart Backend", systemImage: "arrow.clockwise.circle", action: requestRestart)
                 .buttonStyle(.bordered)
                 .controlSize(.large)

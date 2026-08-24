@@ -21,7 +21,9 @@ struct BackendLaunchConfiguration: Equatable {
         "CODEX_WORKSPACE_NETWORK_ACCESS",
         "TERMINAL_ENABLED",
         "SCENE_ENGINE_ENABLED",
-        "REMOTE_SETTINGS_ADMIN"
+        "REMOTE_SETTINGS_ADMIN",
+        "AGENTROOM_EXIT_WITH_PARENT",
+        "AGENTROOM_PARENT_PID"
     ]
 
     var executableURL: URL
@@ -84,6 +86,17 @@ struct BackendLaunchConfiguration: Equatable {
         // default protocol and it starts its own app-server when the operator's
         // arguments do not (`runner/codex/settings.ts`).
         environment["REMOTE_SETTINGS_ADMIN"] = settings.remoteSettingsAdminEnabled ? "true" : "false"
+        // The sidecar stops when this app does. `applicationWillTerminate`
+        // handles a normal quit, but a force quit, a crash, or Xcode's stop
+        // button never reaches it, and the reparented backend then holds the
+        // port with nobody supervising it. Set only here, so a backend an
+        // operator runs themselves is never ended by a parent's exit. See
+        // `apps/backend/src/util/parentExitWatchdog.ts`.
+        environment["AGENTROOM_EXIT_WITH_PARENT"] = "true"
+        // Capture the launcher identity instead of relying only on the child's
+        // eventual `getppid()`: if the app dies before Node arms its watchdog,
+        // the already-reparented child can still detect the mismatch at once.
+        environment["AGENTROOM_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         environment["PATH"] = Self.developerToolPath(from: environment["PATH"])
 
         self.executableURL = runtime.nodeExecutableURL

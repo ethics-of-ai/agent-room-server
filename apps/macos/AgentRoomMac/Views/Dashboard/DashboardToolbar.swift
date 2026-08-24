@@ -13,15 +13,15 @@ struct DashboardToolbar: ToolbarContent {
 
             Menu {
                 Button("Start Backend", systemImage: "play.fill", action: supervisor.startServer)
-                    .disabled(!supervisor.serverState.canStart)
+                    .disabled(!supervisor.canStartBackend)
 
                 Button("Stop Backend", systemImage: "stop.fill", action: supervisor.stopServer)
-                    .disabled(!supervisor.serverState.canStop)
+                    .disabled(!supervisor.canStopBackend)
 
                 Divider()
 
                 Button("Restart Server", systemImage: "arrow.clockwise.circle", action: requestRestart)
-                    .disabled(!supervisor.serverState.canRestart)
+                    .disabled(!supervisor.canRestartBackend)
             } label: {
                 Label("Backend", systemImage: "power.circle")
             }

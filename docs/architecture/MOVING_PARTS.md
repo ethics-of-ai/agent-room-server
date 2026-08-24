@@ -354,6 +354,14 @@
   cancellation deliberately enters below the first rung. See
   `docs/safety/TRUST_AND_SAFETY.md` for the `bypassPermissions`-class posture and
   `docs/engineering/DEEPSEEK_HARNESS_RUNNER.md` for the plan.
+- `src/util/parentExitWatchdog.ts`: exits the process when the one that launched
+  it goes away, armed from `src/index.ts` only under
+  `AGENTROOM_EXIT_WITH_PARENT`. The macOS app also supplies its pid through
+  `AGENTROOM_PARENT_PID`, so the backend can detect a launcher that died before
+  Node started. The watchdog is armed before asynchronous server construction,
+  checks once immediately, and then polls the live parent pid. Both values are
+  env-only and absent or off by default, so a backend an operator started
+  themselves is never ended by a parent's exit.
 - `src/events`: typed runtime event bus and bounded recent event memory.
 - `src/protocol/coding`: the canonical coding-agent event schemas and the
   runner-agnostic mapper (Phase 2 of the universal runner boundary). Adapters
@@ -503,7 +511,17 @@
 
 ## Clients
 
-- `apps/macos`: launches/supervises the backend, keeps the bearer token and every
+- `apps/macos`: launches/supervises the backend — including across its own
+  death, which is the case a child process does not survive gracefully: the
+  sidecar is launched with `AGENTROOM_EXIT_WITH_PARENT` and the app's expected
+  parent pid so it stops when this app does even on a force quit or crash, and
+  every launch records the child's pid, kernel start time, executable path, and
+  port
+  (`Supervision/Process/BackendProcessIdentity.swift`,
+  `BackendSidecarRecordStore.swift`) so a later session can adopt a sidecar the
+  watchdog did not catch only after the same pid owns the configured listening
+  TCP socket, and stop it like its own. A healthy backend without that proof
+  stays foreign and untouched —, keeps the bearer token and every
   runner bootstrap slot value in Keychain — keyed by runner id and slot id, from
   one bundled `RunnerBootstrapDescriptor` per runner that also declares how to
   probe the local prerequisite (an installed executable, a presence-only
