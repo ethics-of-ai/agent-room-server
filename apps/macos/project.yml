@@ -2,7 +2,7 @@ name: AgentRoomMac
 options:
   bundleIdPrefix: dev.agentroom
 settings:
-  MARKETING_VERSION: 0.2.1 # x-release-please-version
+  MARKETING_VERSION: 0.3.0 # x-release-please-version
   CURRENT_PROJECT_VERSION: 1
 targets:
   AgentRoomMac:
