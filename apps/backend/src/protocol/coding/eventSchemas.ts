@@ -6,6 +6,16 @@ import {
   MAX_PERMISSION_OPTIONS,
   MAX_PERMISSION_REQUEST_ID_LENGTH
 } from "../../runner/shared/PendingPermissionRequests";
+import {
+  MAX_QUESTION_DESCRIPTION_LENGTH,
+  MAX_QUESTION_DISCUSSION_LENGTH,
+  MAX_QUESTION_HEADER_LENGTH,
+  MAX_QUESTION_ID_LENGTH,
+  MAX_QUESTION_LABEL_LENGTH,
+  MAX_QUESTION_OPTIONS,
+  MAX_QUESTION_PROMPT_LENGTH,
+  MAX_QUESTION_SETS
+} from "../../runner/shared/PendingQuestionRequests";
 
 export const codingAgentEventTypeSchema = z.enum([
   "coding_session_started",
@@ -23,6 +33,8 @@ export const codingAgentEventTypeSchema = z.enum([
   "coding_tool_activity_completed",
   "coding_permission_requested",
   "coding_permission_resolved",
+  "coding_question_requested",
+  "coding_question_resolved",
   "coding_turn_completed",
   "coding_turn_failed",
   "coding_turn_cancelled"
@@ -155,6 +167,70 @@ export const codingPermissionOptionsSchema = z
   });
 
 /**
+ * One clarifying-question set: a prompt, the options the agent offered, how
+ * many may be chosen, and whether free text is accepted beside or instead of a
+ * choice. Every id is AgentRoom-minted; a client answers with these ids and
+ * nothing else — `POST /api/agent-sessions/:id/questions/:requestId` refuses a
+ * set or option the agent did not offer. `selection` and `discussion` are
+ * closed here because the backend mints the batch; a client still treats them
+ * as open strings and degrades an unknown value to single-select / optional.
+ */
+export const codingQuestionOptionSchema = z.object({
+  optionId: z.string().min(1).max(MAX_QUESTION_ID_LENGTH),
+  label: z.string().min(1).max(MAX_QUESTION_LABEL_LENGTH),
+  description: z.string().max(MAX_QUESTION_DESCRIPTION_LENGTH).optional()
+});
+
+export const codingQuestionSetSchema = z
+  .object({
+    setId: z.string().min(1).max(MAX_QUESTION_ID_LENGTH),
+    header: z.string().max(MAX_QUESTION_HEADER_LENGTH).optional(),
+    prompt: z.string().min(1).max(MAX_QUESTION_PROMPT_LENGTH),
+    selection: z.enum(["single", "multiple"]),
+    options: z.array(codingQuestionOptionSchema).max(MAX_QUESTION_OPTIONS),
+    discussion: z.enum(["none", "optional", "required"]),
+    sensitive: z.boolean().optional()
+  })
+  .superRefine((set, context) => {
+    if (set.options.length === 0 && set.discussion !== "required") {
+      context.addIssue({
+        code: "custom",
+        message: "a question set with no options must require discussion",
+        path: ["options"]
+      });
+    }
+    const seen = new Set<string>();
+    set.options.forEach((option, index) => {
+      if (seen.has(option.optionId)) {
+        context.addIssue({ code: "custom", message: "question option ids must be unique", path: ["options", index, "optionId"] });
+      }
+      seen.add(option.optionId);
+    });
+  });
+
+export const codingQuestionSetsSchema = z
+  .array(codingQuestionSetSchema)
+  .min(1)
+  .max(MAX_QUESTION_SETS)
+  .superRefine((sets, context) => {
+    const seen = new Set<string>();
+    sets.forEach((set, index) => {
+      if (seen.has(set.setId)) {
+        context.addIssue({ code: "custom", message: "question set ids must be unique", path: [index, "setId"] });
+      }
+      seen.add(set.setId);
+    });
+  });
+
+export const codingQuestionAnswerSchema = z.object({
+  setId: z.string().min(1).max(MAX_QUESTION_ID_LENGTH),
+  selectedOptionIds: z.array(z.string().min(1).max(MAX_QUESTION_ID_LENGTH)).max(MAX_QUESTION_OPTIONS),
+  discussion: z.string().max(MAX_QUESTION_DISCUSSION_LENGTH).optional()
+});
+
+export const codingQuestionAnswersSchema = z.array(codingQuestionAnswerSchema).min(1).max(MAX_QUESTION_SETS);
+
+/**
  * The runner-agnostic reading of one activity, produced by the adapter. A
  * client decides what an activity *is* from `kind` here — never from the
  * activity's native `kind` string, which stays beside it as display and
@@ -190,6 +266,18 @@ export const codingCanonicalActivitySchema = z.discriminatedUnion("kind", [
     status: z.string().optional(),
     optionId: z.string().max(MAX_PERMISSION_OPTION_ID_LENGTH).optional(),
     decidedBy: z.string().optional()
+  }),
+  z.object({
+    kind: z.literal("question_requested"),
+    requestId: z.string().max(MAX_QUESTION_ID_LENGTH).optional(),
+    questionSets: codingQuestionSetsSchema
+  }),
+  z.object({
+    kind: z.literal("question_resolved"),
+    requestId: z.string().max(MAX_QUESTION_ID_LENGTH).optional(),
+    status: z.string().optional(),
+    decidedBy: z.string().optional(),
+    questionAnswers: codingQuestionAnswersSchema.optional()
   })
 ]);
 
@@ -309,6 +397,26 @@ export const codingAgentEventPayloadSchema = z.discriminatedUnion("type", [
      * event: "allowed" reads very differently depending on who allowed it.
      */
     decidedBy: z.string().optional()
+  }),
+  baseCodingPayloadSchema.extend({
+    type: z.literal("coding_question_requested"),
+    turnId: z.string().min(1),
+    // The id an answer addresses, present only while the backend holds the
+    // batch open. A batch announced without it is a record a client renders
+    // but cannot answer — the same rule as the permission request's fields.
+    requestId: z.string().max(MAX_QUESTION_ID_LENGTH).optional(),
+    questionSets: codingQuestionSetsSchema
+  }),
+  baseCodingPayloadSchema.extend({
+    type: z.literal("coding_question_resolved"),
+    turnId: z.string().min(1),
+    requestId: z.string().max(MAX_QUESTION_ID_LENGTH).optional(),
+    /** `answered`, `timeout`, or `cancelled`; an open string on the wire. */
+    status: z.string().optional(),
+    /** `human` or `timeout` — who decided; absent when nobody did. */
+    decidedBy: z.string().optional(),
+    /** What was chosen per answered set. A sensitive set's text is never here. */
+    questionAnswers: codingQuestionAnswersSchema.optional()
   }),
   baseCodingPayloadSchema.extend({
     type: z.literal("coding_turn_completed"),

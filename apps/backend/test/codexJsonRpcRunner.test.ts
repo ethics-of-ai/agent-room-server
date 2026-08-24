@@ -300,7 +300,9 @@ describe("CodexAppServerRunner JSON-RPC protocol mode", () => {
 
     const threadStartParams = JSON.parse(await readFile(fakeServer.logPath, "utf8")) as Record<string, unknown>;
     expect(threadStartParams.sandbox).toBe("danger-full-access");
-    expect(threadStartParams.config).toBeUndefined();
+    // The network pin belongs to the workspace-write sandbox alone; the thread
+    // config still carries the clarifying-question flags.
+    expect(threadStartParams.config.sandbox_workspace_write).toBeUndefined();
     expect(events.at(-1)).toEqual({
       type: "run_succeeded",
       message: "Codex app-server turn completed"

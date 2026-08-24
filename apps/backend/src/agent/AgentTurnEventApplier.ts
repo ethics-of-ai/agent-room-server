@@ -13,17 +13,37 @@ import {
   type CodingAgentEventCandidate
 } from "../protocol/coding/events";
 import { legacySessionMetadata } from "../protocol/coding/legacySessionMetadata";
-import type { AgentRunnerActivity, AgentRunnerEvent, RunnerMetadata } from "../runner/AgentRunner";
+import type {
+  AgentRunnerActivity,
+  AgentRunnerEvent,
+  CanonicalQuestionSet,
+  RunnerMetadata
+} from "../runner/AgentRunner";
+import { isValidQuestionRequestBatch } from "../runner/shared/PendingQuestionRequests";
+import { renderQuestionAnswers } from "./questionTranscript";
 import { ArtifactStreamParser, stripArtifactRegions, type ArtifactStreamOp } from "../artifact/ArtifactStreamParser";
 import type { ArtifactStore } from "../artifact/ArtifactStore";
 import type { AgentSessionMessageStore } from "./AgentSessionMessageStore";
 import type { AgentTurnTelemetryStore } from "./AgentTurnTelemetryStore";
+
+export interface OutstandingQuestionRequest {
+  requestId: string;
+  turnId: string;
+  questionSets: CanonicalQuestionSet[];
+}
 
 export class AgentTurnEventApplier {
   // One in-band artifact parser per active turn, lazily created on the first
   // assistant delta and disposed when the turn settles. Only used when an
   // ArtifactStore is configured (i.e. artifacts are enabled).
   private readonly parsers = new Map<string, ArtifactStreamParser>();
+  // The clarifying-question batches each session still holds open, by request
+  // id: filled by the canonical request, consumed by the canonical resolution.
+  // It exists for the late-joining client — a batch can stay outstanding for
+  // minutes while the turn waits on it, long enough for the recent-event
+  // replay to roll over — and for the transcript record of the answer, which
+  // needs the sets' labels. Released with the session.
+  private readonly outstandingQuestions = new Map<string, Map<string, OutstandingQuestionRequest>>();
 
   constructor(
     private readonly deps: {
@@ -124,6 +144,11 @@ export class AgentTurnEventApplier {
         // Legacy per-runner session blocks, projected from the canonical one.
         Object.assign(session, legacySessionMetadata(session.runnerKind, runnerMetadata));
       }
+      // The reconnect snapshot changes synchronously with the live event: a
+      // subscriber that reacts to a request can immediately read it, and one
+      // that reacts to a resolution cannot read a batch that has just settled.
+      this.rememberQuestionRequest(session, turn, event.activity);
+      const resolvedQuestion = this.takeResolvedQuestion(session, event.activity);
       this.deps.eventBus.publish("agent_turn_activity", {
         sessionId: session.id,
         turnId: turn.id,
@@ -141,6 +166,7 @@ export class AgentTurnEventApplier {
         activity: event.activity
       }));
       this.publishPermissionDecision(session, turn, event.activity);
+      this.publishQuestionResolution(session, turn, event.activity, resolvedQuestion);
       return;
     }
 
@@ -189,6 +215,131 @@ export class AgentTurnEventApplier {
         ...(canonical.status ? { status: canonical.status } : {})
       }
     });
+  }
+
+  /**
+   * The clarifying-question side of the same rule. A request the runner is
+   * holding open is remembered so a late joiner can still be shown it; its
+   * resolution publishes the durable decision — which sets, which option ids,
+   * on whose authority, never the person's free text — and, for a human answer,
+   * appends the rendered answers to the thread as the user message they are.
+   */
+  private rememberQuestionRequest(
+    session: AgentSession,
+    turn: AgentSessionTurn,
+    activity: AgentRunnerActivity
+  ): void {
+    const canonical = activity.canonical;
+    if (canonical?.kind !== "question_requested" || !canonical.requestId) return;
+    // The pending store normally proved this before the adapter published the
+    // id. Keep the re-seed surface safe even if a future adapter violates that
+    // boundary: never retain its raw, unbounded model text here.
+    if (!isValidQuestionRequestBatch(canonical.questionSets)) return;
+    const forSession = this.outstandingQuestions.get(session.id) ?? new Map<string, OutstandingQuestionRequest>();
+    forSession.set(canonical.requestId, {
+      requestId: canonical.requestId,
+      turnId: turn.id,
+      questionSets: canonical.questionSets
+    });
+    this.outstandingQuestions.set(session.id, forSession);
+  }
+
+  private takeResolvedQuestion(
+    session: AgentSession,
+    activity: AgentRunnerActivity
+  ): OutstandingQuestionRequest | undefined {
+    const canonical = activity.canonical;
+    if (canonical?.kind !== "question_resolved") return undefined;
+
+    const forSession = this.outstandingQuestions.get(session.id);
+    const request = canonical.requestId ? forSession?.get(canonical.requestId) : undefined;
+    if (canonical.requestId) forSession?.delete(canonical.requestId);
+    if (forSession?.size === 0) this.outstandingQuestions.delete(session.id);
+    return request;
+  }
+
+  private publishQuestionResolution(
+    session: AgentSession,
+    turn: AgentSessionTurn,
+    activity: AgentRunnerActivity,
+    request: OutstandingQuestionRequest | undefined
+  ): void {
+    const canonical = activity.canonical;
+    if (canonical?.kind !== "question_resolved") return;
+
+    this.deps.eventBus.publish("agent_question_resolved", {
+      sessionId: session.id,
+      turnId: turn.id,
+      workspaceId: session.workspaceId,
+      workspacePath: session.workspacePath,
+      runnerKind: session.runnerKind,
+      audit: {
+        ...(canonical.requestId ? { requestId: canonical.requestId } : {}),
+        ...(canonical.status ? { status: canonical.status } : {}),
+        ...(canonical.decidedBy ? { decidedBy: canonical.decidedBy } : {}),
+        ...(canonical.questionAnswers
+          ? {
+              answers: canonical.questionAnswers.map((answer) => ({
+                setId: answer.setId,
+                selectedOptionIds: [...answer.selectedOptionIds]
+              }))
+            }
+          : {})
+      }
+    });
+
+    if (canonical.decidedBy === "human" && request && canonical.questionAnswers) {
+      this.deps.messages.append({
+        sessionId: session.id,
+        turnId: turn.id,
+        role: "user",
+        content: renderQuestionAnswers(request.questionSets, canonical.questionAnswers),
+        context: { questionRequestId: request.requestId },
+        status: "sent",
+        at: new Date().toISOString()
+      });
+    }
+  }
+
+  /**
+   * Settle any batch whose runner terminal path could no longer emit its own
+   * resolution (interrupt, child loss, or a malformed adapter ending early).
+   * The synthetic canonical resolution precedes the turn's terminal event and
+   * removes the reconnect entry before either event is observed.
+   */
+  cancelOutstandingQuestionRequests(session: AgentSession, turn: AgentSessionTurn): void {
+    const requests = [...(this.outstandingQuestions.get(session.id)?.values() ?? [])]
+      .filter((request) => request.turnId === turn.id);
+    for (const request of requests) {
+      const activity: AgentRunnerActivity = {
+        kind: "agentroom_question_cancelled",
+        title: "Questions cancelled",
+        content: { status: "cancelled" },
+        canonical: {
+          kind: "question_resolved",
+          requestId: request.requestId,
+          status: "cancelled"
+        }
+      };
+      const resolved = this.takeResolvedQuestion(session, activity);
+      this.publishCodingEvent(codingEventFromRunnerActivity({
+        sessionId: session.id,
+        turnId: turn.id,
+        runnerKind: session.runnerKind,
+        activity
+      }));
+      this.publishQuestionResolution(session, turn, activity, resolved);
+    }
+  }
+
+  /** The batches a session still holds open, for a client joining late. */
+  outstandingQuestionRequests(sessionId: string): OutstandingQuestionRequest[] {
+    return [...(this.outstandingQuestions.get(sessionId)?.values() ?? [])];
+  }
+
+  /** Forget a deleted session's outstanding batches. */
+  releaseSession(sessionId: string): void {
+    this.outstandingQuestions.delete(sessionId);
   }
 
   /**

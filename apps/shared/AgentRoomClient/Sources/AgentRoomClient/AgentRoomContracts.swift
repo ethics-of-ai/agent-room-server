@@ -1001,13 +1001,19 @@ public struct AgentSessionMessageContextAttachment: Codable, Hashable, Identifia
 public struct AgentSessionMessageContext: Codable, Hashable {
     public var paths: [String]?
     public var attachments: [AgentSessionMessageContextAttachment]?
+    /// Set on the user message the backend records when a person answers a
+    /// clarifying-question batch: the batch it answers. A client can caption
+    /// that message as the answer it is rather than as a typed turn.
+    public var questionRequestId: String?
 
     public init(
         paths: [String]? = nil,
-        attachments: [AgentSessionMessageContextAttachment]? = nil
+        attachments: [AgentSessionMessageContextAttachment]? = nil,
+        questionRequestId: String? = nil
     ) {
         self.paths = paths
         self.attachments = attachments
+        self.questionRequestId = questionRequestId
     }
 }
 
@@ -1129,6 +1135,44 @@ public struct AnswerPermissionRequest: Codable, Hashable {
 
     public init(optionId: String) {
         self.optionId = optionId
+    }
+}
+
+/// Answers one outstanding clarifying-question batch: per answered set, the
+/// option ids chosen from the ones the agent offered and the person's own free
+/// text where the set invited it. A set the body omits stays unanswered. The
+/// backend refuses a set or option the agent did not offer, a second choice on
+/// a single-select set, and free text on a set that accepts none.
+public struct AnswerQuestionRequest: Codable, Hashable {
+    public var answers: [CodingQuestionAnswer]
+
+    public init(answers: [CodingQuestionAnswer]) {
+        self.answers = answers
+    }
+}
+
+/// One clarifying-question batch a session still holds open, as served by
+/// `GET /api/agent-sessions/:id/questions` for a client that joined after the
+/// event replay rolled over. The sets are exactly what the request event carried.
+public struct OutstandingQuestionRequest: Codable, Hashable, Identifiable {
+    public var requestId: String
+    public var turnId: String
+    public var questionSets: [CodingQuestionSet]
+
+    public var id: String { requestId }
+
+    public init(requestId: String, turnId: String, questionSets: [CodingQuestionSet]) {
+        self.requestId = requestId
+        self.turnId = turnId
+        self.questionSets = questionSets
+    }
+}
+
+public struct OutstandingQuestionsResponse: Codable, Hashable {
+    public var questions: [OutstandingQuestionRequest]
+
+    public init(questions: [OutstandingQuestionRequest]) {
+        self.questions = questions
     }
 }
 
@@ -1446,6 +1490,8 @@ public struct CodingAgentEventType: RawRepresentable, Codable, Hashable, Sendabl
     public static let toolActivityCompleted = CodingAgentEventType(rawValue: "coding_tool_activity_completed")
     public static let permissionRequested = CodingAgentEventType(rawValue: "coding_permission_requested")
     public static let permissionResolved = CodingAgentEventType(rawValue: "coding_permission_resolved")
+    public static let questionRequested = CodingAgentEventType(rawValue: "coding_question_requested")
+    public static let questionResolved = CodingAgentEventType(rawValue: "coding_question_resolved")
     public static let turnCompleted = CodingAgentEventType(rawValue: "coding_turn_completed")
     public static let turnFailed = CodingAgentEventType(rawValue: "coding_turn_failed")
     public static let turnCancelled = CodingAgentEventType(rawValue: "coding_turn_cancelled")
@@ -1474,6 +1520,8 @@ public struct CodingCanonicalActivityKind: RawRepresentable, Codable, Hashable, 
     public static let toolCompleted = CodingCanonicalActivityKind(rawValue: "tool_completed")
     public static let permissionRequested = CodingCanonicalActivityKind(rawValue: "permission_requested")
     public static let permissionResolved = CodingCanonicalActivityKind(rawValue: "permission_resolved")
+    public static let questionRequested = CodingCanonicalActivityKind(rawValue: "question_requested")
+    public static let questionResolved = CodingCanonicalActivityKind(rawValue: "question_resolved")
 }
 
 /// Only the fields that can reach an activity block. Plan and diff payloads
@@ -1722,6 +1770,103 @@ public enum CodingPermissionAuthority {
     public static let timeout = "timeout"
 }
 
+/// One option the agent offered for a clarifying-question set. A client answers
+/// with these `optionId`s and nothing else: the backend minted them and refuses
+/// one the agent did not offer for that set.
+public struct CodingQuestionOption: Codable, Hashable, Identifiable, Sendable {
+    public var optionId: String
+    public var label: String
+    public var description: String?
+
+    public var id: String { optionId }
+
+    public init(optionId: String, label: String, description: String? = nil) {
+        self.optionId = optionId
+        self.label = label
+        self.description = description
+    }
+}
+
+/// How many options a set takes, as reported on `coding_question_requested`.
+/// Open-ended by construction: an unknown value renders as single-select.
+public enum CodingQuestionSelection {
+    public static let single = "single"
+    public static let multiple = "multiple"
+}
+
+/// Whether a set invites free text ("discuss further") beside a choice
+/// (`optional`), instead of one (`required`), or not at all (`none`). Open-ended
+/// by construction: an unknown value renders as `optional`.
+public enum CodingQuestionDiscussion {
+    public static let none = "none"
+    public static let optional = "optional"
+    public static let required = "required"
+}
+
+/// How a clarifying-question batch settled, as reported on
+/// `coding_question_resolved`: `answered` by a person, `timeout` when the
+/// bounded wait ran out (the runner applied its own away fallback), or
+/// `cancelled` with the turn. Open-ended like every other vocabulary here.
+public enum CodingQuestionResolution {
+    public static let answered = "answered"
+    public static let timeout = "timeout"
+    public static let cancelled = "cancelled"
+}
+
+/// One clarifying-question set: a prompt, the options the agent offered, how
+/// many may be chosen, and whether free text is accepted. Ids are
+/// AgentRoom-minted (`set-<n>`, `opt-<n>`); `header` is the runner's short chip
+/// label when it supplied one; a `sensitive` set is free-text only, entered
+/// securely, and its text is never echoed back on the stream.
+public struct CodingQuestionSet: Codable, Hashable, Identifiable, Sendable {
+    public var setId: String
+    public var header: String?
+    public var prompt: String
+    public var selection: String
+    public var options: [CodingQuestionOption]
+    public var discussion: String
+    public var sensitive: Bool?
+
+    public var id: String { setId }
+
+    public var allowsMultipleSelection: Bool { selection == CodingQuestionSelection.multiple }
+    public var allowsDiscussion: Bool { discussion != CodingQuestionDiscussion.none }
+    public var requiresDiscussion: Bool { discussion == CodingQuestionDiscussion.required }
+    public var isSensitive: Bool { sensitive ?? false }
+
+    public init(
+        setId: String,
+        header: String? = nil,
+        prompt: String,
+        selection: String = CodingQuestionSelection.single,
+        options: [CodingQuestionOption],
+        discussion: String = CodingQuestionDiscussion.optional,
+        sensitive: Bool? = nil
+    ) {
+        self.setId = setId
+        self.header = header
+        self.prompt = prompt
+        self.selection = selection
+        self.options = options
+        self.discussion = discussion
+        self.sensitive = sensitive
+    }
+}
+
+/// One answered set: the chosen option ids and the person's free text where the
+/// set invited it. On `coding_question_resolved` a sensitive set's text is absent.
+public struct CodingQuestionAnswer: Codable, Hashable, Sendable {
+    public var setId: String
+    public var selectedOptionIds: [String]
+    public var discussion: String?
+
+    public init(setId: String, selectedOptionIds: [String], discussion: String? = nil) {
+        self.setId = setId
+        self.selectedOptionIds = selectedOptionIds
+        self.discussion = discussion
+    }
+}
+
 public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
     public var type: CodingAgentEventType
     public var version: Int
@@ -1761,6 +1906,15 @@ public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
     /// "allowed" reads very differently depending on who allowed it.
     public var optionId: String?
     public var decidedBy: String?
+    /// On `coding_question_requested`: the sets of a clarifying-question batch.
+    /// With `requestId` they are answerable through
+    /// `POST /api/agent-sessions/:id/questions/:requestId`; without it the
+    /// batch is a record a client renders but cannot answer, the same rule as
+    /// `options` on a permission request.
+    public var questionSets: [CodingQuestionSet]?
+    /// On `coding_question_resolved` after a human answer: what was chosen per
+    /// answered set. `status` and `decidedBy` above say how the batch settled.
+    public var questionAnswers: [CodingQuestionAnswer]?
     public var error: String?
     // Live artifact channel: `artifactId` and `kind` ("svg" | "mermaid") on
     // started, `delta` on delta (reuses the field above), and `bytes` on
@@ -1800,6 +1954,8 @@ public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
         status: String? = nil,
         optionId: String? = nil,
         decidedBy: String? = nil,
+        questionSets: [CodingQuestionSet]? = nil,
+        questionAnswers: [CodingQuestionAnswer]? = nil,
         error: String? = nil,
         artifactId: String? = nil,
         kind: String? = nil,
@@ -1834,6 +1990,8 @@ public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
         self.status = status
         self.optionId = optionId
         self.decidedBy = decidedBy
+        self.questionSets = questionSets
+        self.questionAnswers = questionAnswers
         self.error = error
         self.artifactId = artifactId
         self.kind = kind

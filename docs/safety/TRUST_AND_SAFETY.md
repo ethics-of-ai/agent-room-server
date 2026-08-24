@@ -442,6 +442,123 @@ Current posture:
     answer from their own postures and expose no outstanding request, so the
     route's `404` is the honest answer for them — it reads the absence of a
     runner's approval channel, never which runner it is.
+- **Clarifying questions let an agent pause a turn to ask the person driving
+  the session for direction, and answering one authorizes nothing.** A runner
+  that is unsure which way to go raises one *batch* of one or more *sets* —
+  each a prompt, the options it offers, how many may be chosen, and whether
+  free text is accepted beside or instead of a choice — and waits; the person
+  answers through one route and the turn continues with the answers. It is the
+  sibling of interactive permission approval on the same shared waiting store
+  (`runner/shared/PendingRequests.ts`, `PendingQuestionRequests.ts`), and it
+  differs from it in the one way that matters: a permission answer lets an
+  agent *act* on the operator's Mac, whereas a question answer is the person's
+  own choices and words going back to an agent that asked for them — the same
+  class of input as the turn message. Posture:
+  - **One route, minted ids, no invented answers.**
+    `POST /api/agent-sessions/:sessionId/questions/:requestId` selects options
+    the agent itself offered per set, and carries free text only where the set
+    invited it. At least one set must be answered; a set marked `required`
+    needs nonblank discussion even when it also offers options. Request, set,
+    and option ids are AgentRoom's (`question-<uuid>`,
+    `set-<n>`, `opt-<n>`); each adapter keeps the map back to the agent's own
+    question text and labels, so nothing a client sends is a string the agent
+    interprets as an id. A set or option the agent did not offer is `400`; a
+    batch that is not outstanding is `404` — which is also the honest answer
+    for a runner with no way to ask, because the route calls an optional
+    `AgentRunner.answerQuestionRequest` hook and never reads runner identity.
+    Mutating, so the global preHandler requires the bearer token. The read
+    beside it, `GET /api/agent-sessions/:sessionId/questions`, returns
+    model-authored question text and is gated like `/messages`.
+  - **The wait is bounded, and a timeout is reported as a timeout.** A batch
+    holds for ten minutes (longer than a permission request's five: a question
+    asks for a decision, and a headset put down to think about one should still
+    find the turn waiting), then the runner applies its own away fallback — the
+    agent is told nobody answered and to proceed on its best judgment — and the
+    resolved event says `decidedBy: "timeout"`. The channel never picks a
+    default option on the person's behalf; a cancelled turn or a lost child
+    resolves the batch `cancelled`, with no authority at all.
+  - **Outstanding batches are per session, bounded, and in memory.** At most 8
+    per session (a blocking agent asks one at a time; the cap is for a looping
+    or non-blocking one), at most 8 sets of at most 8 options, text clamped at
+    every boundary, and a batch outside those bounds is refused to the agent
+    rather than truncated into a vocabulary the person never saw. Released when
+    the turn settles, the child dies, or the session is deleted; nothing about a
+    pending batch is persisted. A turn blocked on a question is busy, so the
+    session host never idle-reaps its child underneath it.
+  - **Audit records the decision; the thread records the words.**
+    `agent_question_resolved` carries the request id, status, authority, and
+    each answered set's option ids — never the free text. The free text is the
+    person's own message and goes where their messages go: the backend appends
+    the rendered answer to the session history as a `role: "user"` message
+    (`context.questionRequestId`), which the bearer-gated `/messages` read
+    serves. A set the agent marked `sensitive` renders its discussion field
+    securely. Codex's `isSecret` mapping is free-text-only; a prompt-contract
+    runner may still offer non-secret option labels beside sensitive discussion.
+    AgentRoom sends that discussion only to the agent and omits it from the
+    resolved event, message, audit, and logs. As with any model input, the model
+    can choose to restate it in later assistant output; `sensitive` is a storage
+    and rendering rule, not a model non-disclosure guarantee.
+  - **Claude Code's posture is unchanged by supplying the SDK callback.** The
+    CLI's `AskUserQuestion` tool reaches the host only through the SDK
+    `canUseTool` callback, and the CLI routes it there *before* consulting the
+    permission mode — so under the default `bypassPermissions` the callback is
+    invoked for that tool alone (verified against SDK 0.3.172 / CLI 2.1.172:
+    read-only and mutating tools never reach it). Under a stricter configured
+    mode a tool that needs a prompt does reach it, and the runner refuses it
+    with the CLI's own headless wording — exactly what the headless CLI did
+    before the callback existed. The callback is never passed to the isolated
+    capability probe, and it is passed at all only while
+    `clarifyingQuestionsEnabled` is on; off, the SDK adds no permission-prompt
+    tool and the CLI behaves as it did before the channel.
+  - **Codex's tool is switched on per thread, and the dispatcher that serves
+    it refuses everything else.** The app-server's `request_user_input` tool is
+    "unavailable in Default mode" unless two config keys are set, so the runner
+    pins `tools.experimental_request_user_input = { enabled: true }` and
+    `features.default_mode_request_user_input = true` on `thread/start` and
+    `thread/resume` the same way it pins the network-access key — per thread,
+    following the managed switch, never by editing the operator's global Codex
+    config (verified against codex-cli 0.149). Serving the request meant giving
+    `JsonRpcLineClient` a request dispatcher it never had; every other
+    server→client request — the approval family under a prompting
+    `approvalPolicy`, a method a newer app-server invents — is now refused
+    with a JSON-RPC `-32601` and a warn log, where before it was silently
+    dropped and the turn hung waiting for an answer nobody would send. A
+    question the agent marks `isSecret` maps to a `sensitive` free-text set.
+  - **DeepSeek's question channel is model-authored control text with a narrow
+    grammar, not a server-to-client request.** The DeepSeek descriptor owns the
+    standing instruction because its parser owns the matching syntax;
+    `AgentTurnContextAssembler` injects it only for `prompt_contract` mode. The
+    streaming parser accepts at most one line-start `<agentroom-question>` JSON
+    block per Harness protocol turn, buffers at most 64 KiB, zod-validates the
+    shared 8-set × 8-option vocabulary and text caps, and mints every set and
+    option id itself. It removes only a complete valid block. Inline,
+    malformed, incomplete, oversized, or later blocks remain assistant prose,
+    so model variability cannot silently erase output. A valid block is still
+    model-authored text: it rides the live canonical request and the
+    bearer-gated re-seed read under the same caveat as native question text.
+    Parsing it authorizes nothing and performs no action.
+  - **A DeepSeek answer continues the same AgentRoom turn through a second
+    Harness prompt.** The first Harness `turn/end` does not settle the public
+    turn while a parsed batch is pending. The existing bearer-gated answer
+    route settles the shared wait; the adapter maps offered ids back to labels
+    and invited discussion, sends no AgentRoom ids, and queues that text on the
+    already-live Harness session. The continuation's terminal event settles
+    the AgentRoom turn. Timeout or an unavailable wait sends no choice and asks
+    the model to proceed on its best judgment. Sensitive discussion is sent in
+    that internal prompt but stripped from the canonical resolution before the
+    shared transcript and audit paths see it. Cancellation, child loss,
+    session deletion, and disposal release the wait. This adds no route,
+    permission, shell, or process surface.
+  - **One tier-1 kill switch.** `clarifyingQuestionsEnabled` (env
+    `CLARIFYING_QUESTIONS_ENABLED`, default on) is a preference, not a trust
+    setting: answering a question widens nothing, and turning the channel off
+    costs only the agent's ability to ask. Every runner reads it the same way —
+    off means the runner is given no channel at all, never a channel that
+    answers on the person's behalf. For DeepSeek, both the standing instruction
+    and the parser are absent; matching text the model emits anyway remains
+    ordinary assistant prose. Codex's per-thread enable flags are explicitly
+    pinned false so a user-global Codex config cannot bypass the switch, and a
+    defensive request handler returns an empty answer if a process asks anyway.
 - The API does not expose arbitrary shell execution.
 - Bounded harness actions use fixed command templates, require registered
   workspace paths, and reject resolved project paths outside that workspace.
@@ -835,8 +952,10 @@ Current posture:
   - **There is no interactive approval channel, by protocol.** The SDK wire
     documents server-to-client requests as a dead capability, so the adapter
     implements no `answerPermissionRequest` hook and the answer route's `404` is
-    the honest reading for this runner, exactly as it is for Codex and Claude
-    Code. The only lever is the harness's own approval posture, carried as the
+    the honest reading for this runner. This does not preclude the bounded
+    clarifying-question prompt contract described above: answering a question
+    authorizes nothing and uses the question route, not the permission route.
+    The only approval lever is the harness's own posture, carried as the
     tier-2 managed `runners.deepseek.permissionMode` and injected as
     `DSH_PERMISSION_MODE`. Its *vocabulary* belongs to the profile the runtime
     composes: AgentRoom bounds the shape, passes the value through, and does not

@@ -4,8 +4,18 @@ import type {
   PermissionDecisionAuthority,
   PermissionRequestOption
 } from "./shared/PendingPermissionRequests";
+import type {
+  QuestionAnswerResult,
+  QuestionDecisionAuthority,
+  QuestionRequestOption,
+  QuestionRequestSet,
+  QuestionSetAnswer
+} from "./shared/PendingQuestionRequests";
 
 export type CanonicalPermissionOption = PermissionRequestOption;
+export type CanonicalQuestionOption = QuestionRequestOption;
+export type CanonicalQuestionSet = QuestionRequestSet;
+export type CanonicalQuestionAnswer = QuestionSetAnswer;
 
 export type AgentRunnerInputPart =
   | {
@@ -114,6 +124,28 @@ export type CanonicalActivity =
       optionId?: string;
       /** Who decided it — a person, the configured policy, or the bounded wait. */
       decidedBy?: PermissionDecisionAuthority;
+    }
+  | {
+      kind: "question_requested";
+      /**
+       * The id a client answers this batch at. Present only while the backend
+       * holds the batch open; a batch announced without one is a record, not
+       * something a client can answer. Backend-minted, like every set and
+       * option id inside it, so nothing a client sends is an id the agent
+       * interprets.
+       */
+      requestId?: string;
+      questionSets: CanonicalQuestionSet[];
+    }
+  | {
+      kind: "question_resolved";
+      requestId?: string;
+      /** `answered`, `timeout`, or `cancelled`. */
+      status?: string;
+      /** A person, or the bounded wait. Absent when nobody decided (cancelled). */
+      decidedBy?: QuestionDecisionAuthority;
+      /** What was chosen, per answered set. A sensitive set's text is never here. */
+      questionAnswers?: CanonicalQuestionAnswer[];
     };
 
 export type CanonicalActivityKind = CanonicalActivity["kind"];
@@ -232,6 +264,20 @@ export interface AgentRunner {
     requestId: string;
     optionId: string;
   }): PermissionAnswerResult;
+  /**
+   * Answer an outstanding clarifying-question batch with selections from the
+   * sets the runner is holding for it, and the user's own free text where a set
+   * offered it.
+   *
+   * Optional for the same reason as `answerPermissionRequest`: a runner with no
+   * native way to ask has nothing outstanding, and its absence reads as "no such
+   * request" rather than as anything about which runner this is.
+   */
+  answerQuestionRequest?(input: {
+    sessionId: string;
+    requestId: string;
+    answers: CanonicalQuestionAnswer[];
+  }): QuestionAnswerResult;
   // Release per-session runner resources (persistent child processes, queues)
   // when the AgentRoom session is deleted.
   closeSession?(sessionId: string): Promise<void>;

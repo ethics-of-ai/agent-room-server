@@ -1512,7 +1512,12 @@ for the session thread. Like the artifact read, it requires the bearer token whe
 For user messages, `context` is present when the turn included selected
 workspace paths or uploaded image attachment ids. It contains safe display
 metadata only; image bytes remain in backend-owned attachment storage under
-`STATE_DIR`.
+`STATE_DIR`. A user message whose `context.questionRequestId` is set is the
+backend's record of a person answering a clarifying-question batch mid-turn
+(see the questions routes below): its `content` is the rendered answer — each
+set's header or ordinal, its prompt, the chosen labels, and the person's own
+free text where the set invited it — so the decision survives a reconnect the
+way the turn message does. A `sensitive` set's text renders as `[redacted]`.
 
 `GET /api/agent-sessions/:sessionId/artifacts` returns the session's accumulated
 live artifacts for reconnect/late-join, since the WebSocket stream carries only
@@ -1742,6 +1747,76 @@ runner with no approval channel reports). The decision is recorded durably as
 `agent_permission_resolved` — which option, on whose authority, never the tool
 call it was about. See `docs/safety/TRUST_AND_SAFETY.md`.
 
+`POST /api/agent-sessions/:sessionId/questions/:requestId` answers a
+clarifying-question batch a runner raised mid-turn. Where a permission request
+authorizes one action, a question batch asks for direction: the agent pauses
+its turn with one or more *sets* — each a prompt, the options it offers, how
+many may be chosen, and whether free text is accepted — and continues once a
+person answers. Claude Code raises it through `AskUserQuestion`, Codex through
+`request_user_input`, and DeepSeek Harness through a descriptor-owned bounded
+assistant-text block because its SDK has no server-to-client request. A runner
+whose descriptor declares neither a native nor prompt-contract channel has
+nothing outstanding and answers `404`. Gated as a whole by the tier-1 managed setting
+`global.clarifyingQuestionsEnabled` (default on): off, no runner is given the
+channel and each behaves exactly as before it existed.
+
+For DeepSeek, one AgentRoom turn can contain two Harness protocol turns. The
+asking Harness `turn/end` leaves the AgentRoom turn running while the request is
+outstanding; a human answer or timeout is queued as another `session/prompt` on
+the same live Harness session, and the continuation's terminal event completes
+the AgentRoom turn. This is an adapter detail: the route, event pair, session
+status, transcript, and audit shapes are identical for all runners. The internal
+follow-up contains selected labels and invited discussion, never the
+AgentRoom-minted ids.
+
+```json
+{
+  "answers": [
+    { "setId": "set-1", "selectedOptionIds": ["opt-2"], "discussion": "phones first" },
+    { "setId": "set-2", "selectedOptionIds": ["opt-1", "opt-3"] }
+  ]
+}
+```
+
+`requestId`, every `setId`, and every `optionId` are the values the turn's
+`coding_question_requested` event carried. All three are AgentRoom-minted —
+`question-<uuid>`, `set-<n>`, `opt-<n>` — and the adapter keeps its own map
+back to the agent's question text and labels, so nothing a client sends is a
+string the agent interprets as an id. The batch must contain at least one
+entry. Each entry must name a selection or non-blank `discussion`; a
+`required` discussion must be non-blank even when the set also offers options.
+A set the body omits stays unanswered and is reported
+to the agent as such. `selectedOptionIds` must all be options the agent offered
+for that set, at most one on a `single` set; `discussion` (≤ 4000 characters)
+is accepted only where the set's `discussion` is `optional` or `required`. On
+success it returns `{ "session": … }`, the same shape as the cancel route; the
+turn continues with a `coding_question_resolved` carrying `decidedBy:
+"human"`, and the backend appends the rendered answer to the thread as a user
+message (`context.questionRequestId`).
+
+Batches are held for at most 10 minutes; after that the runner applies its own
+away fallback — the agent is told nobody answered and to proceed on its best
+judgment — and the resolved event says `decidedBy: "timeout"`. A cancelled turn
+resolves the batch `cancelled`, with no `decidedBy`. Status codes: `400` for a
+malformed or empty body, a set or option the agent did not offer, a second
+choice on a `single` set, missing required free text, free text on a set that
+accepts none, or an entry with neither;
+`401` when `AUTH_TOKEN` is configured and the bearer token is missing (a
+mutating route); `404` for an unknown session or a batch that is not
+outstanding (which is also what a runner with no way to ask reports). Durable
+audit records `agent_question_resolved` — which sets, which option ids, on whose
+authority — and never the free text, which is the person's own words and lives
+in the thread. See `docs/safety/TRUST_AND_SAFETY.md`.
+
+`GET /api/agent-sessions/:sessionId/questions` lists the batches the session
+still holds open, each `{ requestId, turnId, questionSets }` exactly as the
+request event carried them, so a client that connects after the recent-event
+replay rolled over can still render and answer them. Unlike permission
+requests, which settle in minutes, a batch can stay outstanding for ten while
+the turn waits on it — long enough for the 200-event replay to move on. The
+read returns model-authored text, so it requires the bearer token when
+`AUTH_TOKEN` is configured, like `/messages`; `404` for an unknown session.
+
 `POST /api/agent-sessions/:sessionId/cancel` stops the active turn when one is
 running. The stopped turn is recorded with `status: "cancelled"` and emits
 `agent_turn_cancelled` / `coding_turn_cancelled`, but the session returns to
@@ -1836,6 +1911,7 @@ takes more than 250 ms.
 - `agent_turn_failed`
 - `agent_turn_cancelled`
 - `agent_permission_resolved`
+- `agent_question_resolved`
 - `runner_audit`
 - `coding_session_started`
 - `coding_turn_started`
@@ -1851,6 +1927,8 @@ takes more than 250 ms.
 - `coding_tool_activity_completed`
 - `coding_permission_requested`
 - `coding_permission_resolved`
+- `coding_question_requested`
+- `coding_question_resolved`
 - `coding_turn_completed`
 - `coding_turn_failed`
 - `coding_turn_cancelled`
@@ -1899,7 +1977,8 @@ turn-scoped `turnId` where applicable.
 **Activity payloads carry a canonical reading.** An `activity` block has a
 `canonical` object whose `kind` is one of `session_started`, `turn_started`,
 `plan_updated`, `diff_updated`, `reasoning`, `tool_started`, `tool_output`,
-`tool_completed`, `permission_requested`, or `permission_resolved`. A client
+`tool_completed`, `permission_requested`, `permission_resolved`,
+`question_requested`, or `question_resolved`. A client
 decides what an activity *is* from that, never from the activity's native
 `kind` string, which stays beside it for display and diagnostics. For the three
 tool kinds it also carries `toolId` — the stable per-call id that is identical
@@ -2010,6 +2089,33 @@ workspace, and runner identifiers plus an `audit` block naming the request id,
 the selected option, the authority, and the status — **never** the tool call the
 agent was about to run, which can carry anything and does not belong in a durable
 log.
+
+`coding_question_requested` is what a client renders as a question deck. It
+carries `questionSets` — one entry per set: `setId`, an optional short `header`
+(≤ 24 characters; a runner's chip label), the `prompt`, `selection` (`single`
+or `multiple`), `options` (`optionId`, `label`, optional `description`; at most
+8), `discussion` (`none`, `optional`, or `required` — whether the set rejects,
+invites, or requires free text; a required field may be beside options or
+instead of them), and `sensitive` when the free
+text must be entered securely and is never echoed back. At most 8 sets. It
+carries `requestId` only while the backend holds the batch open; a batch
+announced without one is a record a client renders but cannot answer, the same
+rule as a permission request without options. `selection`, `discussion`, and
+every status below are open strings on the wire: a client degrades an unknown
+value (to single-select, to optional) rather than refusing the batch.
+
+`coding_question_resolved` says what happened: `status` (`answered`, `timeout`,
+or `cancelled`), `decidedBy` (`human` or `timeout`; absent when nobody
+decided), and for a human answer `questionAnswers` — per answered set, the
+`selectedOptionIds` and the `discussion` text, except for a `sensitive` set
+whose text is never on the stream. `agent_question_resolved` is the sanitized
+durable counterpart that reaches `/api/audit`: identifiers plus an `audit` block
+naming the request id, the status, the authority, and each answered set's
+option ids — never the free text.
+
+Added under contract version 2: both event types and both canonical kinds are
+additive, their new fields optional or self-contained, and a client that
+predates them ignores them.
 
 `workspace_git_operation` fires for each mutating Git operation (see the routes
 above). It is sanitized like the terminal payloads: `workspaceId`,

@@ -6,10 +6,23 @@ import {
   MAX_PERMISSION_REQUEST_ID_LENGTH
 } from "../../runner/shared/PendingPermissionRequests";
 import {
+  MAX_QUESTION_DESCRIPTION_LENGTH,
+  MAX_QUESTION_DISCUSSION_LENGTH,
+  MAX_QUESTION_HEADER_LENGTH,
+  MAX_QUESTION_ID_LENGTH,
+  MAX_QUESTION_LABEL_LENGTH,
+  MAX_QUESTION_OPTIONS,
+  MAX_QUESTION_PROMPT_LENGTH,
+  MAX_QUESTION_SETS
+} from "../../runner/shared/PendingQuestionRequests";
+import type { CanonicalQuestionAnswer, CanonicalQuestionSet } from "../../runner/AgentRunner";
+import {
   codingActivitySchema,
   codingAgentEventPayloadSchema,
   codingDiffFileSchema,
-  codingPermissionOptionsSchema
+  codingPermissionOptionsSchema,
+  codingQuestionAnswersSchema,
+  codingQuestionSetsSchema
 } from "./eventSchemas";
 import type {
   CodingAgentEventCandidate,
@@ -29,6 +42,9 @@ export {
   codingClaudeCodeMetadataSchema,
   codingCodexMetadataSchema,
   codingPermissionOptionSchema,
+  codingQuestionAnswerSchema,
+  codingQuestionOptionSchema,
+  codingQuestionSetSchema,
   codingRunnerMetadataSchema
 } from "./eventSchemas";
 export type {
@@ -297,6 +313,27 @@ export function codingEventFromRunnerActivity(
         ...(canonical.optionId ? { optionId: clampText(canonical.optionId, MAX_PERMISSION_OPTION_ID_LENGTH) } : {}),
         ...(canonical.decidedBy ? { decidedBy: clampText(canonical.decidedBy) } : {})
       }));
+    case "question_requested": {
+      const questionSets = boundedQuestionSets(canonical.questionSets);
+      if (!questionSets) return undefined;
+      return candidate(parsePayload({
+        ...base,
+        type: "coding_question_requested",
+        turnId,
+        ...answerableQuestionRequestId(canonical.requestId),
+        questionSets
+      }));
+    }
+    case "question_resolved":
+      return candidate(parsePayload({
+        ...base,
+        type: "coding_question_resolved",
+        turnId,
+        ...answerableQuestionRequestId(canonical.requestId),
+        ...(canonical.status ? { status: clampText(canonical.status) } : {}),
+        ...(canonical.decidedBy ? { decidedBy: clampText(canonical.decidedBy) } : {}),
+        ...boundedQuestionAnswers(canonical.questionAnswers)
+      }));
   }
 }
 
@@ -417,6 +454,20 @@ function boundedCanonicalActivity(canonical: CodingCanonicalActivity): CodingCan
         ...(canonical.optionId ? { optionId: clampText(canonical.optionId, MAX_PERMISSION_OPTION_ID_LENGTH) } : {}),
         ...(canonical.decidedBy ? { decidedBy: clampText(canonical.decidedBy) } : {})
       };
+    case "question_requested":
+      return {
+        kind: "question_requested",
+        ...answerableQuestionRequestId(canonical.requestId),
+        questionSets: boundedQuestionSets(canonical.questionSets) ?? []
+      };
+    case "question_resolved":
+      return {
+        kind: "question_resolved",
+        ...answerableQuestionRequestId(canonical.requestId),
+        ...(canonical.status ? { status: clampText(canonical.status) } : {}),
+        ...(canonical.decidedBy ? { decidedBy: clampText(canonical.decidedBy) } : {}),
+        ...boundedQuestionAnswers(canonical.questionAnswers)
+      };
     default:
       return canonical;
   }
@@ -447,6 +498,49 @@ function answerablePermissionFields(
   const parsedOptions = codingPermissionOptionsSchema.safeParse(options);
   if (!parsedRequestId.success || !parsedOptions.success) return {};
   return { requestId: parsedRequestId.data, options: parsedOptions.data };
+}
+
+/**
+ * A clarifying-question batch, bounded like everything else that crosses this
+ * boundary: text is clamped to its ceiling, ids are kept exact, and a batch that
+ * still fails the schema (too many sets, a duplicate id, a set nobody could
+ * answer) produces no event at all rather than a half-renderable one.
+ */
+function boundedQuestionSets(sets: readonly CanonicalQuestionSet[]): CanonicalQuestionSet[] | undefined {
+  const clamped = sets.slice(0, MAX_QUESTION_SETS + 1).map((set) => ({
+    setId: set.setId,
+    ...(set.header ? { header: clampText(set.header, MAX_QUESTION_HEADER_LENGTH) } : {}),
+    prompt: clampText(set.prompt, MAX_QUESTION_PROMPT_LENGTH),
+    selection: set.selection,
+    options: set.options.slice(0, MAX_QUESTION_OPTIONS + 1).map((option) => ({
+      optionId: option.optionId,
+      label: clampText(option.label, MAX_QUESTION_LABEL_LENGTH),
+      ...(option.description ? { description: clampText(option.description, MAX_QUESTION_DESCRIPTION_LENGTH) } : {})
+    })),
+    discussion: set.discussion,
+    ...(set.sensitive ? { sensitive: true } : {})
+  }));
+  const parsed = codingQuestionSetsSchema.safeParse(clamped);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** The answer-route id, kept exact: a bound may refuse it, never reshape it. */
+function answerableQuestionRequestId(requestId: string | undefined): { requestId: string } | Record<string, never> {
+  const parsed = z.string().min(1).max(MAX_QUESTION_ID_LENGTH).safeParse(requestId);
+  return parsed.success ? { requestId: parsed.data } : {};
+}
+
+function boundedQuestionAnswers(
+  answers: readonly CanonicalQuestionAnswer[] | undefined
+): { questionAnswers: CanonicalQuestionAnswer[] } | Record<string, never> {
+  if (!answers) return {};
+  const clamped = answers.slice(0, MAX_QUESTION_SETS).map((answer) => ({
+    setId: answer.setId,
+    selectedOptionIds: answer.selectedOptionIds.slice(0, MAX_QUESTION_OPTIONS),
+    ...(answer.discussion ? { discussion: clampText(answer.discussion, MAX_QUESTION_DISCUSSION_LENGTH) } : {})
+  }));
+  const parsed = codingQuestionAnswersSchema.safeParse(clamped);
+  return parsed.success ? { questionAnswers: parsed.data } : {};
 }
 
 function boundedRecord(value: Record<string, unknown>): Record<string, unknown> {

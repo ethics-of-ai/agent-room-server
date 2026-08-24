@@ -72,6 +72,11 @@ export interface ServiceConfig {
   // When false, the in-band artifact channel is disabled: assistant text is not
   // parsed for <artifact> regions and no artifact prompt instruction is injected.
   artifactsEnabled?: boolean;
+  // When false, the clarifying-question channel is off: no runner is given a
+  // way to pause a turn and ask the person driving the session, so each behaves
+  // exactly as before the channel existed. Tier 1: answering a question
+  // authorizes nothing. See docs/safety/TRUST_AND_SAFETY.md.
+  clarifyingQuestionsEnabled?: boolean;
   // When false, the backend-served editor language catalog (Phase C) is disabled:
   // the catalog routes are not registered and clients fall back to bundled assets.
   languageCatalogEnabled?: boolean;
@@ -604,6 +609,9 @@ export interface AgentSessionMessageContextAttachment {
 export interface AgentSessionMessageContext {
   paths?: string[];
   attachments?: AgentSessionMessageContextAttachment[];
+  // The clarifying-question batch this user message answers, when it is the
+  // backend's record of a human answer rather than a turn message.
+  questionRequestId?: string;
 }
 
 export interface AgentBridgeMetrics {

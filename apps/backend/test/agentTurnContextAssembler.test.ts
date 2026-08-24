@@ -72,6 +72,31 @@ describe("agent turn context assembler", () => {
     expect(assembled.prompt).toBe("artifact contract\n\nDesign the checkout flow.");
   });
 
+  it("delivers the prompt-contract question instruction only to DeepSeek", async () => {
+    const fixture = await createAssemblerFixture();
+
+    fixture.session.runnerKind = "deepseek";
+    const deepseek = await fixture.assembler.assemble({ session: fixture.session, message: "Plan this work." });
+    fixture.session.runnerKind = "codex";
+    const codex = await fixture.assembler.assemble({ session: fixture.session, message: "Plan this work." });
+    fixture.session.runnerKind = "claude_code";
+    const claudeCode = await fixture.assembler.assemble({ session: fixture.session, message: "Plan this work." });
+
+    expect(deepseek.prompt).toContain("<agentroom-question>");
+    expect(deepseek.prompt).toContain("\n\nPlan this work.");
+    expect(codex.prompt).toBe("Plan this work.");
+    expect(claudeCode.prompt).toBe("Plan this work.");
+  });
+
+  it("omits the prompt-contract question instruction when the channel is disabled", async () => {
+    const fixture = await createAssemblerFixture({ clarifyingQuestionsEnabled: false });
+    fixture.session.runnerKind = "deepseek";
+
+    const assembled = await fixture.assembler.assemble({ session: fixture.session, message: "Plan this work." });
+
+    expect(assembled.prompt).toBe("Plan this work.");
+  });
+
   it("appends the human-edit summary after the standing diagram contract", async () => {
     const { assembler, session } = await createAssemblerFixture({
       diagramInstruction: "diagram contract",
@@ -291,6 +316,7 @@ describe("agent turn context assembler", () => {
 
 async function createAssemblerFixture(instructions: {
   artifactInstruction?: string;
+  clarifyingQuestionsEnabled?: boolean;
   diagramInstruction?: string;
   diagramHumanEdits?: {
     prepareSummaryForTurn(session: AgentSession): Promise<{ summary?: string; acknowledge(): void } | undefined>;

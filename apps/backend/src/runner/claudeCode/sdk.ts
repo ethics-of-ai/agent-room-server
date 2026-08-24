@@ -10,6 +10,21 @@ export interface ClaudeCodeQuery extends AsyncIterable<unknown> {
   return?(value?: unknown): Promise<IteratorResult<unknown>>;
 }
 
+/**
+ * The SDK's `canUseTool` callback, typed structurally for the same reason as
+ * the query: AgentRoom passes it to hold the `AskUserQuestion` tool open for a
+ * human answer and to refuse every other interactive prompt, and a fake query
+ * in the tests exercises both paths.
+ */
+export type ClaudeCodeCanUseTool = (
+  toolName: string,
+  input: Record<string, unknown>,
+  options: { signal?: AbortSignal; toolUseID?: string }
+) => Promise<
+  | { behavior: "allow"; updatedInput?: Record<string, unknown> }
+  | { behavior: "deny"; message: string; interrupt?: boolean }
+>;
+
 export type ClaudeCodeQueryFunction = (params: {
   prompt: AsyncIterable<unknown>;
   options: Record<string, unknown>;

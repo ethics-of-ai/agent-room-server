@@ -4,6 +4,12 @@ import {
   MAX_PERMISSION_OPTION_ID_LENGTH,
   MAX_PERMISSION_REQUEST_ID_LENGTH
 } from "../runner/shared/PendingPermissionRequests";
+import {
+  MAX_QUESTION_DISCUSSION_LENGTH,
+  MAX_QUESTION_ID_LENGTH,
+  MAX_QUESTION_OPTIONS,
+  MAX_QUESTION_SETS
+} from "../runner/shared/PendingQuestionRequests";
 import { AgentAttachmentError, AgentAttachmentStore, maxAgentAttachmentBytes } from "../agent/AgentAttachmentStore";
 import { AgentSessionError, AgentSessionService } from "../agent/AgentSessionService";
 import { agentRunnerKindSchema, agentTurnContextSchema, codingAgentTurnSettingsSchema } from "../domain/schemas";
@@ -33,6 +39,28 @@ const answerPermissionPayloadSchema = z.object({
   // Opaque agent id: preserve leading/trailing whitespace exactly rather than
   // changing the value between the advertised option and the pending store.
   optionId: z.string().min(1).max(MAX_PERMISSION_OPTION_ID_LENGTH)
+});
+
+const questionParamsSchema = z.object({
+  sessionId: z.string().trim().min(1),
+  requestId: z.string().trim().min(1).max(MAX_QUESTION_ID_LENGTH)
+});
+
+// Every id here is AgentRoom-minted and checked by the runner against the sets
+// it is holding; the bounds exist so the route cannot be used to push an
+// arbitrary string at the pending store, not because the backend mints long
+// ones. Free text is the person's own words and is bounded by length only.
+const answerQuestionPayloadSchema = z.object({
+  answers: z
+    .array(
+      z.object({
+        setId: z.string().min(1).max(MAX_QUESTION_ID_LENGTH),
+        selectedOptionIds: z.array(z.string().min(1).max(MAX_QUESTION_ID_LENGTH)).max(MAX_QUESTION_OPTIONS).default([]),
+        discussion: z.string().max(MAX_QUESTION_DISCUSSION_LENGTH).optional()
+      })
+    )
+    .min(1)
+    .max(MAX_QUESTION_SETS)
 });
 
 const startTurnPayloadSchema = z.object({
@@ -198,6 +226,45 @@ export async function registerAgentSessionRoutes(
       }
       throw error;
     }
+  });
+
+  // Answer a clarifying-question batch a runner raised mid-turn: selections
+  // from the sets the agent offered, and the person's own free text where a set
+  // invited it. A set the body omits stays unanswered. Mutating, so the global
+  // preHandler requires the bearer token when AUTH_TOKEN is configured.
+  app.post("/api/agent-sessions/:sessionId/questions/:requestId", async (request, reply) => {
+    const { sessionId, requestId } = questionParamsSchema.parse(request.params);
+    const parsed = answerQuestionPayloadSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: "Invalid question answer payload" });
+    }
+    try {
+      const session = agentSessions.answerQuestionRequest({
+        sessionId,
+        requestId,
+        answers: parsed.data.answers
+      });
+      return { session };
+    } catch (error) {
+      if (error instanceof AgentSessionError) {
+        return reply.code(error.statusCode).send({ error: error.message });
+      }
+      throw error;
+    }
+  });
+
+  // The clarifying-question batches a session still holds open, so a client
+  // that connects after the recent-event replay rolled over can still render
+  // and answer them. Question text is model-authored content, so it requires
+  // the bearer token when AUTH_TOKEN is configured, like the transcript read.
+  app.get("/api/agent-sessions/:sessionId/questions", async (request, reply) => {
+    if (!authorizedForRead(request.headers.authorization, config)) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+    const { sessionId } = sessionParamsSchema.parse(request.params);
+    const questions = agentSessions.listOutstandingQuestions(sessionId);
+    if (!questions) return reply.code(404).send({ error: "Agent session was not found" });
+    return { questions };
   });
 
   app.post("/api/agent-sessions/:sessionId/cancel", async (request, reply) => {

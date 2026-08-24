@@ -7,6 +7,7 @@ import type { CodingAgentTurnSettings, ServiceConfig } from "../../domain/models
 import { defaultClaudeCodeLoadWorkspaceSkills, defaultClaudeCodePermissionMode } from "../../domain/runnerDefaults";
 import type { AgentRunnerInputPart } from "../AgentRunner";
 import { commandAudit } from "../shared/commandAudit";
+import type { ClaudeCodeCanUseTool } from "./sdk";
 import { DIAGRAM_PROMPT_INSTRUCTION } from "../../scene/diagram/prompt";
 
 export type ClaudeCodeEffortLevel = "low" | "medium" | "high" | "xhigh";
@@ -96,7 +97,7 @@ export function claudeCodeQueryOptions(
   // transcript) after the child process was lost; every other option —
   // including the settings-isolation posture — is rebuilt as for a fresh
   // session, so resuming cannot relax the documented gating.
-  options: { forceIsolation?: boolean; resume?: string } = {}
+  options: { forceIsolation?: boolean; resume?: string; canUseTool?: ClaudeCodeCanUseTool } = {}
 ): Record<string, unknown> {
   const permissionMode = config.claudeCodePermissionMode ?? defaultClaudeCodePermissionMode;
   const loadWorkspaceSettings = !options.forceIsolation && loadsWorkspaceSettings(config);
@@ -120,6 +121,13 @@ export function claudeCodeQueryOptions(
     },
     permissionMode,
     ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+    // Passing a callback is what lets the CLI raise `AskUserQuestion` at all
+    // (the SDK adds `--permission-prompt-tool stdio`). The runner supplies one
+    // only while the clarifying-question channel is enabled and never for the
+    // isolated capability probe; see docs/safety/TRUST_AND_SAFETY.md for why
+    // every other tool the callback sees is refused exactly as the headless
+    // CLI refuses it today.
+    ...(options.canUseTool ? { canUseTool: options.canUseTool } : {}),
     ...(settings.model ? { model: settings.model } : {}),
     ...(settings.effort ? { effort: settings.effort } : {}),
     ...(config.claudeCodeExecutable ? { pathToClaudeCodeExecutable: config.claudeCodeExecutable } : {})

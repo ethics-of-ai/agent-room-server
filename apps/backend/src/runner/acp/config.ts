@@ -196,6 +196,9 @@ export function acpRunnerDescriptor(adapter: AcpAdapterConfig): RunnerDescriptor
     displayName: adapter.displayName,
     promptDelivery: "turn",
     turnDiffSource: "settle_time_git",
+    // ACP v1 has no portable user-question request. Do not opt an arbitrary
+    // external agent into AgentRoom's prompt syntax without an explicit rollout.
+    clarifyingQuestions: { mode: "none" },
     workspaceSkills: { mode: "none" },
     skillSourceDirs: [],
     skillInvocationPrefix: "/",

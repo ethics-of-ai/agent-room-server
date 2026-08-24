@@ -144,6 +144,16 @@ describe("Swift model structure", () => {
       "BackendSecretStoreError",
       "BackendSecretValues",
       "BackendServerState",
+      "CodingQuestionDeckFooter",
+      "CodingQuestionDeckPresentation",
+      "CodingQuestionDeckView",
+      "CodingQuestionDiscussionField",
+      "CodingQuestionDraft",
+      "CodingQuestionDraftStore",
+      "CodingQuestionOptionCard",
+      "CodingQuestionRequestState",
+      "CodingQuestionRequestView",
+      "CodingQuestionSetView",
       "DiagnosticsBundle",
       "DiagnosticsTextRedactor",
       "KeychainBackendSecretStore",
@@ -251,8 +261,13 @@ describe("Swift model structure", () => {
     const settingsSelection = await readFile(resolve(visionOSRoot, "State/Coding/CodingAgentSettingsSelection.swift"), "utf8");
     const backendSetting = await readFile(resolve(visionOSRoot, "State/BackendSettings/ManagedBackendSettingDescriptor.swift"), "utf8");
     const editorDiff = await readFile(resolve(visionOSRoot, "State/Editor/GitLineDiff.swift"), "utf8");
+    const questionRequestState = await readFile(resolve(visionOSRoot, "State/Coding/CodingQuestionRequestState.swift"), "utf8");
 
     expect(transcriptMessage).toContain("struct CodingTranscriptMessage");
+    // The clarifying-question record sits beside the permission record in the
+    // coding state taxonomy, not inside the reducer.
+    expect(questionRequestState).toContain("struct CodingQuestionRequestState");
+    expect(rendererState).not.toContain("struct CodingQuestionRequestState");
     expect(appAction).toContain("enum AppAction");
     expect(settingsSelection).toContain("struct CodingAgentSettingsSelection");
     expect(backendSetting).toContain("struct ManagedBackendSettingDescriptor");

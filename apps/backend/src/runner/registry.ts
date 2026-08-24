@@ -14,6 +14,7 @@ import {
 } from "../domain/settingValueSchemas";
 import type { RunnerRestoreStrategy } from "./shared/PersistentRunnerSessionHost";
 import { loadsWorkspaceSettings } from "./claudeCode/settings";
+import { DEEPSEEK_QUESTION_PROMPT_INSTRUCTION } from "./deepseek/promptQuestions";
 
 /**
  * Central declaration for runner-specific behavior.
@@ -71,6 +72,24 @@ export type RunnerPromptDelivery = "turn" | "system";
 export type RunnerTurnDiffSource = "runner" | "settle_time_git";
 
 /**
+ * How a runner exposes clarifying questions.
+ *
+ * - `native` means the adapter receives a real protocol callback/request and
+ *   maps it into the canonical question pair.
+ * - `prompt_contract` means the runner has no request channel, so the turn
+ *   assembler teaches it AgentRoom's bounded in-band block and the adapter
+ *   parses that block from assistant text.
+ * - `none` means AgentRoom offers no question mechanism for this runner.
+ *
+ * This is dispatch policy only. The native payload and the prompt-contract
+ * parser stay inside their adapters.
+ */
+export type RunnerClarifyingQuestions =
+  | { readonly mode: "native" }
+  | { readonly mode: "prompt_contract"; readonly instruction: string }
+  | { readonly mode: "none" };
+
+/**
  * Whether a session of this runner kind actually loads the workspace skills that
  * the bounded skills read (`GET /api/workspaces/:id/skills`) lists.
  *
@@ -107,6 +126,7 @@ export interface RunnerDescriptor {
   readonly displayName: string;
   readonly promptDelivery: RunnerPromptDelivery;
   readonly turnDiffSource: RunnerTurnDiffSource;
+  readonly clarifyingQuestions: RunnerClarifyingQuestions;
   readonly workspaceSkills: RunnerWorkspaceSkills;
   /** Fixed committed skill directories this runner natively loads, in precedence order. */
   readonly skillSourceDirs: readonly string[];
@@ -215,6 +235,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     promptDelivery: "turn",
     // `turn/diff/updated` arrives on the runner's own stream.
     turnDiffSource: "runner",
+    clarifyingQuestions: { mode: "native" },
     // Repo skills load natively with no isolation toggle; registering the
     // workspace is the trust decision (docs/safety/TRUST_AND_SAFETY.md).
     workspaceSkills: { mode: "native" },
@@ -278,6 +299,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     promptDelivery: "system",
     // The SDK stream has no `turn/diff/updated` analog.
     turnDiffSource: "settle_time_git",
+    clarifyingQuestions: { mode: "native" },
     workspaceSkills: {
       mode: "gated",
       // Called through rather than referenced, so the binding resolves at call
@@ -345,6 +367,13 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // The session log has no diff event, so AgentTurnGitDiffTracker derives the
     // turn's diff from the workspace's Git status at settlement.
     turnDiffSource: "settle_time_git",
+    // The SDK wire has no server-to-client request. The adapter recognizes one
+    // bounded line-start block in assistant text, then sends the person's
+    // answer as another SDK prompt while the same AgentRoom turn stays open.
+    clarifyingQuestions: {
+      mode: "prompt_contract",
+      instruction: DEEPSEEK_QUESTION_PROMPT_INSTRUCTION
+    },
     // `dsh` discovers skills through its own filesystem provider, but *whether*
     // a given composition loads one is the profile's answer and not something
     // this backend can see from the wire. Reporting `none` is the honest state

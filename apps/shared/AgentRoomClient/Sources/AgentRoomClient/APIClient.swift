@@ -507,6 +507,37 @@ public struct APIClient {
         return response.session
     }
 
+    /// Answer a clarifying-question batch a runner raised mid-turn: per answered
+    /// set, option ids the agent offered and the person's free text where the
+    /// set invited it (`coding_question_requested` carries the request id and
+    /// the sets). A set left out stays unanswered. The backend refuses a set or
+    /// option the agent did not offer, so this can express nothing the agent
+    /// would not accept.
+    public func answerQuestionRequest(
+        sessionId: String,
+        requestId: String,
+        answers: [CodingQuestionAnswer]
+    ) async throws -> AgentSession {
+        let payload = AnswerQuestionRequest(answers: answers)
+        let response: AgentSessionResponse = try await request(
+            ["api", "agent-sessions", sessionId, "questions", requestId],
+            method: "POST",
+            body: try JSONEncoder().encode(payload)
+        )
+        return response.session
+    }
+
+    /// The clarifying-question batches a session still holds open, for a client
+    /// that connected after the event replay rolled over. Bearer-gated like the
+    /// transcript read, since question text is model-authored.
+    public func outstandingQuestions(sessionId: String) async throws -> [OutstandingQuestionRequest] {
+        let response: OutstandingQuestionsResponse = try await request(
+            ["api", "agent-sessions", sessionId, "questions"],
+            method: "GET"
+        )
+        return response.questions
+    }
+
     public func deleteAgentSession(sessionId: String) async throws {
         _ = try await requestData(["api", "agent-sessions", sessionId], method: "DELETE")
     }

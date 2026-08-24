@@ -24,6 +24,7 @@ enum ManagedBackendSettingKey: String, CaseIterable {
     case artifactsEnabled
     case languageCatalogEnabled
     case sceneEngineEnabled
+    case clarifyingQuestionsEnabled
     case gitCommandTimeoutMs
     case gitNetworkTimeoutMs
     // Tier 2 — trust posture. Editable from these panes always; editable from a

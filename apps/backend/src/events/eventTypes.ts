@@ -15,6 +15,7 @@ export type AgentRoomEventType =
   | "agent_turn_failed"
   | "agent_turn_cancelled"
   | "agent_permission_resolved"
+  | "agent_question_resolved"
   | "workspace_registered"
   | "workspace_removed"
   | "workspace_branch_changed"
@@ -89,6 +90,28 @@ export interface AgentPermissionResolvedPayload {
     /** `human`, `policy`, or `timeout`. */
     decidedBy?: string;
     status?: string;
+  };
+}
+
+// Emitted when a clarifying-question batch a runner raised mid-turn settles —
+// answered by a person through the answer route, timed out, or cancelled with
+// the turn. Sanitized the same way as the permission decision: which sets were
+// answered and which option ids were chosen, on whose authority — never the
+// free text a person typed, which is their own words and belongs in the thread
+// (the backend records it as a user message there), not in a durable log.
+export interface AgentQuestionResolvedPayload {
+  sessionId: string;
+  turnId: string;
+  workspaceId: string;
+  workspacePath: string;
+  runnerKind: string;
+  audit: {
+    requestId?: string;
+    /** `answered`, `timeout`, or `cancelled`. */
+    status?: string;
+    /** `human` or `timeout`; absent when nobody decided. */
+    decidedBy?: string;
+    answers?: Array<{ setId: string; selectedOptionIds: string[] }>;
   };
 }
 

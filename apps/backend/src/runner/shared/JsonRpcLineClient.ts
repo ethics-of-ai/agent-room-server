@@ -1,4 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { logger } from "../../logging/logger";
 
 /**
  * Newline-delimited JSON-RPC over a child process's stdio: one compact JSON
@@ -48,9 +49,26 @@ export interface JsonRpcNotification {
 
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
 
+/**
+ * Thrown by a request handler for a method it does not serve. The child gets
+ * the standard `-32601` rather than a hang: a server→client request nobody
+ * answers is what wedged a turn before the dispatcher existed.
+ */
+export class JsonRpcMethodNotFoundError extends Error {
+  constructor(readonly method: string) {
+    super(`Method not found: ${method}`);
+  }
+}
+
+export type JsonRpcRequestHandler = (request: JsonRpcRequest) => unknown | Promise<unknown>;
+
+const JSON_RPC_METHOD_NOT_FOUND = -32601;
+const JSON_RPC_INTERNAL_ERROR = -32603;
+
 export class JsonRpcLineClient {
   private readonly pending = new Map<JsonRpcId, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private readonly notificationHandlers = new Set<(notification: JsonRpcNotification) => void>();
+  private requestHandler?: JsonRpcRequestHandler;
   private nextId = 1;
   private stdoutBuffer = "";
 
@@ -69,6 +87,24 @@ export class JsonRpcLineClient {
 
   onNotification(handler: (notification: JsonRpcNotification) => void): void {
     this.notificationHandlers.add(handler);
+  }
+
+  /**
+   * Serve the child's own requests (a frame carrying both `method` and `id`).
+   * One handler: it returns the result, or throws `JsonRpcMethodNotFoundError`
+   * for a method it does not serve. With no handler registered every such
+   * request is refused with `-32601`, which is strictly better than the silence
+   * that preceded this — a child awaiting an answer nobody will send holds its
+   * turn open forever.
+   */
+  onRequest(handler: JsonRpcRequestHandler): void {
+    this.requestHandler = handler;
+  }
+
+  /** Answer one of the child's requests. */
+  respond(id: JsonRpcId, response: { result: unknown } | { error: { code: number; message: string } }): void {
+    const frame: JsonRpcResponse = { id, ...response };
+    this.child.stdin.write(`${JSON.stringify(frame)}\n`, () => undefined);
   }
 
   request(method: string, params: unknown): Promise<unknown> {
@@ -118,6 +154,11 @@ export class JsonRpcLineClient {
       return;
     }
 
+    if ("method" in message && "id" in message) {
+      this.serveRequest(message);
+      return;
+    }
+
     if ("id" in message && ("result" in message || "error" in message)) {
       const pending = this.pending.get(message.id);
       if (!pending) return;
@@ -128,6 +169,30 @@ export class JsonRpcLineClient {
         pending.resolve(message.result);
       }
     }
+  }
+
+  private serveRequest(request: JsonRpcRequest): void {
+    const handler = this.requestHandler;
+    const refuse = (code: number, message: string): void => {
+      logger.warn({ label: this.label, method: request.method, code }, "Refused a JSON-RPC request from the child");
+      this.respond(request.id, { error: { code, message } });
+    };
+    if (!handler) {
+      refuse(JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${request.method}`);
+      return;
+    }
+    void Promise.resolve()
+      .then(() => handler(request))
+      .then(
+        (result) => this.respond(request.id, { result }),
+        (error: unknown) => {
+          if (error instanceof JsonRpcMethodNotFoundError) {
+            refuse(JSON_RPC_METHOD_NOT_FOUND, error.message);
+            return;
+          }
+          refuse(JSON_RPC_INTERNAL_ERROR, error instanceof Error ? error.message : String(error));
+        }
+      );
   }
 
   private rejectPending(error: Error): void {

@@ -1,14 +1,28 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import type { CodingAgentCapabilities, ServiceConfig } from "../../domain/models";
 import { logger } from "../../logging/logger";
 import { redactSecrets } from "../../util/redactSecrets";
-import type { AgentRunner, AgentRunnerEvent, AgentRunnerInput, AgentRunnerInputPart, RunnerMetadata } from "../AgentRunner";
+import type {
+  AgentRunner,
+  AgentRunnerActivity,
+  AgentRunnerEvent,
+  AgentRunnerInput,
+  AgentRunnerInputPart,
+  CanonicalQuestionAnswer,
+  RunnerMetadata
+} from "../AgentRunner";
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { withTimeout } from "../shared/asyncUtils";
 import { JsonRpcLineClient, type JsonRpcNotification } from "../shared/JsonRpcLineClient";
 import { PersistentRunnerSessionHost } from "../shared/PersistentRunnerSessionHost";
+import {
+  PendingQuestionRequests,
+  type QuestionAnswerResult,
+  type QuestionWaitOutcome
+} from "../shared/PendingQuestionRequests";
 import {
   createRunnerStreamTiming,
   observeRunnerStreamEvent,
@@ -29,6 +43,11 @@ import {
   type DeepSeekTurnState
 } from "./sessionEventMapper";
 import {
+  DeepSeekPromptQuestionStreamParser,
+  deepseekQuestionFollowUp,
+  type DeepSeekPromptQuestionBatch
+} from "./promptQuestions";
+import {
   DEEPSEEK_RUNTIME_BINARY,
   deepseekChildEnv,
   deepseekCommandAudit,
@@ -47,6 +66,21 @@ interface DeepSeekActiveTurn {
   state: DeepSeekTurnState;
   /** Set once the runtime has reported this session's agent running. */
   sawRunning: boolean;
+  /** Ignore a late duplicate `turn/end` after the idle backstop closed that cycle. */
+  lastCompletedProtocolTurnNumber?: number;
+  /** Present only while the managed clarifying-question channel is enabled. */
+  questionParser?: DeepSeekPromptQuestionStreamParser;
+  pendingQuestion?: DeepSeekPendingQuestion;
+}
+
+type DeepSeekQuestionOutcome = QuestionWaitOutcome | { status: "unavailable" };
+
+interface DeepSeekPendingQuestion {
+  batch: DeepSeekPromptQuestionBatch;
+  requestId?: string;
+  outcome?: DeepSeekQuestionOutcome;
+  protocolCompleted: boolean;
+  continuing: boolean;
 }
 
 interface DeepSeekRunnerSession {
@@ -131,10 +165,12 @@ const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000;
  *   child and ends this AgentRoom session's usable conversation. A follow-up is
  *   refused rather than silently starting fresh under the same session id.
  * - **There are no server-to-client requests.** So there is no interactive
- *   permission channel to expose, no `answerPermissionRequest` hook, and the
- *   answer route's `404` is the honest reading for this runner — exactly as it
- *   is for Codex and Claude Code. What the agent may do is its own configured
- *   posture (`DSH_PERMISSION_MODE`, a tier-2 managed setting).
+ *   permission channel to expose and no `answerPermissionRequest` hook.
+ *   Clarifying questions use the descriptor-declared prompt contract instead:
+ *   a bounded assistant block opens the shared question wait, and its answer
+ *   becomes a second Harness prompt inside the same AgentRoom turn. What the
+ *   agent may do is still its own configured posture (`DSH_PERMISSION_MODE`, a
+ *   tier-2 managed setting).
  */
 export class DeepSeekHarnessRunner implements AgentRunner {
   private readonly activeTurns = new Map<string, { session: DeepSeekRunnerSession; turn: DeepSeekActiveTurn }>();
@@ -142,14 +178,18 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   /** Sessions whose runtime held conversation state that can no longer be restored. */
   private readonly uncontinuableSessionIds = new Set<string>();
   private readonly initializeTimeoutMs: number;
+  private readonly questions: PendingQuestionRequests;
   private disposing = false;
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
 
   constructor(
     private readonly config: ServiceConfig,
-    deps: { idleSessionTimeoutMs?: number; initializeTimeoutMs?: number } = {}
+    deps: { idleSessionTimeoutMs?: number; initializeTimeoutMs?: number; questionTimeoutMs?: number } = {}
   ) {
     this.initializeTimeoutMs = deps.initializeTimeoutMs ?? INITIALIZE_TIMEOUT_MS;
+    this.questions = new PendingQuestionRequests(
+      deps.questionTimeoutMs !== undefined ? { timeoutMs: deps.questionTimeoutMs } : {}
+    );
     this.sessions = new PersistentRunnerSessionHost({
       runnerKind: "deepseek",
       // The registry owns this: the host arms an idle timer only for a runner it
@@ -163,6 +203,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       // caller blocked for up to eleven seconds on a wedged child would be a
       // worse answer than one that exits a moment after its session did.
       teardown: (session) => {
+        this.questions.releaseSession(session.key);
         void this.terminateRuntime(session);
       },
       isBusy: (session) => session.activeTurn !== undefined,
@@ -313,7 +354,10 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       queue: new AsyncEventQueue<AgentRunnerEvent>(),
       completedByProtocol: false,
       state: createDeepSeekTurnState(),
-      sawRunning: false
+      sawRunning: false,
+      ...(this.config.clarifyingQuestionsEnabled !== false
+        ? { questionParser: new DeepSeekPromptQuestionStreamParser() }
+        : {})
     };
     let session: DeepSeekRunnerSession | undefined;
 
@@ -407,8 +451,10 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   async cancel(runId: string): Promise<void> {
     const active = this.activeTurns.get(runId);
     if (!active) return;
+    this.cancelPendingQuestion(active.session, active.turn, "Questions cancelled");
     active.turn.completedByProtocol = true;
     active.turn.finalEvent = { type: "run_failed", error: "DeepSeek Harness turn interrupted" };
+    this.questions.releaseSession(active.session.key);
     this.uncontinuableSessionIds.add(active.session.key);
     // Enter the ladder below `shutdown`: that rung disposes the runtime to
     // quiescence, which would let the work the operator just stopped run on.
@@ -416,6 +462,14 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     this.sessions.destroy(active.session);
     active.turn.queue.close();
     this.activeTurns.delete(runId);
+  }
+
+  answerQuestionRequest(input: {
+    sessionId: string;
+    requestId: string;
+    answers: CanonicalQuestionAnswer[];
+  }): QuestionAnswerResult {
+    return this.questions.answer(input.sessionId, input.requestId, input.answers);
   }
 
   // Deleting the AgentRoom session releases its runtime child and forgets the
@@ -429,6 +483,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
 
   async dispose(): Promise<void> {
     this.disposing = true;
+    this.questions.releaseAll();
     this.sessions.disposeAll();
     this.activeTurns.clear();
     this.uncontinuableSessionIds.clear();
@@ -498,6 +553,9 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       this.sessions.release(session);
       const active = session.activeTurn;
       if (!active || active.completedByProtocol) return;
+      this.cancelPendingQuestion(session, active, "Questions cancelled");
+      active.completedByProtocol = true;
+      this.questions.releaseSession(session.key);
       active.finalEvent = {
         type: "run_failed",
         error: appendStderrTail(
@@ -514,6 +572,9 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       this.sessions.release(session);
       const active = session.activeTurn;
       if (!active) return;
+      this.cancelPendingQuestion(session, active, "Questions cancelled");
+      active.completedByProtocol = true;
+      this.questions.releaseSession(session.key);
       active.finalEvent = { type: "run_failed", error: error.message };
       active.queue.close();
     });
@@ -576,7 +637,12 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       // `turn/end` this adapter recognized. A turn that never settles is a worse
       // failure than one settled a beat early.
       if (active.sawRunning && !active.completedByProtocol) {
-        this.settle(session, active, { type: "run_succeeded" });
+        this.completeProtocolCycle(
+          session,
+          active,
+          { type: "run_succeeded" },
+          active.state.turnNumber
+        );
       }
       return;
     }
@@ -592,11 +658,253 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       state: active.state,
       runner: this.runnerMetadata(session)
     });
-    for (const event of result.events) active.queue.push(event);
+    for (const event of result.events) this.pushMappedEvent(session, active, event);
 
     if (result.completion && !active.completedByProtocol) {
-      this.settle(session, active, result.completion.event);
+      this.completeProtocolCycle(
+        session,
+        active,
+        result.completion.event,
+        result.completion.turnNumber
+      );
     }
+  }
+
+  /**
+   * Apply one mapped DeepSeek event, intercepting only assistant prose when the
+   * descriptor-selected prompt contract is enabled. The parser returns ordinary
+   * prose unchanged and turns one valid structured block into a canonical batch.
+   */
+  private pushMappedEvent(
+    session: DeepSeekRunnerSession,
+    turn: DeepSeekActiveTurn,
+    event: AgentRunnerEvent
+  ): void {
+    if (event.type !== "agent_update" || !turn.questionParser) {
+      turn.queue.push(event);
+      return;
+    }
+    const parsed = turn.questionParser.push(event.message);
+    if (parsed.prose) turn.queue.push({ ...event, message: parsed.prose });
+    if (parsed.batch) this.openPromptQuestion(session, turn, parsed.batch);
+  }
+
+  /**
+   * Register the parsed batch before publishing its request id, exactly like
+   * the native adapters. The SDK turn is allowed to finish, but the AgentRoom
+   * turn remains open until this wait settles and a continuation prompt runs.
+   */
+  private openPromptQuestion(
+    session: DeepSeekRunnerSession,
+    turn: DeepSeekActiveTurn,
+    batch: DeepSeekPromptQuestionBatch
+  ): void {
+    if (turn.pendingQuestion || turn.completedByProtocol) return;
+    const requestId = `question-${randomUUID()}`;
+    const wait = this.questions.wait({ sessionKey: session.key, requestId, sets: batch.sets });
+    const pending: DeepSeekPendingQuestion = {
+      batch,
+      ...(wait ? { requestId } : {}),
+      protocolCompleted: false,
+      continuing: false,
+      ...(!wait ? { outcome: { status: "unavailable" } as const } : {})
+    };
+    turn.pendingQuestion = pending;
+    turn.queue.push({
+      type: "agent_activity",
+      activity: this.questionActivity(session, turn, {
+        kind: "deepseek_question_requested",
+        title: "Questions for you",
+        content: { questionCount: batch.sets.length },
+        canonical: {
+          kind: "question_requested",
+          ...(wait ? { requestId } : {}),
+          questionSets: batch.sets
+        }
+      })
+    });
+
+    if (!wait) {
+      turn.queue.push({
+        type: "agent_activity",
+        activity: this.questionActivity(session, turn, {
+          kind: "deepseek_question_resolved",
+          title: "Questions not presented",
+          content: { status: "cancelled" },
+          canonical: { kind: "question_resolved", status: "cancelled" }
+        })
+      });
+      return;
+    }
+
+    void wait.then((outcome) => {
+      if (turn.completedByProtocol || turn.pendingQuestion !== pending) return;
+      pending.outcome = outcome;
+      void this.continueAfterQuestion(session, turn, pending);
+    });
+  }
+
+  /** Flush held parser state before the underlying Harness turn settles. */
+  private completeProtocolCycle(
+    session: DeepSeekRunnerSession,
+    turn: DeepSeekActiveTurn,
+    event: AgentRunnerEvent,
+    protocolTurnNumber?: number
+  ): void {
+    // `running` → `idle` is the documented backstop for a missing turn end.
+    // If the runtime records that end late, it still belongs to the cycle the
+    // backstop already closed — never to a continuation prompt queued since.
+    if (
+      protocolTurnNumber !== undefined
+      && turn.lastCompletedProtocolTurnNumber === protocolTurnNumber
+    ) return;
+    if (protocolTurnNumber !== undefined) {
+      turn.lastCompletedProtocolTurnNumber = protocolTurnNumber;
+    }
+
+    const flushed = turn.questionParser?.flush();
+    if (flushed?.prose) {
+      turn.queue.push({ type: "agent_update", message: flushed.prose, runner: this.runnerMetadata(session) });
+    }
+    if (flushed?.batch) this.openPromptQuestion(session, turn, flushed.batch);
+
+    const pending = turn.pendingQuestion;
+    if (!pending || event.type === "run_failed") {
+      if (pending) this.cancelPendingQuestion(session, turn, "Questions cancelled");
+      this.settle(session, turn, event);
+      return;
+    }
+
+    // `turn/end` belongs to the first Harness protocol turn, not the AgentRoom
+    // turn. Hold the latter open until the answer route or timeout settles the
+    // batch, then enqueue the continuation below.
+    pending.protocolCompleted = true;
+    void this.continueAfterQuestion(session, turn, pending);
+  }
+
+  private async continueAfterQuestion(
+    session: DeepSeekRunnerSession,
+    turn: DeepSeekActiveTurn,
+    pending: DeepSeekPendingQuestion
+  ): Promise<void> {
+    if (
+      turn.completedByProtocol
+      || turn.pendingQuestion !== pending
+      || pending.continuing
+      || !pending.protocolCompleted
+      || !pending.outcome
+    ) return;
+
+    const outcome = pending.outcome;
+    if (outcome.status === "cancelled") {
+      // Cancellation and teardown set `completedByProtocol` before releasing
+      // the store. This branch is the conservative fallback for any future
+      // release path that does not.
+      this.settle(session, turn, { type: "run_failed", error: "DeepSeek Harness clarifying questions were cancelled" });
+      return;
+    }
+
+    pending.continuing = true;
+    if (pending.requestId) {
+      turn.queue.push({
+        type: "agent_activity",
+        activity: this.questionActivity(session, turn, {
+          kind: "deepseek_question_resolved",
+          title: outcome.status === "answered" ? "Questions answered" : "Questions timed out",
+          content: { status: outcome.status, ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}) },
+          canonical: {
+            kind: "question_resolved",
+            requestId: pending.requestId,
+            status: outcome.status,
+            ...(outcome.status === "answered"
+              ? {
+                  decidedBy: outcome.decidedBy,
+                  // A sensitive set's text reaches the next model prompt and
+                  // nowhere else: not this event, the transcript, or audit.
+                  questionAnswers: outcome.answers.map((answer) =>
+                    pending.batch.sets.find((set) => set.setId === answer.setId)?.sensitive
+                      ? { setId: answer.setId, selectedOptionIds: answer.selectedOptionIds }
+                      : answer
+                  )
+                }
+              : outcome.status === "timeout"
+                ? { decidedBy: outcome.decidedBy }
+                : {})
+          }
+        })
+      });
+    }
+
+    const followUp = deepseekQuestionFollowUp(pending.batch, outcome);
+    turn.pendingQuestion = undefined;
+    // Keep cumulative usage counters for the AgentRoom turn, while allowing the
+    // mapper to claim the next Harness turn number and publish its own metadata.
+    turn.state.turnNumber = undefined;
+    turn.sawRunning = false;
+    turn.questionParser = this.config.clarifyingQuestionsEnabled !== false
+      ? new DeepSeekPromptQuestionStreamParser()
+      : undefined;
+
+    try {
+      const contentBlocks = await deepseekContentBlocks(followUp, undefined);
+      const receipt = await withTimeout(
+        session.client.request("session/prompt", {
+          sessionId: session.sdkSessionId,
+          contentBlocks
+        }),
+        PROMPT_TIMEOUT_MS,
+        "Timed out queueing the DeepSeek Harness clarifying-question answer"
+      );
+      const parsedReceipt = sessionPromptResultSchema.safeParse(receipt);
+      if (!parsedReceipt.success) {
+        throw new Error("The DeepSeek Harness runtime returned an unrecognized prompt receipt for a clarifying-question answer");
+      }
+      logger.debug({
+        runId: turn.runId,
+        messageId: parsedReceipt.data.messageId
+      }, "DeepSeek Harness clarifying-question answer queued");
+    } catch (error) {
+      this.settle(session, turn, {
+        type: "run_failed",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private questionActivity(
+    session: DeepSeekRunnerSession,
+    turn: DeepSeekActiveTurn,
+    activity: Omit<AgentRunnerActivity, "runner">
+  ): AgentRunnerActivity {
+    return {
+      ...activity,
+      runner: {
+        ...this.runnerMetadata(session),
+        ...(turn.state.turnNumber === undefined ? {} : { nativeTurnId: String(turn.state.turnNumber) })
+      }
+    };
+  }
+
+  /** Close a client deck before any terminal path makes the wait unreachable. */
+  private cancelPendingQuestion(
+    session: DeepSeekRunnerSession,
+    turn: DeepSeekActiveTurn,
+    title: string
+  ): void {
+    const pending = turn.pendingQuestion;
+    if (!pending) return;
+    turn.pendingQuestion = undefined;
+    if (!pending.requestId) return;
+    this.questions.cancel(session.key, pending.requestId);
+    turn.queue.push({
+      type: "agent_activity",
+      activity: this.questionActivity(session, turn, {
+        kind: "deepseek_question_resolved",
+        title,
+        content: { status: "cancelled" },
+        canonical: { kind: "question_resolved", requestId: pending.requestId, status: "cancelled" }
+      })
+    });
   }
 
   /**

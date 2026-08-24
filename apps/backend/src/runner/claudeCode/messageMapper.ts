@@ -323,6 +323,8 @@ function claudeCodeToolTitle(name: string): string {
       return "Run subagent";
     case "TodoWrite":
       return "Update plan";
+    case "AskUserQuestion":
+      return "Ask the user";
     default:
       return "Call tool";
   }
@@ -330,6 +332,14 @@ function claudeCodeToolTitle(name: string): string {
 
 function claudeCodeToolDescription(name: string, input: Record<string, unknown>): string | undefined {
   if (name.startsWith("mcp__")) return compactDisplayText(name);
+  if (name === "AskUserQuestion") {
+    // The first question's text; the batch itself rides the canonical
+    // `question_requested` activity the runner raises from the SDK callback.
+    const questions = Array.isArray(input.questions) ? input.questions : [];
+    const first = questions[0] && typeof questions[0] === "object" ? (questions[0] as Record<string, unknown>) : undefined;
+    const text = stringValue(first?.question);
+    return text ? compactDisplayText(text) : undefined;
+  }
   const fieldsByTool: Record<string, string[]> = {
     Bash: ["command"],
     Edit: ["file_path"],

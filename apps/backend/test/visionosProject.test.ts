@@ -526,6 +526,21 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(workspaceChatColumn).toContain("CodingDiffView(diff: diff, startReview: { startDiffReview(diff) })");
     expect(composerPanel).not.toContain("CodingDiffView");
     expect(contextPanel).not.toContain("CodingDiffView");
+
+    // The clarifying-question deck is a trailing scene ornament owned by the
+    // chat column, beside the composer's bottom one; the record cards sit in
+    // the same column. Neither reaches the composer, the context panel, or
+    // the navigation-only window view.
+    expect(workspaceChatColumn).toContain("CodingQuestionDeckView(presentation: questionDeck)");
+    expect(workspaceChatColumn).toContain("attachmentAnchor: .scene(.trailing)");
+    expect(workspaceChatColumn).toContain("CodingQuestionRequestView(");
+    // Closing the deck hides it in this window only; the record card is the
+    // way back while the batch can still be answered.
+    expect(workspaceChatColumn).toContain("reopenQuestionDeck(request)");
+    expect(workspaceWindow).toContain("model.questionDrafts.isDismissed(requestId)");
+    expect(composerPanel).not.toContain("CodingQuestionDeckView");
+    expect(contextPanel).not.toContain("CodingQuestionDeckView");
+    expect(workspaceWindow).not.toContain("CodingQuestionDeckView(");
   });
 
   test("uses a native workspace window shell", async () => {

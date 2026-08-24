@@ -17,7 +17,13 @@ import type {
 import type { ArtifactSnapshot, ArtifactStore } from "../artifact/ArtifactStore";
 import type { EventBus } from "../events/EventBus";
 import { logger } from "../logging/logger";
-import { AgentRunnerInputError, type AgentRunner, type AgentRunnerInputPart } from "../runner/AgentRunner";
+import {
+  AgentRunnerInputError,
+  type AgentRunner,
+  type AgentRunnerInputPart,
+  type CanonicalQuestionAnswer
+} from "../runner/AgentRunner";
+import type { QuestionAnswerResult } from "../runner/shared/PendingQuestionRequests";
 import { runnerDescriptor } from "../runner/registry";
 import {
   codingDiffUpdatedEvent,
@@ -32,7 +38,7 @@ import {
   type LocalWorkspaceRegistry
 } from "../workspace/LocalWorkspaceRegistry";
 import { AgentSessionMessageStore } from "./AgentSessionMessageStore";
-import { AgentTurnEventApplier } from "./AgentTurnEventApplier";
+import { AgentTurnEventApplier, type OutstandingQuestionRequest } from "./AgentTurnEventApplier";
 import { AgentTurnGitDiffTracker } from "./AgentTurnGitDiffTracker";
 import { AgentTurnTelemetryStore } from "./AgentTurnTelemetryStore";
 
@@ -44,6 +50,22 @@ export class AgentSessionError extends Error {
     super(message);
   }
 }
+
+// The one message per way a batch answer can be refused. The agent decides
+// what it is willing to be told — a set or option it did not offer, a second
+// choice on a single-select set, free text where none was invited — and each
+// refusal names the rule rather than forwarding the answer.
+const questionAnswerRefusal: Record<Exclude<QuestionAnswerResult, "answered" | "unknown_request">, string> = {
+  empty_batch: "Question answer needs at least one answered set",
+  unknown_set: "Question set was not offered for this request",
+  duplicate_set: "Question set was answered more than once",
+  unknown_option: "Question option was not offered for this set",
+  duplicate_option: "Question option was selected more than once",
+  selection_limit: "Question set accepts a single selection",
+  discussion_not_offered: "Question set does not accept free text",
+  discussion_required: "Question set requires free text",
+  empty_answer: "Question set answer needs a selection or free text"
+};
 
 export interface CreateAgentSessionInput {
   workspaceId: string;
@@ -307,6 +329,40 @@ export class AgentSessionService {
     return session;
   }
 
+  /**
+   * Answer an outstanding clarifying-question batch with selections from the
+   * sets the runner is holding for it, plus the person's own free text where a
+   * set offered it. As with permissions, the runner decides whether the batch
+   * is still outstanding and whether every named set and option was offered;
+   * this maps those answers onto status codes, and a runner with no way to ask
+   * has no outstanding batch, which is the same 404.
+   */
+  answerQuestionRequest(input: {
+    sessionId: string;
+    requestId: string;
+    answers: CanonicalQuestionAnswer[];
+  }): AgentSession {
+    const session = this.requireSession(input.sessionId);
+    const answer = this.requireRunner(session.runnerKind).answerQuestionRequest?.({
+      sessionId: session.id,
+      requestId: input.requestId,
+      answers: input.answers
+    }) ?? "unknown_request";
+    if (answer === "unknown_request") {
+      throw new AgentSessionError("Question request is not outstanding for this session", 404);
+    }
+    if (answer !== "answered") {
+      throw new AgentSessionError(questionAnswerRefusal[answer], 400);
+    }
+    return session;
+  }
+
+  /** The clarifying-question batches a session still holds open, for a late joiner. */
+  listOutstandingQuestions(sessionId: string): OutstandingQuestionRequest[] | undefined {
+    if (!this.sessions.has(sessionId)) return undefined;
+    return this.runnerEvents.outstandingQuestionRequests(sessionId);
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     const session = this.requireSession(sessionId);
     const activeTurnId = session.activeTurnId;
@@ -325,6 +381,7 @@ export class AgentSessionService {
     this.deps.artifacts?.releaseSession(sessionId);
     this.sessions.delete(sessionId);
     this.messages.deleteSession(sessionId);
+    this.runnerEvents.releaseSession(sessionId);
     for (const [turnId, turn] of this.turns) {
       if (turn.sessionId === sessionId) {
         this.turns.delete(turnId);
@@ -488,6 +545,7 @@ export class AgentSessionService {
     turn: AgentSessionTurn,
     event: { message?: string; inputTokens?: number; outputTokens?: number; totalTokens?: number }
   ): void {
+    this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
     const finalMessage = event.message && !turn.lastMessage ? event.message : undefined;
     if (finalMessage) {
       const content = `${turn.lastMessage ?? ""}${finalMessage}`;
@@ -559,6 +617,7 @@ export class AgentSessionService {
       return;
     }
 
+    this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
     const now = new Date().toISOString();
     turn.status = "failed";
     turn.error = error;
@@ -585,6 +644,8 @@ export class AgentSessionService {
     turn: AgentSessionTurn,
     options: { publishEvents?: boolean } = {}
   ): void {
+    this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
+    this.runnerEvents.releaseTurn(turn.id);
     const now = new Date().toISOString();
     turn.status = "cancelled";
     turn.completedAt = turn.completedAt ?? now;

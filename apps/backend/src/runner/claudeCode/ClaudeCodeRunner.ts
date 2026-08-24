@@ -1,11 +1,14 @@
+import { randomUUID } from "node:crypto";
 import type { CodingAgentCapabilities, ServiceConfig } from "../../domain/models";
 import { logger } from "../../logging/logger";
 import {
   AgentRunnerInputError,
   type AgentRunner,
+  type AgentRunnerActivity,
   type AgentRunnerEvent,
   type AgentRunnerInput,
-  type AgentRunnerInputPart
+  type AgentRunnerInputPart,
+  type CanonicalQuestionAnswer
 } from "../AgentRunner";
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { delay, withTimeout } from "../shared/asyncUtils";
@@ -16,7 +19,12 @@ import {
   mapClaudeCodeMessage,
   type ClaudeCodeToolUseDisplay
 } from "./messageMapper";
-import { loadClaudeCodeQuery, type ClaudeCodeQuery, type ClaudeCodeQueryLoader } from "./sdk";
+import {
+  loadClaudeCodeQuery,
+  type ClaudeCodeCanUseTool,
+  type ClaudeCodeQuery,
+  type ClaudeCodeQueryLoader
+} from "./sdk";
 import {
   claudeCodeCommandAudit,
   claudeCodeQueryOptions,
@@ -30,7 +38,18 @@ import {
   runnerStreamTimingAudit
 } from "../shared/streamTiming";
 import { PersistentRunnerSessionHost } from "../shared/PersistentRunnerSessionHost";
+import {
+  PendingQuestionRequests,
+  type QuestionAnswerResult,
+  type QuestionWaitOutcome
+} from "../shared/PendingQuestionRequests";
 import { runnerDescriptor } from "../registry";
+import {
+  ASK_USER_QUESTION_TOOL,
+  HEADLESS_PERMISSION_DENY_MESSAGE,
+  askUserQuestionBatch,
+  askUserQuestionUpdatedInput
+} from "./askUserQuestion";
 
 interface ClaudeCodeActiveTurn {
   runId: string;
@@ -71,13 +90,21 @@ export class ClaudeCodeRunner implements AgentRunner {
   // instead of silently starting a fresh thread with no memory.
   private readonly sessions: PersistentRunnerSessionHost<ClaudeCodeRunnerSession>;
   private readonly loadQuery: ClaudeCodeQueryLoader;
+  // Clarifying-question batches held open for a human answer, keyed by the
+  // AgentRoom session. The CLI's `AskUserQuestion` tool reaches `decideToolUse`
+  // through the SDK `canUseTool` callback and waits here; the answer route
+  // settles it. Released with the turn, the child, and the session.
+  private readonly questions: PendingQuestionRequests;
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
 
   constructor(
     private readonly config: ServiceConfig,
-    deps: { loadQuery?: ClaudeCodeQueryLoader; idleSessionTimeoutMs?: number } = {}
+    deps: { loadQuery?: ClaudeCodeQueryLoader; idleSessionTimeoutMs?: number; questionTimeoutMs?: number } = {}
   ) {
     this.loadQuery = deps.loadQuery ?? loadClaudeCodeQuery;
+    this.questions = new PendingQuestionRequests(
+      deps.questionTimeoutMs !== undefined ? { timeoutMs: deps.questionTimeoutMs } : {}
+    );
     this.sessions = new PersistentRunnerSessionHost({
       runnerKind: "claude_code",
       // The registry owns this: the host arms an idle timer only for a runner it
@@ -85,6 +112,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       restoreStrategy: runnerDescriptor("claude_code").restoreStrategy,
       idleSessionTimeoutMs: deps.idleSessionTimeoutMs ?? IDLE_SESSION_TIMEOUT_MS,
       teardown: (session) => {
+        this.questions.releaseSession(session.key);
         session.input.close();
         void Promise.resolve(session.query.return?.(undefined)).catch(() => undefined);
       },
@@ -238,6 +266,9 @@ export class ClaudeCodeRunner implements AgentRunner {
         if (session.activeTurn === activeTurn) {
           session.activeTurn = undefined;
         }
+        // A question belongs to the turn that asked it; nothing may stay open
+        // for a person once the turn has settled.
+        this.questions.releaseSession(session.key);
       }
     }
 
@@ -286,10 +317,17 @@ export class ClaudeCodeRunner implements AgentRunner {
     if (active.session.activeTurn === active.turn) {
       active.session.activeTurn = undefined;
     }
+    // The interrupt aborts the callback's signal, which cancels the wait; this
+    // covers an SDK that never aborted it.
+    this.questions.releaseSession(active.session.key);
     if (!interrupted) {
       this.sessions.destroy(active.session);
     }
     this.activeTurns.delete(runId);
+  }
+
+  answerQuestionRequest(input: { sessionId: string; requestId: string; answers: CanonicalQuestionAnswer[] }): QuestionAnswerResult {
+    return this.questions.answer(input.sessionId, input.requestId, input.answers);
   }
 
   // Evict the persistent SDK session (and its spawned claude child process)
@@ -302,6 +340,7 @@ export class ClaudeCodeRunner implements AgentRunner {
   }
 
   async dispose(): Promise<void> {
+    this.questions.releaseAll();
     this.sessions.disposeAll();
     this.activeTurns.clear();
   }
@@ -322,13 +361,23 @@ export class ClaudeCodeRunner implements AgentRunner {
     // the options — including the settings-isolation posture — are rebuilt
     // exactly as for a fresh session.
     const resumeSessionId = this.sessions.resumableId(key);
+    // The callback closes over the session record assigned just below, before
+    // the first prompt is pushed, so it can never run with it unset. It is
+    // supplied only while the clarifying-question channel is enabled: without
+    // it the SDK passes no permission-prompt tool and the CLI behaves exactly
+    // as it did before the channel existed.
+    let session: ClaudeCodeRunnerSession | undefined;
+    const canUseTool: ClaudeCodeCanUseTool | undefined = this.config.clarifyingQuestionsEnabled !== false
+      ? (toolName, toolInput, options) => this.decideToolUse(key, () => session, toolName, toolInput, options)
+      : undefined;
     const query = queryFunction({
       prompt: sessionInput,
       options: claudeCodeQueryOptions(this.config, input.workspacePath, settings, {
-        ...(resumeSessionId ? { resume: resumeSessionId } : {})
+        ...(resumeSessionId ? { resume: resumeSessionId } : {}),
+        ...(canUseTool ? { canUseTool } : {})
       })
     });
-    const session: ClaudeCodeRunnerSession = {
+    session = {
       key,
       query,
       input: sessionInput,
@@ -340,6 +389,92 @@ export class ClaudeCodeRunner implements AgentRunner {
     this.sessions.register(session);
     void this.consumeSession(session);
     return session;
+  }
+
+  /**
+   * The SDK `canUseTool` callback for one AgentRoom session.
+   *
+   * `AskUserQuestion` is the one tool it holds open: the questions become a
+   * canonical batch announced on the turn's event stream, the wait sits in the
+   * shared store until the answer route settles it (or the clock, or the
+   * turn's own interrupt through `signal`), and the answers go back as the
+   * tool's `updatedInput`. Every other tool is refused with the CLI's own
+   * headless wording — under `bypassPermissions` none reaches here, and under a
+   * stricter mode they were refused headless before this callback existed —
+   * so supplying it changes nothing about what an agent may do.
+   */
+  private async decideToolUse(
+    sessionKey: string,
+    getSession: () => ClaudeCodeRunnerSession | undefined,
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    options: { signal?: AbortSignal; toolUseID?: string }
+  ): ReturnType<ClaudeCodeCanUseTool> {
+    if (toolName !== ASK_USER_QUESTION_TOOL) {
+      return { behavior: "deny", message: HEADLESS_PERMISSION_DENY_MESSAGE };
+    }
+    const batch = askUserQuestionBatch(toolInput);
+    if ("error" in batch) return { behavior: "deny", message: batch.error };
+
+    const session = getSession();
+    const turn = session?.activeTurn;
+    const requestId = `question-${randomUUID()}`;
+    const wait = turn && !turn.finalEvent
+      ? this.questions.wait({ sessionKey, requestId, sets: batch.sets })
+      : undefined;
+    const runner = {
+      ...(session?.sdkSessionId ? { nativeSessionId: session.sdkSessionId } : {}),
+      ...(options.toolUseID ? { nativeItemId: options.toolUseID } : {})
+    };
+    const pushActivity = (activity: AgentRunnerActivity): void => {
+      const target = getSession()?.activeTurn;
+      if (target && !target.finalEvent) target.queue.push({ type: "agent_activity", activity });
+    };
+    pushActivity({
+      kind: "claude_code_question_requested",
+      title: "Questions for you",
+      content: { questionCount: batch.sets.length, ...(options.toolUseID ? { toolUseId: options.toolUseID } : {}) },
+      canonical: { kind: "question_requested", ...(wait ? { requestId } : {}), questionSets: batch.sets },
+      runner
+    });
+    if (!wait) {
+      pushActivity({
+        kind: "claude_code_question_resolved",
+        title: "Questions not presented",
+        content: { status: "cancelled" },
+        canonical: { kind: "question_resolved", status: "cancelled" },
+        runner
+      });
+      return { behavior: "allow", updatedInput: askUserQuestionUpdatedInput(toolInput, batch, { status: "unavailable" }) };
+    }
+
+    const abort = (): void => {
+      this.questions.cancel(sessionKey, requestId);
+    };
+    options.signal?.addEventListener("abort", abort, { once: true });
+    let outcome: QuestionWaitOutcome;
+    try {
+      outcome = await wait;
+    } finally {
+      options.signal?.removeEventListener("abort", abort);
+    }
+    pushActivity({
+      kind: "claude_code_question_resolved",
+      title: outcome.status === "answered" ? "Questions answered" : outcome.status === "timeout" ? "Questions timed out" : "Questions cancelled",
+      content: { status: outcome.status, ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}) },
+      canonical: {
+        kind: "question_resolved",
+        requestId,
+        status: outcome.status,
+        ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}),
+        ...(outcome.status === "answered" ? { questionAnswers: outcome.answers } : {})
+      },
+      runner
+    });
+    if (outcome.status === "cancelled") {
+      return { behavior: "deny", message: "Turn cancelled" };
+    }
+    return { behavior: "allow", updatedInput: askUserQuestionUpdatedInput(toolInput, batch, outcome) };
   }
 
   private async consumeSession(session: ClaudeCodeRunnerSession): Promise<void> {
@@ -404,6 +539,7 @@ export class ClaudeCodeRunner implements AgentRunner {
   private endSession(session: ClaudeCodeRunnerSession, error: string): void {
     // The SDK stream has already ended, so the entry and its idle timer are all
     // that need clearing — there is nothing left to tear down.
+    this.questions.releaseSession(session.key);
     this.sessions.release(session);
     const openTurns = new Set(session.turnsAwaitingResult);
     if (session.activeTurn) openTurns.add(session.activeTurn);

@@ -10,6 +10,11 @@ import {
   MAX_PERMISSION_OPTION_ID_LENGTH,
   MAX_PERMISSION_OPTIONS
 } from "../src/runner/shared/PendingPermissionRequests";
+import {
+  MAX_QUESTION_DISCUSSION_LENGTH,
+  MAX_QUESTION_HEADER_LENGTH,
+  MAX_QUESTION_SETS
+} from "../src/runner/shared/PendingQuestionRequests";
 
 /// Phase 2 of the universal runner boundary: the core mapper dispatches on the
 /// adapter-produced canonical payload and never on which runner produced it.
@@ -152,6 +157,95 @@ describe("canonical coding-event mapping", () => {
       expect((bounded.canonical as { requestId?: string }).requestId).toBeUndefined();
       expect((bounded.canonical as { options?: unknown[] }).options).toBeUndefined();
     }
+  });
+
+  it("maps a third runner's clarifying-question batch with exact ids and clamped text", () => {
+    const requested = eventFor({
+      kind: "question_requested",
+      requestId: "question-1",
+      questionSets: [
+        {
+          setId: "set-1",
+          header: "H".repeat(MAX_QUESTION_HEADER_LENGTH + 10),
+          prompt: "Which way?",
+          selection: "single",
+          options: [
+            { optionId: "opt-1", label: "Left", description: "d".repeat(600) },
+            { optionId: "opt-2", label: "Right" }
+          ],
+          discussion: "optional"
+        },
+        { setId: "set-2", prompt: "Say more", selection: "single", options: [], discussion: "required", sensitive: true }
+      ]
+    });
+    expect(requested?.type).toBe("coding_question_requested");
+    expect(requested?.payload).toMatchObject({
+      runnerKind: THIRD_RUNNER,
+      requestId: "question-1",
+      questionSets: [
+        {
+          setId: "set-1",
+          header: "H".repeat(MAX_QUESTION_HEADER_LENGTH),
+          options: [{ optionId: "opt-1", label: "Left", description: "d".repeat(500) }, { optionId: "opt-2", label: "Right" }]
+        },
+        { setId: "set-2", options: [], discussion: "required", sensitive: true }
+      ]
+    });
+
+    // Announced without an id: a record a client renders but cannot answer.
+    const unanswerable = eventFor({
+      kind: "question_requested",
+      questionSets: [{ setId: "set-1", prompt: "?", selection: "single", options: [{ optionId: "o", label: "x" }], discussion: "none" }]
+    });
+    expect(unanswerable?.payload.requestId).toBeUndefined();
+    expect((unanswerable?.payload as { questionSets: unknown[] }).questionSets).toHaveLength(1);
+
+    const resolved = eventFor({
+      kind: "question_resolved",
+      requestId: "question-1",
+      status: "answered",
+      decidedBy: "human",
+      questionAnswers: [{ setId: "set-1", selectedOptionIds: ["opt-2"], discussion: "x".repeat(MAX_QUESTION_DISCUSSION_LENGTH + 5) }]
+    });
+    expect(resolved?.type).toBe("coding_question_resolved");
+    expect(resolved?.payload).toMatchObject({
+      requestId: "question-1",
+      status: "answered",
+      decidedBy: "human",
+      questionAnswers: [{ setId: "set-1", selectedOptionIds: ["opt-2"], discussion: "x".repeat(MAX_QUESTION_DISCUSSION_LENGTH) }]
+    });
+  });
+
+  it("drops a clarifying-question batch outside its bounds rather than truncating the vocabulary", () => {
+    const tooMany = eventFor({
+      kind: "question_requested",
+      requestId: "question-many",
+      questionSets: Array.from({ length: MAX_QUESTION_SETS + 1 }, (_, index) => ({
+        setId: `set-${index}`,
+        prompt: "?",
+        selection: "single" as const,
+        options: [{ optionId: "o", label: "x" }],
+        discussion: "none" as const
+      }))
+    });
+    expect(tooMany).toBeUndefined();
+
+    const unanswerableSet = eventFor({
+      kind: "question_requested",
+      requestId: "question-empty",
+      questionSets: [{ setId: "set-1", prompt: "?", selection: "single", options: [], discussion: "optional" }]
+    });
+    expect(unanswerableSet).toBeUndefined();
+
+    const duplicateIds = eventFor({
+      kind: "question_requested",
+      requestId: "question-dup",
+      questionSets: [
+        { setId: "same", prompt: "?", selection: "single", options: [{ optionId: "o", label: "x" }], discussion: "none" },
+        { setId: "same", prompt: "?", selection: "single", options: [{ optionId: "o", label: "x" }], discussion: "none" }
+      ]
+    });
+    expect(duplicateIds).toBeUndefined();
   });
 
   it("records a third runner's session block without knowing its activity kinds", () => {

@@ -10,6 +10,7 @@ import { EventBus } from "../src/events/EventBus";
 import { buildServer } from "../src/server";
 import type { AgentSession, ServiceConfig } from "../src/domain/models";
 import type { AgentRunner } from "../src/runner/AgentRunner";
+import { PendingQuestionRequests } from "../src/runner/shared/PendingQuestionRequests";
 import { LocalWorkspaceRegistry } from "../src/workspace/LocalWorkspaceRegistry";
 import { WorkspaceExplorer } from "../src/workspace/WorkspaceExplorer";
 
@@ -968,6 +969,223 @@ describe("agent sessions", () => {
 
     await app.close();
   });
+
+  it("lets a client answer a clarifying-question batch, records the answer in the thread, and audits the decision", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-question-workspace-"));
+    const runner = questionAskingRunner();
+    const { app, eventBus, agentSessions } = await buildServer({ config: serviceConfig, runners: { codex: runner } });
+    const registered = await app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: { workspaceId: registered.json().workspace.id, runnerKind: "codex" }
+    });
+    const sessionId = session.json().session.id as string;
+    let snapshotDuringRequest: ReturnType<AgentSessionService["listOutstandingQuestions"]> = undefined;
+    const unsubscribe = eventBus.subscribe((event) => {
+      if (event.type === "coding_question_requested") {
+        snapshotDuringRequest = agentSessions.listOutstandingQuestions(sessionId);
+      }
+    });
+    await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/turns`,
+      payload: { message: "build the thing" }
+    });
+
+    const requested = await waitForEvent(eventBus, "coding_question_requested");
+    // The client is given what it needs to render the deck: the id an answer
+    // addresses and every set with its minted option ids.
+    expect(requested.payload).toMatchObject({
+      requestId: QUESTION_REQUEST_ID,
+      questionSets: [
+        { setId: "set-1", header: "Platform", selection: "single", discussion: "optional" },
+        { setId: "set-2", header: "Features", selection: "multiple", discussion: "none" }
+      ]
+    });
+    expect(snapshotDuringRequest).toEqual([
+      expect.objectContaining({ requestId: QUESTION_REQUEST_ID, questionSets: requested.payload.questionSets })
+    ]);
+    unsubscribe();
+
+    // A late joiner can re-seed the same batch from the read route.
+    const outstanding = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/questions` });
+    expect(outstanding.statusCode).toBe(200);
+    expect(outstanding.json().questions).toEqual([
+      expect.objectContaining({ requestId: QUESTION_REQUEST_ID, questionSets: requested.payload.questionSets })
+    ]);
+
+    const unknownOption = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/questions/${QUESTION_REQUEST_ID}`,
+      payload: { answers: [{ setId: "set-1", selectedOptionIds: ["opt-9"] }] }
+    });
+    expect(unknownOption.statusCode).toBe(400);
+    expect(unknownOption.json().error).toBe("Question option was not offered for this set");
+
+    const freeTextRefused = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/questions/${QUESTION_REQUEST_ID}`,
+      payload: { answers: [{ setId: "set-2", selectedOptionIds: ["opt-1"], discussion: "but also" }] }
+    });
+    expect(freeTextRefused.statusCode).toBe(400);
+
+    const unknownRequest = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/questions/question-not-mine`,
+      payload: { answers: [{ setId: "set-1", selectedOptionIds: ["opt-1"] }] }
+    });
+    expect(unknownRequest.statusCode).toBe(404);
+
+    const emptyAnswer = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/questions/${QUESTION_REQUEST_ID}`,
+      payload: { answers: [] }
+    });
+    expect(emptyAnswer.statusCode).toBe(400);
+
+    const answered = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/questions/${QUESTION_REQUEST_ID}`,
+      payload: {
+        answers: [
+          { setId: "set-1", selectedOptionIds: ["opt-2"], discussion: "phones first, please" },
+          { setId: "set-2", selectedOptionIds: ["opt-1", "opt-3"] }
+        ]
+      }
+    });
+    expect(answered.statusCode).toBe(200);
+    expect(answered.json().session.id).toBe(sessionId);
+    await waitForSession(app, sessionId, "idle");
+
+    const resolved = await waitForEvent(eventBus, "coding_question_resolved");
+    expect(resolved.payload).toMatchObject({
+      requestId: QUESTION_REQUEST_ID,
+      status: "answered",
+      decidedBy: "human",
+      questionAnswers: [
+        { setId: "set-1", selectedOptionIds: ["opt-2"], discussion: "phones first, please" },
+        { setId: "set-2", selectedOptionIds: ["opt-1", "opt-3"] }
+      ]
+    });
+
+    // The answer is in the thread as the user message it is.
+    const messages = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/messages` });
+    const answerMessage = messages.json().messages.find(
+      (message: { context?: { questionRequestId?: string } }) => message.context?.questionRequestId === QUESTION_REQUEST_ID
+    );
+    expect(answerMessage).toMatchObject({ role: "user", status: "sent" });
+    expect(answerMessage.content).toContain("Platform: Which platform first?");
+    expect(answerMessage.content).toContain("→ Mobile");
+    expect(answerMessage.content).toContain("phones first, please");
+    expect(answerMessage.content).toContain("→ Reminders, Sharing");
+
+    // Durable audit keeps the decision — sets and option ids, on whose
+    // authority — and never the person's free text.
+    const audit = await app.inject({ method: "GET", url: "/api/audit" });
+    const entry = audit.json().events.find((event: { type: string }) => event.type === "agent_question_resolved");
+    expect(entry).toMatchObject({
+      sessionId,
+      audit: {
+        requestId: QUESTION_REQUEST_ID,
+        status: "answered",
+        decidedBy: "human",
+        answers: [
+          { setId: "set-1", selectedOptionIds: ["opt-2"] },
+          { setId: "set-2", selectedOptionIds: ["opt-1", "opt-3"] }
+        ]
+      }
+    });
+    expect(JSON.stringify(entry)).not.toContain("phones first");
+
+    // Settled, so the read route shows nothing outstanding.
+    const drained = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/questions` });
+    expect(drained.json().questions).toEqual([]);
+
+    await app.close();
+  });
+
+  it("cancels a question left open by a terminal runner path before publishing the terminal event", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-question-terminal-"));
+    const { app, eventBus } = await buildServer({
+      config: serviceConfig,
+      runners: { codex: abandonedQuestionRunner() }
+    });
+    const registered = await app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: { workspaceId: registered.json().workspace.id, runnerKind: "codex" }
+    });
+    const sessionId = session.json().session.id as string;
+    await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/turns`,
+      payload: { message: "ask, then fail" }
+    });
+    await waitForSession(app, sessionId, "failed");
+
+    const questions = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/questions` });
+    expect(questions.json().questions).toEqual([]);
+    const relevant = eventBus.getRecentEvents().filter((event) =>
+      event.type === "coding_question_requested"
+      || event.type === "coding_question_resolved"
+      || event.type === "coding_turn_failed"
+    );
+    expect(relevant.map((event) => event.type)).toEqual([
+      "coding_question_requested",
+      "coding_question_resolved",
+      "coding_turn_failed"
+    ]);
+    expect(relevant[1]?.payload).toMatchObject({ requestId: QUESTION_REQUEST_ID, status: "cancelled" });
+
+    await app.close();
+  });
+
+  it("gates the question answer and the outstanding read behind the bearer token when one is configured", async () => {
+    const serviceConfig = await config({ requireAuth: true, authToken: "secret-token" });
+    const { app } = await buildServer({ config: serviceConfig, runners: { codex: questionAskingRunner() } });
+
+    const answer = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions/agent-session-missing/questions/question-1",
+      payload: { answers: [] }
+    });
+    expect(answer.statusCode).toBe(401);
+    // The outstanding read returns model-authored text, so it is gated like
+    // the transcript read rather than left open like the status snapshot.
+    const read = await app.inject({ method: "GET", url: "/api/agent-sessions/agent-session-missing/questions" });
+    expect(read.statusCode).toBe(401);
+
+    await app.close();
+  });
+
+  it("reports no outstanding question batch for a runner with no way to ask", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-question-none-"));
+    const { app } = await buildServer({ config: serviceConfig, runners: { codex: fileWritingRunner("codex", async () => {}) } });
+    const registered = await app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: { workspaceId: registered.json().workspace.id, runnerKind: "codex" }
+    });
+    const sessionId = session.json().session.id as string;
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/questions/question-1`,
+      payload: { answers: [{ setId: "set-1", selectedOptionIds: ["opt-1"] }] }
+    });
+    expect(response.statusCode).toBe(404);
+    const outstanding = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/questions` });
+    expect(outstanding.json().questions).toEqual([]);
+    expect((await app.inject({ method: "GET", url: "/api/agent-sessions/nope/questions" })).statusCode).toBe(404);
+
+    await app.close();
+  });
 });
 
 async function waitForSession(app: { inject: (input: { method: string; url: string }) => Promise<{ json: () => any }> }, id: string, status: string): Promise<any> {
@@ -1175,6 +1393,106 @@ function permissionAskingRunner(): AgentRunner {
       answer(input.optionId);
       return "answered";
     }
+  };
+}
+
+const QUESTION_REQUEST_ID = "question-test-1";
+const QUESTION_SETS = [
+  {
+    setId: "set-1",
+    header: "Platform",
+    prompt: "Which platform first?",
+    selection: "single" as const,
+    options: [
+      { optionId: "opt-1", label: "Web" },
+      { optionId: "opt-2", label: "Mobile", description: "iOS and Android" }
+    ],
+    discussion: "optional" as const
+  },
+  {
+    setId: "set-2",
+    header: "Features",
+    prompt: "Which features matter?",
+    selection: "multiple" as const,
+    options: [
+      { optionId: "opt-1", label: "Reminders" },
+      { optionId: "opt-2", label: "Tags" },
+      { optionId: "opt-3", label: "Sharing" }
+    ],
+    discussion: "none" as const
+  }
+];
+
+/**
+ * A runner that pauses mid-turn to ask a clarifying-question batch and waits
+ * for the answer, the way the Claude Code adapter does through the SDK
+ * callback — without a child process. Validation is the shared store's rule,
+ * reused so the route's refusals are the real ones.
+ */
+function questionAskingRunner(): AgentRunner {
+  const pending = new PendingQuestionRequests({ timeoutMs: 5_000 });
+  return {
+    async getCapabilities() {
+      return { runnerKind: "codex", settings: { models: [], defaultSettings: {} } };
+    },
+    validateInputParts() {},
+    async *run(input) {
+      const sessionKey = input.sessionId ?? input.runId;
+      const wait = pending.wait({ sessionKey, requestId: QUESTION_REQUEST_ID, sets: QUESTION_SETS })!;
+      yield {
+        type: "agent_activity",
+        activity: {
+          kind: "test_question_requested",
+          title: "Questions for you",
+          content: {},
+          canonical: { kind: "question_requested", requestId: QUESTION_REQUEST_ID, questionSets: QUESTION_SETS }
+        }
+      };
+      const outcome = await wait;
+      yield {
+        type: "agent_activity",
+        activity: {
+          kind: "test_question_resolved",
+          title: "Questions answered",
+          content: {},
+          canonical: {
+            kind: "question_resolved",
+            requestId: QUESTION_REQUEST_ID,
+            status: outcome.status,
+            ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}),
+            ...(outcome.status === "answered" ? { questionAnswers: outcome.answers } : {})
+          }
+        }
+      };
+      yield { type: "run_succeeded", message: "done" };
+    },
+    async cancel() {},
+    answerQuestionRequest(input) {
+      return pending.answer(input.sessionId, input.requestId, input.answers);
+    }
+  };
+}
+
+/** A child-loss shape: the request was published, but no resolution survived. */
+function abandonedQuestionRunner(): AgentRunner {
+  return {
+    async getCapabilities() {
+      return { runnerKind: "codex", settings: { models: [], defaultSettings: {} } };
+    },
+    validateInputParts() {},
+    async *run() {
+      yield {
+        type: "agent_activity",
+        activity: {
+          kind: "test_question_requested",
+          title: "Questions for you",
+          content: {},
+          canonical: { kind: "question_requested", requestId: QUESTION_REQUEST_ID, questionSets: QUESTION_SETS }
+        }
+      };
+      yield { type: "run_failed", error: "child exited" };
+    },
+    async cancel() {}
   };
 }
 

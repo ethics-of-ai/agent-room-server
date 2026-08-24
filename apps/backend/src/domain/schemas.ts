@@ -117,6 +117,7 @@ export const serviceConfigSchema = z.object({
   deepseekMaxTokens: z.number().int().positive().optional(),
   deepseekPermissionMode: deepseekPermissionModeSchema.optional(),
   artifactsEnabled: z.boolean().default(true),
+  clarifyingQuestionsEnabled: z.boolean().default(true),
   languageCatalogEnabled: z.boolean().default(true),
   terminalEnabled: z.boolean().default(false),
   terminalMaxSessions: z.number().int().min(1).max(64).default(8),
@@ -334,7 +335,10 @@ export const agentSessionMessageContextAttachmentSchema = z.object({
 
 export const agentSessionMessageContextSchema = z.object({
   paths: z.array(z.string().min(1)).max(8).optional(),
-  attachments: z.array(agentSessionMessageContextAttachmentSchema).max(8).optional()
+  attachments: z.array(agentSessionMessageContextAttachmentSchema).max(8).optional(),
+  // Set on the user message the backend records when a person answers a
+  // clarifying-question batch, so a client can style it as that answer.
+  questionRequestId: z.string().min(1).max(200).optional()
 });
 
 export const agentSessionStatusSchema = z.enum(["idle", "running", "failed", "cancelled"]);

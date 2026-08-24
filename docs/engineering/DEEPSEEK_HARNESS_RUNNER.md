@@ -10,7 +10,9 @@ one, **and it has since been run against a real runtime** — see *Setting up a
 runtime* for both install paths, the composition, and the three operational
 findings that only a real runtime produced. Fact 1 remains closed
 conservatively as `unsupported`; facts 2 and 3 under *Three facts to confirm*
-were not settled by that run and still need deliberate observation.
+were not settled by that run and still need deliberate observation. A
+2026-08-23 extension adds clarifying questions through a bounded prompt contract
+without claiming that the SDK acquired a server-to-client request channel.
 
 > **Step 10 — the launch contract, corrected against the upstream repository**
 > (2026-08-18, `master` at `0.1.0-rc.7`). Steps 1–9 were written from the SDK
@@ -108,11 +110,14 @@ Two properties of the SDK wire shape this adapter, and neither is worked around:
   `idle` with no `activeTurnId`, but later turns on that AgentRoom session are
   refused with an instruction to create a new session. This avoids silently
   starting a fresh conversation under the old id.
-- **No server→client requests** (documented as a dead capability). So the adapter
-  implements no `answerPermissionRequest` hook, and
-  `POST /api/agent-sessions/:id/permissions/:requestId` correctly `404`s for it —
-  exactly as it does for Codex and Claude Code, reading the absence of an approval
-  channel rather than which runner this is.
+- **No server→client requests** (documented as a dead capability). The adapter
+  therefore implements no `answerPermissionRequest` hook, and
+  `POST /api/agent-sessions/:id/permissions/:requestId` correctly `404`s for it,
+  reading the absence of an approval channel rather than which runner this is.
+  Clarifying questions do not pretend otherwise: the descriptor teaches the
+  model one bounded assistant-text block, the adapter maps a valid block into
+  the existing question channel, and the answer becomes another
+  `session/prompt` on the same live Harness session.
 
 ## Three facts to confirm against a real `dsh` before the adapter is finished
 
@@ -147,8 +152,9 @@ the operator's trust decision, which is why the composition is tier 3.
 - **No new legacy metadata block.** `codex`/`claudeCode` are shims scheduled for
   deletion when `codingEventContractVersion` passes 2; a third would recreate the
   thing they retire. Clients read `runner` and `activity.canonical`.
-- **No new execution surface**, no route, no event type, no widening of any
-  documented bound.
+- **No new execution or permission surface.** The later clarification extension
+  reuses the existing bearer-gated question route, canonical event pair, and
+  shared bounds; it adds no runner-specific route or authorization.
 - **No generic buddy fallback.** An unknown runner still renders without a buddy
   rather than borrowing another runner's identity. The dedicated DeepSeek whale
   landed later as a separately grounded asset-pipeline change; it does not give
@@ -253,13 +259,18 @@ deepseek: {
   // The SDK wire has no diff notification, so AgentTurnGitDiffTracker derives
   // the turn's diff at settlement, as it does for Claude Code.
   turnDiffSource: "settle_time_git",
+  clarifyingQuestions: {
+    mode: "prompt_contract",
+    instruction: DEEPSEEK_QUESTION_PROMPT_INSTRUCTION
+  },
   workspaceSkills: { mode: "none" },        // → "native" once fact 3 is confirmed
   skillSourceDirs: [],                      // → the discovered dirs
   skillInvocationPrefix: "/",                // → whatever dsh actually uses
   settingsKeyPrefix: "deepseek",
   settings: [ /* Step 5 */ ],
   restoreStrategy: "unsupported",            // no protocol-proven resume path
-  isConfigured: (config) => Boolean(config.deepseekExecutable)
+  isConfigured: (config) =>
+    Boolean(config.deepseekExecutable && config.deepseekCordisConfig)
 }
 ```
 
@@ -269,7 +280,8 @@ column in the same commit.
 
 ## Step 4 — The adapter — **done**
 
-> **Done** (2026-08-18). Five files under `apps/backend/src/runner/deepseek`, on
+> **Done** (2026-08-18). Five initial files under
+> `apps/backend/src/runner/deepseek`, on
 > the shared session host and the shared line client, plus the wiring in
 > `server.ts`. Covered by `deepseekRunner.test.ts` (handshake, turn interval,
 > terminal cancellation, idle backstop, initialization cleanup, wrong-server
@@ -292,6 +304,7 @@ false start; it arrives with content or is removed.
 | `sessionEventMapper.ts` | `claudeCode/messageMapper.ts`, `codex/notificationMapper.ts` | `session.event` → `AgentRunnerActivity` + `CanonicalActivity` + `RunnerMetadata`. |
 | `settings.ts` | `claudeCode/settings.ts` | Effective turn settings, `initialize` parameters, child environment, command audit. |
 | `capabilities.ts` | `claudeCode/capabilities.ts` | Model catalog and defaults. |
+| `promptQuestions.ts` | `artifact/ArtifactStreamParser.ts`, `codex/userInput.ts` | The later prompt-contract instruction, bounded streaming parser, canonical set mapping, and model-visible continuation. |
 
 **Session host.** One child per AgentRoom session, `restoreStrategy` read from the
 registry (never a local constant). The shared 30-minute timeout is supplied, but
@@ -332,6 +345,33 @@ already ignores unparseable lines; keep a bounded tail of them for the error pat
 **Audit and timing** come from the shared helpers (`createRunnerStreamTiming`,
 `observeRunnerStreamEvent`, `runnerStreamTimingAudit`, `commandAudit`) so
 `runner_audit` rows look like every other runner's.
+
+### Clarifying questions over a prompt contract — **done**
+
+The SDK still has no server-to-client request, so this is an in-band contract,
+not a synthetic protocol method. `RunnerDescriptor.clarifyingQuestions` owns
+the instruction and declares `prompt_contract`; `AgentTurnContextAssembler`
+injects it only for that mode while the global channel is enabled. The model may
+end a response with one line-start `<agentroom-question>` JSON block. The
+adapter accepts at most one per Harness protocol turn, buffers at most 64 KiB,
+validates the shared question vocabulary, mints every id, and leaves malformed
+or incomplete control text in assistant prose.
+
+A valid block opens `PendingQuestionRequests` and emits the same canonical
+request the native adapters do. The Harness `turn/end` closes only that protocol
+cycle; the `AgentRunner.run()` iterator and AgentRoom turn stay open. The answer
+route settles the wait, the adapter sends labels and invited discussion as a
+second `session/prompt`, and the continuation's final `turn/end` settles the
+AgentRoom turn. Timeout and an unavailable wait send an explicit no-answer
+message and ask the model to continue on its best judgment. AgentRoom ids never
+enter the Harness prompt. Sensitive discussion enters that prompt but is absent
+from the canonical resolution, transcript, audit, and logs.
+
+This differs deliberately from starting a second AgentRoom turn through the
+service: the question remains a mid-turn request, so the existing client deck,
+re-seed read, cancellation, audit, and message semantics need no DeepSeek
+special case. External ACP descriptors remain `none`; they have not agreed to
+this grammar.
 
 ## Step 5 — Settings, environment, and trust posture — **done**
 
@@ -505,7 +545,12 @@ New, named after the existing per-runner suites:
 - `deepseekRunner.test.ts` — handshake, turn interval settling on `idle` rather
   than on the receipt, cancellation and child death refusing a silently fresh
   same-session continuation, failed-initialize cleanup, and `closeSession`
-  releasing the child.
+  releasing the child; plus the two-prompt question round trip, timeout, kill
+  switch, sensitive resolution, and an HTTP end-to-end flow through re-seed,
+  answer, transcript, audit, and turn completion.
+- `deepseekPromptQuestions.test.ts` — streamed/split control blocks, strict
+  mapping and minted ids, malformed/incomplete passthrough, one-block cap, and
+  answer rendering without AgentRoom ids.
 - `deepseekEvents.test.ts` — `session.event` → canonical activity kinds, including
   an envelope with no canonical reading producing no `coding_*` event.
 - `deepseekSettings.test.ts` — effective settings, `initialize` parameters, child
@@ -826,7 +871,12 @@ turn may write): create a `deepseek` session, send a turn, watch
 `WS /api/events` for `coding_session_started` → `coding_turn_started` → assistant
 deltas and tool activity → `coding_diff_updated` → `coding_turn_completed`; stop a
 turn mid-flight, confirm a same-session follow-up is refused, then create a new
-session; delete it and confirm the child is gone.
+session; delete it and confirm the child is gone. Then ask the agent to raise an
+AgentRoom clarification before proceeding: expect `coding_question_requested`,
+answer through `POST …/questions/:requestId`, and confirm the same AgentRoom
+turn emits `coding_question_resolved` and completes only after the Harness
+continuation. With `CLARIFYING_QUESTIONS_ENABLED=false`, the standing contract
+is absent and the adapter does not intercept assistant text.
 
 ## Sequencing
 

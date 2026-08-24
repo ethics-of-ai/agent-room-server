@@ -135,7 +135,8 @@
   standing diagram contract ride the turn prompt, or has the adapter installed it
   on a cached system prompt?), `turnDiffSource` (does the runner report its own
   turn diff, or does `AgentTurnGitDiffTracker` derive one at settlement?),
-  `workspaceSkills`, `skillSourceDirs`, `skillInvocationPrefix`,
+  `clarifyingQuestions` (native request, descriptor-owned prompt contract, or
+  none), `workspaceSkills`, `skillSourceDirs`, `skillInvocationPrefix`,
   `settingsKeyPrefix` (which of the flat version-1 keys are this runner's, and
   therefore where the same setting lives in the version-2 document),
   `settings` (the managed settings this runner owns — one
@@ -218,6 +219,11 @@
   live one. The setter's complete-state response must confirm the value, and a
   complete `config_option_update` refreshes that live state even while idle. See
   `docs/safety/TRUST_AND_SAFETY.md`.
+- `src/runner/shared/PendingRequests.ts`: the id-table, clock, per-session cap,
+  and release paths every "ask the person driving the session" channel shares.
+  It knows nothing about what is asked; `PendingPermissionRequests.ts` and
+  `PendingQuestionRequests.ts` put their own vocabulary check and outcome shape
+  behind it, so a second adapter never reimplements the wait.
 - `src/runner/shared/PendingPermissionRequests.ts`: the waiting half of
   interactive approval, shared rather than adapter-owned for the same reason the
   session host is — a bounded per-session wait is not protocol. It holds one
@@ -230,6 +236,28 @@
   `AgentRunner.answerPermissionRequest` hook — whose absence is what "no such
   outstanding request" means for a runner with no approval channel, so nothing
   along that path reads a runner's identity.
+- `src/runner/shared/PendingQuestionRequests.ts`: the waiting half of
+  clarifying questions — an agent pausing its turn to ask the person one batch
+  of sets (prompt, options, `single`/`multiple`, whether free text is
+  `none`/`optional`/`required`, `sensitive`) and continuing with the answers.
+  It owns the bounds (8 sets × 8 options, clamped text, a 10-minute clock) and
+  the pure `validateQuestionAnswers` the route's refusals come from: every named
+  set and option must be one the agent offered, a `single` set takes one, free
+  text only where invited, an omitted set is simply unanswered. Outcomes are
+  `answered` (by a human, with the answers), `timeout` (the runner applies its
+  own away fallback), or `cancelled` (released; nobody decided). The canonical
+  kinds are `question_requested`/`question_resolved`; the route is
+  `POST /api/agent-sessions/:sessionId/questions/:requestId` →
+  `AgentSessionService.answerQuestionRequest` → the optional
+  `AgentRunner.answerQuestionRequest` hook; `GET …/questions` serves the batches
+  a session still holds (from `AgentTurnEventApplier`'s outstanding map, which
+  also writes the rendered answer — `agent/questionTranscript.ts` — into the
+  thread as a user message and publishes the `agent_question_resolved` audit).
+  `clarifyingQuestionsEnabled` (tier 1) gates the channel for every runner.
+  Codex and Claude Code open that wait from their native request mechanisms;
+  DeepSeek opens it from its bounded prompt contract and holds the same
+  AgentRoom turn across the answer's second Harness protocol prompt.
+  See `docs/safety/TRUST_AND_SAFETY.md`.
 - `src/runner`: the `AgentRunner` boundary — which since Phase 2 also declares
   the `CanonicalActivity` union and `RunnerMetadata` envelope every adapter
   produces, so protocol knowledge stops at the adapter. Codex's unified-diff
@@ -244,7 +272,13 @@
   runner pins `sandbox_workspace_write.network_access` on `thread/start` and
   `thread/resume` so
   that layer cannot widen the operator's network policy — see
-  `docs/safety/TRUST_AND_SAFETY.md`), and the
+  `docs/safety/TRUST_AND_SAFETY.md`; the same per-thread `config` carries the
+  two keys that make the agent's `request_user_input` tool available while
+  `clarifyingQuestionsEnabled` is on, and `codex/userInput.ts` maps that
+  `item/tool/requestUserInput` server request into a clarifying-question batch
+  and a settled batch back into the response keyed by the agent's question ids
+  — `JsonRpcLineClient.onRequest` is the dispatcher, which refuses any other
+  server→client request with `-32601` rather than leaving it unanswered), and the
   `ClaudeCodeRunner` Claude Agent SDK adapter (one persistent SDK session per
   AgentRoom session, provider-credential scrubbing, live `supportedModels()`
   capability discovery cached per backend process with a hardcoded fallback
@@ -252,7 +286,17 @@
   loading the registered workspace's `project` settings source so its
   `.claude/skills`, `CLAUDE.md`, subagents, hooks, and MCP servers are available,
   toggled by `CLAUDE_CODE_LOAD_WORKSPACE_SKILLS` and forced off for stricter
-  permission modes and for the isolated capability-discovery probe). Both adapters
+  permission modes and for the isolated capability-discovery probe). The Claude
+  adapter is also where the CLI's `AskUserQuestion` becomes a clarifying-question
+  batch: while `clarifyingQuestionsEnabled` is on it passes the SDK `canUseTool`
+  callback (never to the probe), `claudeCode/askUserQuestion.ts` maps the tool's
+  questions into minted-id sets and a settled batch back into the tool's
+  `updatedInput` (`answers` by question text, `annotations[question].notes` for
+  free text, the CLI's `(notes only)` sentinel, a `response` naming a timeout),
+  the wait sits in `PendingQuestionRequests`, the turn's interrupt aborts it
+  through the callback's `signal`, and every other tool the callback sees is
+  refused with the CLI's own headless wording so the permission posture is
+  unchanged. Both adapters
   implement the optional `closeSession` hook so
   deleting an AgentRoom session releases its persistent child process, and both
   are session-resilient: quiet children are idle-reaped after 30 minutes, and a
@@ -275,7 +319,7 @@
 - `src/runner/deepseek`: the DeepSeek Harness adapter, driving the vendor's
   first-party SDK runtime over newline-delimited JSON-RPC on the child's stdio
   (`DeepSeekHarnessRunner`, `protocol.ts`, `sessionEventMapper.ts`, `settings.ts`,
-  `capabilities.ts`). It takes no dependency on the vendor's packages: the
+  `capabilities.ts`, `promptQuestions.ts`). It takes no dependency on the vendor's packages: the
   runtime is an operator-installed executable like `codex`, so the protocol is
   spoken directly and every consumed message is zod-validated on receipt. That
   executable is the SDK runtime (`dsh-jsonrpc-agent`, or the packaged
@@ -290,7 +334,14 @@
   or verified restore method (so cancelling kills the child and a later turn
   on that AgentRoom session is refused rather than silently starting fresh),
   and there are no server-to-client requests (so there is no approval channel
-  to expose and the answer route's `404` is honest). Its
+  to expose and the permission answer route's `404` is honest). Clarifying
+  questions use the separate prompt-contract policy on the descriptor:
+  `AgentTurnContextAssembler` injects its bounded grammar when enabled,
+  `promptQuestions.ts` removes one valid line-start block from assistant prose
+  and mints its canonical ids, and the runner keeps the AgentRoom turn open
+  after the asking Harness `turn/end` until the shared wait settles and a second
+  `session/prompt` completes. Malformed or oversized blocks stay visible prose;
+  ACP descriptors remain `none`. Its
   `sessionEventMapper` is the only place that knows what a DeepSeek session-log
   event means; an event it gives no canonical reading produces no `coding_*`
   event at all. Because the composition is an operator-authored file this

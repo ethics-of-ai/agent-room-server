@@ -94,6 +94,21 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime
   `timeout`) because "allowed" means something different in each case. What a
   client needs in order to decide rides the live request event; what durable
   audit keeps is the decision alone.
+- A runner that is unsure which way to go can pause its turn and ask: one
+  batch of clarifying-question sets (a prompt, the options it offers, how many
+  may be chosen, whether free text is invited) announced on the canonical
+  stream, held open in the same shared waiting store as permission requests,
+  and answered through one bearer-gated route that selects offered options and
+  carries the person's own words. Answering authorizes nothing; ids are
+  AgentRoom-minted so the agent never reads a client string as one; the wait is
+  bounded and a timeout is reported as a timeout, never as a default choice; the
+  audit keeps the decision while the thread keeps the words. Claude Code asks
+  through its `AskUserQuestion` tool over the SDK callback; Codex through
+  `item/tool/requestUserInput`; DeepSeek, whose SDK has no request channel,
+  through a descriptor-owned bounded prompt block that the adapter resumes with
+  a second Harness prompt inside the same AgentRoom turn. A runner whose
+  descriptor declares neither path has nothing outstanding. One tier-1 setting
+  turns the channel off for every runner.
 - Backend turn context assembly combines the original user message, selected
   workspace context, and session-scoped attachment ids into the runner prompt
   plus runner input parts before execution.

@@ -14,10 +14,12 @@ import { z } from "zod";
  * unchecked shape.
  *
  * Two properties of this protocol shape the adapter and are not worked around:
- * there is no prompt-cancel method (so cancelling kills the child and the next
- * turn restores the conversation) and no server-to-client requests (so there is
- * no interactive permission channel to expose). The runtime's own README
- * documents both.
+ * there is no prompt-cancel method (so cancelling kills the child and that
+ * non-restorable AgentRoom session cannot safely continue) and no
+ * server-to-client requests (so there is no interactive permission channel to
+ * expose). Clarifying questions use an assistant-text prompt contract in the
+ * adapter; they do not add a wire method. The runtime's own README documents
+ * both protocol absences.
  *
  * Everything here is deliberately permissive about *unknown* fields and strict
  * about the ones AgentRoom reads: this is a developer preview whose protocol

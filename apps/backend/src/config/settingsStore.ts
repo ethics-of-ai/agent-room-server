@@ -120,6 +120,14 @@ const globalSettingDefinitions: readonly ManagedSettingDefinition[] = [
     defaultValue: true
   },
   {
+    field: "clarifyingQuestionsEnabled",
+    schema: z.boolean().optional(),
+    tier: 1,
+    env: "CLARIFYING_QUESTIONS_ENABLED",
+    valueKind: "boolean",
+    defaultValue: true
+  },
+  {
     field: "gitCommandTimeoutMs",
     schema: serviceConfigSchema.shape.gitCommandTimeoutMs.optional(),
     tier: 1,

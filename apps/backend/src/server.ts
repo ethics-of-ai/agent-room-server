@@ -116,6 +116,7 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     workspaceExplorer,
     attachments: agentAttachments,
     ...(artifactsEnabled ? { artifactInstruction: ARTIFACT_PROMPT_INSTRUCTION } : {}),
+    clarifyingQuestionsEnabled: input.config.clarifyingQuestionsEnabled !== false,
     ...(sceneEngineEnabled ? { diagramInstruction: DIAGRAM_PROMPT_INSTRUCTION } : {}),
     ...(diagramHumanEdits ? { diagramHumanEdits } : {}),
     ...(diagramRenderFeedback ? { diagramRenderFeedback } : {})

@@ -114,20 +114,38 @@ export function codexDisplayServiceTier(value: string | undefined): string | und
   return value;
 }
 
-// A registered workspace's committed `.codex/config.toml` merges into the
-// thread's effective config as a Codex project layer, and per-key thread/start
-// `config` overrides are the only shadowing mechanism the app-server offers.
-// `network_access` is therefore pinned explicitly in both states: leaving the
-// key unset when the operator has not enabled network access would let a
-// workspace layer silently re-enable it inside the workspace-write sandbox,
-// overriding the documented CODEX_WORKSPACE_NETWORK_ACCESS control.
+// The per-thread `config` overrides AgentRoom pins on `thread/start` and
+// `thread/resume`. Two things live here.
+//
+// The workspace network pin: a registered workspace's committed
+// `.codex/config.toml` merges into the thread's effective config as a Codex
+// project layer, and per-key thread `config` overrides are the only shadowing
+// mechanism the app-server offers, so `network_access` is pinned explicitly in
+// both states — leaving the key unset when the operator has not enabled network
+// access would let a workspace layer silently re-enable it inside the
+// workspace-write sandbox, overriding the documented
+// CODEX_WORKSPACE_NETWORK_ACCESS control.
+//
+// The flags that make the agent's `request_user_input` tool available outside
+// plan mode — the clarifying-question channel. They ride the thread's own config
+// so they follow the managed `clarifyingQuestionsEnabled` switch rather than
+// the operator's global Codex config (verified against codex-cli 0.149: the
+// tool is offered with these two keys set per thread and reported "unavailable
+// in Default mode" without them).
 function jsonRpcRuntimeConfig(config: ServiceConfig): Record<string, unknown> | undefined {
-  if ((config.codexSandboxMode ?? "workspace-write") !== "workspace-write") return undefined;
-  return {
-    sandbox_workspace_write: {
+  const runtimeConfig: Record<string, unknown> = {};
+  if ((config.codexSandboxMode ?? "workspace-write") === "workspace-write") {
+    runtimeConfig.sandbox_workspace_write = {
       network_access: config.codexWorkspaceNetworkAccess ?? false
-    }
-  };
+    };
+  }
+  const clarifyingQuestionsEnabled = config.clarifyingQuestionsEnabled !== false;
+  // Pin both sides of Codex's gate in either state. Omitting them while the
+  // AgentRoom kill switch is off would let a user-global Codex config turn the
+  // tool back on inside this thread.
+  runtimeConfig.tools = { experimental_request_user_input: { enabled: clarifyingQuestionsEnabled } };
+  runtimeConfig.features = { default_mode_request_user_input: clarifyingQuestionsEnabled };
+  return Object.keys(runtimeConfig).length > 0 ? runtimeConfig : undefined;
 }
 
 function codexWireServiceTier(value: string | undefined): string | undefined {

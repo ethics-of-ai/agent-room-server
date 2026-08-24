@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { ServiceConfig } from "../src/domain/models";
 import type { AgentRunnerEvent } from "../src/runner/AgentRunner";
 import { DeepSeekHarnessRunner } from "../src/runner/deepseek/DeepSeekHarnessRunner";
+import { buildServer } from "../src/server";
 
 const config = async (overrides: Partial<ServiceConfig> = {}): Promise<ServiceConfig> => {
   const root = await mkdtemp(join(tmpdir(), "agentroom-deepseek-"));
@@ -55,6 +56,20 @@ const appears = async (path: string, timeoutMs = 2_000): Promise<boolean> => {
 const assistantText = (events: AgentRunnerEvent[]): string =>
   events.flatMap((event) => (event.type === "agent_update" ? [event.message] : [])).join("");
 
+const canonicalOf = (events: AgentRunnerEvent[], kind: string): Array<Record<string, unknown>> =>
+  events
+    .filter((event): event is AgentRunnerEvent & { type: "agent_activity" } => event.type === "agent_activity")
+    .map((event) => event.activity.canonical as Record<string, unknown> | undefined)
+    .filter((canonical): canonical is Record<string, unknown> => canonical?.kind === kind);
+
+const waitFor = async (condition: () => boolean, timeoutMs = 2_000): Promise<void> => {
+  const startedAt = Date.now();
+  while (!condition()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
+
 describe("DeepSeekHarnessRunner", () => {
   it("hands the runtime the workspace, streams its session log, and settles on the turn's own end", async () => {
     const runtime = await writeFakeRuntime();
@@ -88,6 +103,197 @@ describe("DeepSeekHarnessRunner", () => {
       type: "runner_audit",
       audit: { phase: "completed", runnerKind: "deepseek", status: "succeeded" }
     });
+  });
+
+  it("holds a prompt-contract question open, accepts the human answer, and resumes the same AgentRoom turn", async () => {
+    const runtime = await writeFakeRuntime({
+      askQuestion: true,
+      sensitiveQuestion: true,
+      idleBeforeQuestionTurnEnd: true,
+      delayContinuationCompletion: true
+    });
+    const serviceConfig = await config({ deepseekArgs: [runtime] });
+    const runner = new DeepSeekHarnessRunner(serviceConfig);
+    const events: AgentRunnerEvent[] = [];
+    const run = (async () => {
+      for await (const event of runner.run({
+        runId: "agentroom-turn-question",
+        sessionId: "agent-session-question",
+        workspacePath: serviceConfig.workspaceRoot,
+        prompt: "Choose the target"
+      })) {
+        events.push(event);
+      }
+    })();
+
+    await waitFor(() => canonicalOf(events, "question_requested").length > 0);
+    const requested = canonicalOf(events, "question_requested")[0];
+    const requestId = requested.requestId as string;
+    expect(requestId).toMatch(/^question-/);
+    expect(requested.questionSets).toEqual([
+      expect.objectContaining({
+        setId: "set-1",
+        header: "Target",
+        selection: "single",
+        discussion: "optional",
+        sensitive: true
+      })
+    ]);
+    expect(runner.answerQuestionRequest({
+      sessionId: "agent-session-question",
+      requestId,
+      answers: [{ setId: "set-1", selectedOptionIds: ["opt-2"], discussion: "Keep this private" }]
+    })).toBe("answered");
+
+    await run;
+    const resolved = canonicalOf(events, "question_resolved")[0];
+    expect(resolved).toEqual({
+      kind: "question_resolved",
+      requestId,
+      status: "answered",
+      decidedBy: "human",
+      questionAnswers: [{ setId: "set-1", selectedOptionIds: ["opt-2"] }]
+    });
+    expect(assistantText(events)).toContain("continued with macOS");
+    expect(assistantText(events)).toContain("continuation-finished");
+    expect(assistantText(events)).toContain("private-note-received");
+    expect(assistantText(events)).not.toContain("Keep this private");
+    expect(assistantText(events)).not.toContain("<agentroom-question>");
+    expect(assistantText(events)).not.toContain("set-1");
+    expect(events.at(-1)).toEqual({ type: "run_succeeded" });
+    expect(runner.answerQuestionRequest({
+      sessionId: "agent-session-question",
+      requestId,
+      answers: []
+    })).toBe("unknown_request");
+    await runner.dispose();
+  });
+
+  it("carries a DeepSeek question through the HTTP route, durable transcript, and completed turn", async () => {
+    const runtime = await writeFakeRuntime({ askQuestion: true, sensitiveQuestion: true });
+    const serviceConfig = await config({ deepseekArgs: [runtime] });
+    const runner = new DeepSeekHarnessRunner(serviceConfig);
+    const { app, eventBus } = await buildServer({ config: serviceConfig, runners: { deepseek: runner } });
+    const workspace = await app.inject({
+      method: "POST",
+      url: "/api/workspaces",
+      payload: { path: serviceConfig.workspaceRoot }
+    });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: { workspaceId: workspace.json().workspace.id, runnerKind: "deepseek" }
+    });
+    const sessionId = session.json().session.id as string;
+    const turn = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/turns`,
+      payload: { message: "Choose the target" }
+    });
+    expect(turn.statusCode).toBe(202);
+
+    await waitFor(() => eventBus.getRecentEvents().some((event) => event.type === "coding_question_requested"));
+    const requested = eventBus.getRecentEvents().find((event) => event.type === "coding_question_requested");
+    if (!requested || requested.type !== "coding_question_requested") throw new Error("Missing question request");
+    const requestId = requested.payload.requestId;
+    const outstanding = await app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${sessionId}/questions`
+    });
+    expect(outstanding.json().questions).toEqual([
+      expect.objectContaining({ requestId, questionSets: requested.payload.questionSets })
+    ]);
+
+    const answered = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${sessionId}/questions/${requestId}`,
+      payload: {
+        answers: [{ setId: "set-1", selectedOptionIds: ["opt-2"], discussion: "Keep this private" }]
+      }
+    });
+    expect(answered.statusCode).toBe(200);
+    await waitFor(() => eventBus.getRecentEvents().some((event) => event.type === "coding_turn_completed"));
+
+    const detail = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}` });
+    expect(detail.json().session.status).toBe("idle");
+    const messages = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/messages` });
+    const answer = messages.json().messages.find(
+      (message: { context?: { questionRequestId?: string } }) => message.context?.questionRequestId === requestId
+    );
+    expect(answer.content).toContain("macOS");
+    expect(answer.content).not.toContain("Keep this private");
+    expect(messages.json().messages.some(
+      (message: { role: string; content: string }) => message.role === "assistant" && message.content.includes("continued with macOS")
+    )).toBe(true);
+    expect(eventBus.getRecentEvents()).toContainEqual(expect.objectContaining({
+      type: "agent_question_resolved",
+      payload: expect.objectContaining({
+        audit: expect.objectContaining({ decidedBy: "human", status: "answered" })
+      })
+    }));
+
+    await app.close();
+  });
+
+  it("continues without inventing an answer when a prompt-contract question times out", async () => {
+    const runtime = await writeFakeRuntime({ askQuestion: true });
+    const serviceConfig = await config({ deepseekArgs: [runtime] });
+    const runner = new DeepSeekHarnessRunner(serviceConfig, { questionTimeoutMs: 30 });
+    const events = await collect(runner.run({
+      runId: "agentroom-turn-timeout",
+      sessionId: "agent-session-timeout",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "Choose the target"
+    }));
+
+    expect(canonicalOf(events, "question_resolved")[0]).toMatchObject({
+      status: "timeout",
+      decidedBy: "timeout"
+    });
+    expect(assistantText(events)).toContain("continued with best judgment");
+    expect(events.at(-1)).toEqual({ type: "run_succeeded" });
+    await runner.dispose();
+  });
+
+  it("closes an outstanding question before reporting a Harness child failure", async () => {
+    const runtime = await writeFakeRuntime({ askQuestion: true, dieAfterQuestion: true });
+    const serviceConfig = await config({ deepseekArgs: [runtime] });
+    const runner = new DeepSeekHarnessRunner(serviceConfig);
+    const events = await collect(runner.run({
+      runId: "agentroom-turn-question-crash",
+      sessionId: "agent-session-question-crash",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "Choose the target"
+    }));
+
+    const requested = canonicalOf(events, "question_requested")[0];
+    expect(canonicalOf(events, "question_resolved")[0]).toEqual({
+      kind: "question_resolved",
+      requestId: requested.requestId,
+      status: "cancelled"
+    });
+    expect(events.at(-1)).toMatchObject({
+      type: "run_failed",
+      error: expect.stringContaining("failed after asking")
+    });
+    await runner.dispose();
+  });
+
+  it("leaves prompt-contract blocks as prose when clarifying questions are disabled", async () => {
+    const runtime = await writeFakeRuntime({ askQuestion: true });
+    const serviceConfig = await config({ deepseekArgs: [runtime], clarifyingQuestionsEnabled: false });
+    const runner = new DeepSeekHarnessRunner(serviceConfig);
+    const events = await collect(runner.run({
+      runId: "agentroom-turn-disabled",
+      sessionId: "agent-session-disabled",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "Choose the target"
+    }));
+
+    expect(canonicalOf(events, "question_requested")).toHaveLength(0);
+    expect(assistantText(events)).toContain("<agentroom-question>");
+    expect(events.at(-1)).toEqual({ type: "run_succeeded" });
+    await runner.dispose();
   });
 
   it("refuses to spawn at all without the composition the runtime demands", async () => {
@@ -346,6 +552,11 @@ async function writeFakeRuntime(options: {
   dieOnPrompt?: boolean;
   rejectInitialize?: boolean;
   shutdownMarker?: string;
+  askQuestion?: boolean;
+  sensitiveQuestion?: boolean;
+  dieAfterQuestion?: boolean;
+  idleBeforeQuestionTurnEnd?: boolean;
+  delayContinuationCompletion?: boolean;
 } = {}): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "agentroom-fake-dsh-"));
   const path = join(root, "fake-dsh-runtime.cjs");
@@ -356,6 +567,7 @@ const rl = readline.createInterface({ input: process.stdin });
 const options = ${JSON.stringify(options)};
 let seq = 0;
 let initialize;
+let promptNumber = 0;
 
 function send(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -405,19 +617,27 @@ rl.on("line", (line) => {
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join(" ");
-  send({ jsonrpc: "2.0", id: message.id, result: { messageId: "message-1" } });
+  promptNumber += 1;
+  const turn = promptNumber;
+  send({ jsonrpc: "2.0", id: message.id, result: { messageId: "message-" + promptNumber } });
 
   status(sessionId, "running");
-  event(sessionId, "request/header", { reason: "initial" });
+  event(sessionId, "request/header", { reason: promptNumber === 1 ? "initial" : "change" });
   event(sessionId, "request/context", { provider: initialize.provider, model: initialize.model, contextWindow: 128000 });
-  event(sessionId, "turn/start", { turn: 1 });
+  event(sessionId, "turn/start", { turn });
   event(sessionId, "assistant/chunk", {
-    turn: 1,
+    turn,
     step: 1,
     chunk: {
       type: "text-delta",
       index: 0,
-      text: "session=" + sessionId + " cwd=" + initialize.cwd + " model=" + initialize.model
+      text: promptNumber === 1
+        ? "session=" + sessionId + " cwd=" + initialize.cwd + " model=" + initialize.model
+        : "continued with " + (
+            text.includes("macOS")
+              ? "macOS " + (text.includes("Keep this private") ? "private-note-received" : "")
+              : text.includes("best judgment") ? "best judgment" : "the answer"
+          )
     }
   });
 
@@ -431,25 +651,85 @@ rl.on("line", (line) => {
   // is the state a cancel has to resolve.
   if (text.includes("HANG")) return;
 
-  event(sessionId, "tool/call", { turn: 1, step: 1, callId: "call-1", name: "bash", arguments: "{}" });
+  if (options.askQuestion && promptNumber === 1) {
+    const question = JSON.stringify({
+      sets: [{
+        header: "Target",
+        prompt: "Which client should land first?",
+        selection: "single",
+        options: [
+          { label: "visionOS", description: "Ship the spatial client first" },
+          { label: "macOS", description: "Ship the operator app first" }
+        ],
+        discussion: "optional",
+        sensitive: Boolean(options.sensitiveQuestion)
+      }]
+    });
+    event(sessionId, "assistant/chunk", {
+      turn,
+      step: 1,
+      chunk: { type: "text-delta", index: 1, text: "\\n<agentroom-ques" }
+    });
+    event(sessionId, "assistant/chunk", {
+      turn,
+      step: 1,
+      chunk: { type: "text-delta", index: 2, text: "tion>" + question.slice(0, 40) }
+    });
+    event(sessionId, "assistant/chunk", {
+      turn,
+      step: 1,
+      chunk: { type: "text-delta", index: 3, text: question.slice(40) + "</agentroom-question>" }
+    });
+    if (options.dieAfterQuestion) {
+      process.stderr.write("dsh: failed after asking\\n");
+      process.exit(4);
+    }
+    if (options.idleBeforeQuestionTurnEnd) {
+      status(sessionId, "idle");
+      setTimeout(() => {
+        event(sessionId, "turn/end", { turn, reason: { kind: "completed" } });
+      }, 20);
+      return;
+    }
+    if (!options.omitTurnEnd) {
+      event(sessionId, "turn/end", { turn, reason: { kind: "completed" } });
+    }
+    status(sessionId, "idle");
+    return;
+  }
+
+  if (options.delayContinuationCompletion && promptNumber > 1) {
+    setTimeout(() => {
+      event(sessionId, "assistant/chunk", {
+        turn,
+        step: 1,
+        chunk: { type: "text-delta", index: 1, text: " continuation-finished" }
+      });
+      event(sessionId, "turn/end", { turn, reason: { kind: "completed" } });
+      status(sessionId, "idle");
+    }, 50);
+    return;
+  }
+
+  event(sessionId, "tool/call", { turn, step: 1, callId: "call-" + turn, name: "bash", arguments: "{}" });
   event(sessionId, "tool/result", {
-    turn: 1,
+    turn,
     step: 1,
     message: {
       role: "user",
-      source: { kind: "tool", callId: "call-1" },
-      content: [{ type: "tool-result", toolCallId: "call-1", content: [{ type: "text", text: "ok" }] }]
+      source: { kind: "tool", callId: "call-" + turn },
+      content: [{ type: "tool-result", toolCallId: "call-" + turn, content: [{ type: "text", text: "ok" }] }]
     }
   });
   event(sessionId, "assistant/chunk", { chunk: { type: "usage", usage: { inputTokens: 10, outputTokens: 2 } } });
   event(sessionId, "assistant/message", {
-    turn: 1,
+    turn,
     step: 1,
     message: { role: "assistant", content: [] },
     usage: { inputTokens: 10, outputTokens: 2 }
   });
   if (!options.omitTurnEnd) {
-    event(sessionId, "turn/end", { turn: 1, reason: { kind: "completed" } });
+    event(sessionId, "turn/end", { turn, reason: { kind: "completed" } });
   }
   status(sessionId, "idle");
 });

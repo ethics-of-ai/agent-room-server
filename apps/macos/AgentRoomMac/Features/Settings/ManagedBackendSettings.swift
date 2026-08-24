@@ -27,6 +27,7 @@ struct ManagedBackendSettings: Codable, Equatable {
     var artifactsEnabled: Bool?
     var languageCatalogEnabled: Bool?
     var sceneEngineEnabled: Bool?
+    var clarifyingQuestionsEnabled: Bool?
     var gitCommandTimeoutMs: Int?
     var gitNetworkTimeoutMs: Int?
     // Tier 2 — trust posture.

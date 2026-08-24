@@ -28,6 +28,9 @@ export class AgentTurnContextAssembler {
       // Prepended to every assembled prompt when artifacts are enabled; omitted
       // (undefined) disables the in-band artifact convention for prompts.
       artifactInstruction?: string;
+      // Kill switch for the descriptor-owned prompt contract. Native adapters
+      // receive no copy: their own protocol supplies the ask mechanism.
+      clarifyingQuestionsEnabled?: boolean;
       // Standing spatial-diagram contract, prepended when the scene engine is
       // enabled; omitted (undefined) disables it. claude_code turns skip it
       // here because their runner delivers the same string once via the SDK
@@ -79,8 +82,14 @@ export class AgentTurnContextAssembler {
       // not standing values and ride the turn prompt for every runner kind.
       const standingInstructionsRideTheTurn =
         runnerDescriptor(input.session.runnerKind).promptDelivery === "turn";
+      const questionChannel = runnerDescriptor(input.session.runnerKind).clarifyingQuestions;
+      const questionInstruction =
+        this.deps.clarifyingQuestionsEnabled !== false && questionChannel.mode === "prompt_contract"
+          ? questionChannel.instruction
+          : undefined;
       const instructions = [
         this.deps.artifactInstruction,
+        questionInstruction,
         standingInstructionsRideTheTurn ? this.deps.diagramInstruction : undefined,
         renderFeedback?.summary,
         humanEditSummary?.summary

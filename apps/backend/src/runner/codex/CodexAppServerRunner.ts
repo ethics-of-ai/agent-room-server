@@ -3,7 +3,16 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { CodingAgentCapabilities, CodingAgentTurnSettings, ServiceConfig } from "../../domain/models";
 import { logger } from "../../logging/logger";
 import { redactSecrets } from "../../util/redactSecrets";
-import { AgentRunnerInputError, type AgentRunner, type AgentRunnerEvent, type AgentRunnerInput, type AgentRunnerInputPart } from "../AgentRunner";
+import { randomUUID } from "node:crypto";
+import {
+  AgentRunnerInputError,
+  type AgentRunner,
+  type AgentRunnerActivity,
+  type AgentRunnerEvent,
+  type AgentRunnerInput,
+  type AgentRunnerInputPart,
+  type CanonicalQuestionAnswer
+} from "../AgentRunner";
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { TimeoutError, delay, withTimeout } from "../shared/asyncUtils";
 import { commandAudit } from "../shared/commandAudit";
@@ -24,7 +33,23 @@ import {
   jsonRpcTurnSettings,
   withSettingsOverrides
 } from "./settings";
-import { JsonRpcLineClient, type JsonRpcNotification } from "../shared/JsonRpcLineClient";
+import {
+  JsonRpcLineClient,
+  JsonRpcMethodNotFoundError,
+  type JsonRpcNotification,
+  type JsonRpcRequest
+} from "../shared/JsonRpcLineClient";
+import {
+  PendingQuestionRequests,
+  type QuestionAnswerResult,
+  type QuestionWaitOutcome
+} from "../shared/PendingQuestionRequests";
+import {
+  CODEX_REQUEST_USER_INPUT_METHOD,
+  codexUserInputBatch,
+  codexUserInputRequestSchema,
+  codexUserInputResponse
+} from "./userInput";
 import {
   createRunnerStreamTiming,
   observeRunnerStreamEvent,
@@ -87,6 +112,12 @@ export class CodexAppServerRunner implements AgentRunner {
   private readonly sessions: PersistentRunnerSessionHost<JsonRpcRunnerSession>;
   private readonly startupTimeouts: { initializeMs: number; threadStartMs: number };
   private readonly interruptTimeoutMs: number;
+  // Clarifying-question batches held open for a human answer, keyed by the
+  // AgentRoom session. The app-server's `item/tool/requestUserInput` request
+  // reaches `decideUserInput` through the JSON-RPC request dispatcher and
+  // waits here; the answer route settles it. Released with the turn, the
+  // child, and the session.
+  private readonly questions: PendingQuestionRequests;
 
   constructor(
     private readonly config: ServiceConfig,
@@ -94,6 +125,7 @@ export class CodexAppServerRunner implements AgentRunner {
       startupTimeouts?: { initializeMs: number; threadStartMs: number };
       interruptTimeoutMs?: number;
       idleSessionTimeoutMs?: number;
+      questionTimeoutMs?: number;
     } = {}
   ) {
     this.startupTimeouts = deps.startupTimeouts ?? {
@@ -101,6 +133,9 @@ export class CodexAppServerRunner implements AgentRunner {
       threadStartMs: JSON_RPC_THREAD_START_TIMEOUT_MS
     };
     this.interruptTimeoutMs = deps.interruptTimeoutMs ?? JSON_RPC_INTERRUPT_TIMEOUT_MS;
+    this.questions = new PendingQuestionRequests(
+      deps.questionTimeoutMs !== undefined ? { timeoutMs: deps.questionTimeoutMs } : {}
+    );
     this.sessions = new PersistentRunnerSessionHost({
       runnerKind: "codex",
       // The registry owns this: the host arms an idle timer only for a runner it
@@ -108,6 +143,7 @@ export class CodexAppServerRunner implements AgentRunner {
       restoreStrategy: runnerDescriptor("codex").restoreStrategy,
       idleSessionTimeoutMs: deps.idleSessionTimeoutMs ?? IDLE_SESSION_TIMEOUT_MS,
       teardown: (session) => {
+        this.questions.releaseSession(session.key);
         session.client.dispose();
         if (!session.child.killed && session.child.exitCode === null) {
           session.child.kill("SIGTERM");
@@ -188,6 +224,9 @@ export class CodexAppServerRunner implements AgentRunner {
     }
 
     if (activeJsonRpcTurn?.turn.turnId) {
+      // A question belongs to the turn being stopped; settle it as cancelled
+      // so the child gets its (empty) answer and nothing waits on a person.
+      this.questions.releaseSession(activeJsonRpcTurn.session.key);
       let interrupted = false;
       const interrupt = activeJsonRpcTurn.session.client.request("turn/interrupt", {
         threadId: activeJsonRpcTurn.session.threadId,
@@ -231,7 +270,12 @@ export class CodexAppServerRunner implements AgentRunner {
     this.sessions.close(sessionId);
   }
 
+  answerQuestionRequest(input: { sessionId: string; requestId: string; answers: CanonicalQuestionAnswer[] }): QuestionAnswerResult {
+    return this.questions.answer(input.sessionId, input.requestId, input.answers);
+  }
+
   async dispose(): Promise<void> {
+    this.questions.releaseAll();
     for (const child of this.processes.values()) {
       if (!child.killed && child.exitCode === null) {
         child.kill("SIGTERM");
@@ -449,6 +493,9 @@ export class CodexAppServerRunner implements AgentRunner {
         if (session.activeTurn === activeTurn) {
           session.activeTurn = undefined;
         }
+        // A question belongs to the turn that asked it; nothing may stay open
+        // for a person once the turn has settled.
+        this.questions.releaseSession(session.key);
       }
     }
 
@@ -511,8 +558,10 @@ export class CodexAppServerRunner implements AgentRunner {
     };
 
     client.onNotification((notification) => this.handleJsonRpcNotification(session, notification));
+    client.onRequest((request) => this.handleJsonRpcRequest(session, request));
     child.on("close", (code, signal) => {
       this.sessions.release(session);
+      this.questions.releaseSession(session.key);
       const active = session.activeTurn;
       if (!active) return;
       active.exitStatus = { code, signal };
@@ -529,6 +578,7 @@ export class CodexAppServerRunner implements AgentRunner {
     });
     child.on("error", (error) => {
       this.sessions.release(session);
+      this.questions.releaseSession(session.key);
       const active = session.activeTurn;
       if (!active) return;
       active.failureCategory = "process_error";
@@ -641,6 +691,105 @@ export class CodexAppServerRunner implements AgentRunner {
       });
   }
 
+  /**
+   * The app-server's own requests. `item/tool/requestUserInput` is the one
+   * served: the agent's `request_user_input` tool pausing the turn for the
+   * person driving the session. Anything else — the approval family under a
+   * prompting `approvalPolicy`, a method a newer app-server invents — is
+   * refused with `-32601` rather than left unanswered, which is what hung a
+   * turn before the dispatcher existed.
+   */
+  private async handleJsonRpcRequest(session: JsonRpcRunnerSession, request: JsonRpcRequest): Promise<unknown> {
+    if (request.method === CODEX_REQUEST_USER_INPUT_METHOD) {
+      // Defense in depth for a Codex process whose global config or version
+      // still exposes the tool despite the per-thread false pins.
+      if (this.config.clarifyingQuestionsEnabled === false) return { answers: {} };
+      return this.decideUserInput(session, request.params);
+    }
+    throw new JsonRpcMethodNotFoundError(request.method);
+  }
+
+  /**
+   * Hold a `request_user_input` batch open for a human answer.
+   *
+   * The questions become a canonical batch announced on the turn's event
+   * stream, the wait sits in the shared store until the answer route settles
+   * it (or the clock, or the turn's cancellation), and the answers go back as
+   * the request's response keyed by the agent's own question ids. A batch the
+   * backend cannot hold open — no live turn, a full session, a request outside
+   * the bounds — is announced as a record and answered empty, which the agent
+   * reads as "nobody answered": the channel never picks for the person.
+   */
+  private async decideUserInput(session: JsonRpcRunnerSession, params: unknown): Promise<unknown> {
+    const parsed = codexUserInputRequestSchema.safeParse(params);
+    if (!parsed.success) {
+      logger.warn({ runnerKind: "codex", threadId: session.threadId }, "Codex request_user_input params failed validation");
+      return { answers: {} };
+    }
+    const batch = codexUserInputBatch(parsed.data);
+    if ("error" in batch) {
+      logger.warn({ runnerKind: "codex", threadId: session.threadId, reason: batch.error }, "Codex request_user_input batch refused");
+      return { answers: {} };
+    }
+    this.sessions.touch(session);
+    const turn = session.activeTurn;
+    const requestId = `question-${randomUUID()}`;
+    const wait = turn && !turn.finalEvent
+      ? this.questions.wait({ sessionKey: session.key, requestId, sets: batch.sets })
+      : undefined;
+    const runner = {
+      nativeSessionId: session.threadId,
+      ...(parsed.data.turnId ? { nativeTurnId: parsed.data.turnId } : {}),
+      ...(parsed.data.itemId ? { nativeItemId: parsed.data.itemId } : {}),
+      native: { method: CODEX_REQUEST_USER_INPUT_METHOD }
+    };
+    const pushActivity = (activity: AgentRunnerActivity): void => {
+      const target = session.activeTurn;
+      if (target && !target.finalEvent) target.queue.push({ type: "agent_activity", activity });
+    };
+    pushActivity({
+      kind: "codex_question_requested",
+      title: "Questions for you",
+      content: { questionCount: batch.sets.length, ...(parsed.data.itemId ? { itemId: parsed.data.itemId } : {}) },
+      canonical: { kind: "question_requested", ...(wait ? { requestId } : {}), questionSets: batch.sets },
+      runner
+    });
+    if (!wait) {
+      pushActivity({
+        kind: "codex_question_resolved",
+        title: "Questions not presented",
+        content: { status: "cancelled" },
+        canonical: { kind: "question_resolved", status: "cancelled" },
+        runner
+      });
+      return codexUserInputResponse(batch, { status: "unavailable" });
+    }
+    const outcome: QuestionWaitOutcome = await wait;
+    pushActivity({
+      kind: "codex_question_resolved",
+      title: outcome.status === "answered" ? "Questions answered" : outcome.status === "timeout" ? "Questions timed out" : "Questions cancelled",
+      content: { status: outcome.status, ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}) },
+      canonical: {
+        kind: "question_resolved",
+        requestId,
+        status: outcome.status,
+        ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}),
+        ...(outcome.status === "answered"
+          ? {
+              // A sensitive set's text reaches the agent and nowhere else.
+              questionAnswers: outcome.answers.map((answer) =>
+                batch.sets.find((set) => set.setId === answer.setId)?.sensitive
+                  ? { setId: answer.setId, selectedOptionIds: answer.selectedOptionIds }
+                  : answer
+              )
+            }
+          : {})
+      },
+      runner
+    });
+    return codexUserInputResponse(batch, outcome);
+  }
+
   private handleJsonRpcNotification(session: JsonRpcRunnerSession, notification: JsonRpcNotification): void {
     const active = session.activeTurn;
     if (!active) return;
@@ -692,4 +841,3 @@ function codexChildEnv(): NodeJS.ProcessEnv {
   delete env.AUTH_TOKEN;
   return env;
 }
-

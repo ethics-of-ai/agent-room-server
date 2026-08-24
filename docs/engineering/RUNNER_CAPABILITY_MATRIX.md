@@ -58,6 +58,7 @@ runner is a row of data rather than a column of exceptions:
 |---|---|---|
 | `promptDelivery` | `turn` | The SDK `initialize` carries no system-prompt parameter — the persona is the composed profile's — so the standing contract rides each turn prompt. |
 | `turnDiffSource` | `settle_time_git` | The session log has no diff event, so `AgentTurnGitDiffTracker` derives one at settlement, as for Claude Code. |
+| `clarifyingQuestions` | `prompt_contract` | The SDK has no server-to-client request. The descriptor owns a bounded line-start assistant block; the adapter maps it into the shared wait and sends the answer as a second Harness prompt inside the same AgentRoom turn. |
 | `workspaceSkills` | `none` | Whether a composition loads workspace skills is the profile's answer and is not visible on the wire; advertising invocations a session would ignore is what the skills read exists to avoid. |
 | `skillSources` / `skillInvocationPrefix` | *(none)* / `/` | Follows from `none`. |
 | `restoreStrategy` | `unsupported` | The wire has no resume method, and reusing an id may create an empty pair when the composition has no persistence. The handshake cannot prove persistence, so the host never idle-reaps the child and a cancelled/crashed session is refused rather than silently restarted. |
@@ -68,6 +69,7 @@ runner is a row of data rather than a column of exceptions:
 |---|---|---|---|---|---|
 | `promptDelivery` | `turn` | `system` | — *retired; the assembler reads the descriptor* | `promptDelivery: "turn" \| "system"` | **3 — done** |
 | `turnDiffSource` | `runner` | `settle_time_git` | — *retired; the session service reads the descriptor* | `turnDiffSource: "runner" \| "settle_time_git"` | **3 — done** |
+| `clarifyingQuestions` | `native` (`item/tool/requestUserInput`) | `native` (`AskUserQuestion`) | — *the assembler reads the descriptor only when the mode carries a prompt contract* | `{ mode: "native" } \| { mode: "prompt_contract"; instruction } \| { mode: "none" }` | **clarifying questions Phase 4 — done** |
 | `workspaceSkills` | `native` | `gated` | — *retired; the skills route reads `workspaceSkillsAvailable()`* | `workspaceSkills: { mode: "native" } \| { mode: "none" } \| { mode: "gated"; gate }` — a discriminated union, so the compiler requires the gate on the branch that needs one | **3 — done** |
 | `skillSources` | `.codex/skills`, `.agents/skills` | `.claude/skills` | — *retired; the explorer reads the descriptor* | `skillSourceDirs: readonly string[]` | **3 — done** |
 | `skillInvocationPrefix` | `$` | `/` | — *retired; the explorer reads the descriptor* | `skillInvocationPrefix: string` | **3 — done** |
@@ -143,6 +145,9 @@ must look deliberate.
 | Claude Code `settingSources` / `permissionMode` gating | `runner/claudeCode/settings.ts:64,85` | Same — the other half of the posture that must not be flattened. |
 | Codex `turn/interrupt` + kill fallback | `CodexAppServerRunner.ts:174` | Cancellation is already abstract at `AgentRunner.cancel`. |
 | Claude Code `query.interrupt()` | `ClaudeCodeRunner.ts:264` | Same. |
+| Claude Code `AskUserQuestion` ↔ the SDK `canUseTool` callback | `runner/claudeCode/askUserQuestion.ts`, `ClaudeCodeRunner.decideToolUse` | The CLI's way of asking is a tool routed through a permission callback; the canonical `question_requested`/`question_resolved` pair, the shared `PendingQuestionRequests` wait, and the answer route are what cross the boundary. The callback's refusal of every other tool is a posture detail documented in `docs/safety/TRUST_AND_SAFETY.md`. |
+| Codex `item/tool/requestUserInput` ↔ the JSON-RPC request dispatcher and the per-thread `tools`/`features` flags | `runner/codex/userInput.ts`, `CodexAppServerRunner.decideUserInput`, `runner/shared/JsonRpcLineClient.onRequest` | Same shape: the app-server's way of asking is a server→client request gated by thread config; the canonical pair and the shared wait are the boundary. |
+| DeepSeek `<agentroom-question>` ↔ a second Harness prompt | `runner/deepseek/promptQuestions.ts`, `DeepSeekHarnessRunner` | The descriptor selects and owns the in-band grammar because the SDK has no request channel; streaming parse, JSON validation, label mapping, and the two-protocol-turn continuation remain DeepSeek details. The canonical pair and shared wait are still the boundary. |
 | Claude Code result-to-turn routing | `ClaudeCodeRunner.ts:381` | An SDK-shaped ordering problem with no Codex analog. |
 | Codex stderr tail + redaction | `CodexAppServerRunner.ts:659,674` | Adapter-authored text; the redaction rule is shared, the tail is not. |
 

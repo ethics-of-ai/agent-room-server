@@ -42,3 +42,5 @@ useful when changing the contracts, but they are not setup guides.
 
 - [Universal runner boundary](engineering/UNIVERSAL_RUNNER_BOUNDARY.md)
 - [Registered runner completeness](engineering/REGISTERED_RUNNER_COMPLETENESS.md)
+- [Clarifying questions](engineering/CLARIFYING_QUESTIONS.md) — the channel
+  through which an agent pauses a turn to ask for direction

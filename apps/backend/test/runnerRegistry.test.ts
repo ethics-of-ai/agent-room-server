@@ -82,6 +82,7 @@ describe("runner registry", () => {
     const codex = runnerDescriptor("codex");
     expect(codex.promptDelivery).toBe("turn");
     expect(codex.turnDiffSource).toBe("runner");
+    expect(codex.clarifyingQuestions.mode).toBe("native");
     expect(codex.workspaceSkills.mode).toBe("native");
     expect([...codex.skillSourceDirs]).toEqual([".codex/skills", ".agents/skills"]);
     expect(codex.skillInvocationPrefix).toBe("$");
@@ -90,6 +91,7 @@ describe("runner registry", () => {
     const claudeCode = runnerDescriptor("claude_code");
     expect(claudeCode.promptDelivery).toBe("system");
     expect(claudeCode.turnDiffSource).toBe("settle_time_git");
+    expect(claudeCode.clarifyingQuestions.mode).toBe("native");
     expect(claudeCode.workspaceSkills.mode).toBe("gated");
     expect([...claudeCode.skillSourceDirs]).toEqual([".claude/skills"]);
     expect(claudeCode.skillInvocationPrefix).toBe("/");
@@ -101,6 +103,10 @@ describe("runner registry", () => {
     // is derived at settlement.
     expect(deepseek.promptDelivery).toBe("turn");
     expect(deepseek.turnDiffSource).toBe("settle_time_git");
+    expect(deepseek.clarifyingQuestions.mode).toBe("prompt_contract");
+    if (deepseek.clarifyingQuestions.mode === "prompt_contract") {
+      expect(deepseek.clarifyingQuestions.instruction).toContain("<agentroom-question>");
+    }
     // Whether a composition loads workspace skills is the profile's answer, not
     // one this backend can read off the wire, so the honest report is none —
     // advertising invocations a session would ignore is what the skills read
@@ -235,13 +241,14 @@ describe("runner registry", () => {
 
     it("projects no policy field a client could act on", () => {
       // The registry answers `promptDelivery`, `turnDiffSource`,
-      // `workspaceSkills`, and `restoreStrategy` *for the backend*. Putting them
-      // on the wire would invite a client to re-derive a decision the boundary
-      // exists to keep on this side of it.
+      // `clarifyingQuestions`, `workspaceSkills`, and `restoreStrategy` *for the
+      // backend*. Putting them on the wire would invite a client to re-derive a
+      // decision the boundary exists to keep on this side of it.
       const serialized = JSON.stringify(publicRunnerDescriptors(config()));
       for (const field of [
         "promptDelivery",
         "turnDiffSource",
+        "clarifyingQuestions",
         "workspaceSkills",
         "restoreStrategy",
         "skillSourceDirs",

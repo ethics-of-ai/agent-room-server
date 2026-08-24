@@ -1,3 +1,5 @@
+import { PendingRequests } from "./PendingRequests";
+
 /**
  * Outstanding permission requests waiting for a human answer.
  *
@@ -6,7 +8,9 @@
  * the third — ask the person driving the session — and it is the *waiting* half
  * of it, kept here rather than in an adapter for the same reason
  * `PersistentRunnerSessionHost` is: an adapter owns its protocol, and a bounded
- * per-session wait is not protocol.
+ * per-session wait is not protocol. The id table, the clock, the cap, and the
+ * release paths are `PendingRequests`, shared with the clarifying-question
+ * channel; what this file owns is the vocabulary check and the outcome shape.
  *
  * Three properties make this safe to expose:
  *
@@ -49,10 +53,8 @@ export type PermissionWaitOutcome =
 
 export type PermissionAnswerResult = "answered" | "unknown_request" | "unknown_option";
 
-interface WaitingRequest {
+interface PermissionEntry {
   readonly optionIds: ReadonlySet<string>;
-  readonly timer: NodeJS.Timeout;
-  settle(outcome: PermissionWaitOutcome): void;
 }
 
 /**
@@ -70,13 +72,15 @@ export const DEFAULT_PERMISSION_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_PER_SESSION = 8;
 
 export class PendingPermissionRequests {
-  private readonly bySession = new Map<string, Map<string, WaitingRequest>>();
-  private readonly timeoutMs: number;
-  private readonly maxPerSession: number;
+  private readonly requests: PendingRequests<PermissionEntry, PermissionWaitOutcome>;
 
   constructor(options: { timeoutMs?: number; maxPerSession?: number } = {}) {
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS;
-    this.maxPerSession = options.maxPerSession ?? DEFAULT_MAX_PER_SESSION;
+    this.requests = new PendingRequests<PermissionEntry, PermissionWaitOutcome>({
+      timeoutMs: options.timeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS,
+      maxPerSession: options.maxPerSession ?? DEFAULT_MAX_PER_SESSION,
+      onTimeout: () => ({ decidedBy: "timeout" }),
+      onRelease: () => ({ decidedBy: "timeout" })
+    });
   }
 
   /**
@@ -98,25 +102,8 @@ export class PendingPermissionRequests {
     options: readonly PermissionRequestOption[];
   }): Promise<PermissionWaitOutcome> | undefined {
     if (input.options.length === 0) return undefined;
-    const requests = this.bySession.get(input.sessionKey) ?? new Map<string, WaitingRequest>();
-    if (requests.size >= this.maxPerSession) return undefined;
-    this.bySession.set(input.sessionKey, requests);
-
-    return new Promise<PermissionWaitOutcome>((resolve) => {
-      const settle = (outcome: PermissionWaitOutcome): void => {
-        const pending = this.bySession.get(input.sessionKey);
-        pending?.delete(input.requestId);
-        if (pending?.size === 0) this.bySession.delete(input.sessionKey);
-        clearTimeout(timer);
-        resolve(outcome);
-      };
-      const timer = setTimeout(() => settle({ decidedBy: "timeout" }), this.timeoutMs);
-      timer.unref?.();
-      requests.set(input.requestId, {
-        optionIds: new Set(input.options.map((option) => option.optionId)),
-        timer,
-        settle
-      });
+    return this.requests.open(input.sessionKey, input.requestId, {
+      optionIds: new Set(input.options.map((option) => option.optionId))
     });
   }
 
@@ -128,27 +115,24 @@ export class PendingPermissionRequests {
    * supplied is the one thing this channel must never do.
    */
   answer(sessionKey: string, requestId: string, optionId: string): PermissionAnswerResult {
-    const request = this.bySession.get(sessionKey)?.get(requestId);
-    if (!request) return "unknown_request";
-    if (!request.optionIds.has(optionId)) return "unknown_option";
-    request.settle({ decidedBy: "human", optionId });
+    const entry = this.requests.entry(sessionKey, requestId);
+    if (!entry) return "unknown_request";
+    if (!entry.optionIds.has(optionId)) return "unknown_option";
+    this.requests.settle(sessionKey, requestId, { decidedBy: "human", optionId });
     return "answered";
   }
 
   /** Settle everything this session holds, so no wait outlives it. */
   releaseSession(sessionKey: string): void {
-    const requests = this.bySession.get(sessionKey);
-    if (!requests) return;
-    for (const request of [...requests.values()]) request.settle({ decidedBy: "timeout" });
-    this.bySession.delete(sessionKey);
+    this.requests.releaseSession(sessionKey);
   }
 
   releaseAll(): void {
-    for (const sessionKey of [...this.bySession.keys()]) this.releaseSession(sessionKey);
+    this.requests.releaseAll();
   }
 
   /** Outstanding request count, for bounds assertions in tests. */
   pendingCount(sessionKey: string): number {
-    return this.bySession.get(sessionKey)?.size ?? 0;
+    return this.requests.pendingCount(sessionKey);
   }
 }
