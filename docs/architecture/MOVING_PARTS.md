@@ -766,8 +766,16 @@
   sections, metadata rows, and dividers (`DashboardPocket*`, extracted from
   `WorkspacePocketView`, which now renders through them). Each pane is pocket
   contents; the detail column owns the scrolling, the reading width, and the
-  title. The connection pane
-  still gates the rest, now by controlling which rows the sidebar has at all:
+  title. The connection pane retains `/health.release` and evaluates its strict
+  product/API floors before authentication, status, or WebSocket setup. A known
+  mismatch stays visible and names the side to update; an older backend with no
+  envelope continues to route checks as explicitly unverified. Its Compatibility
+  section also lazily asks the public GitHub Releases API for advisory download
+  guidance. That shared Apple client caches for 24 hours, revalidates with an
+  ETag, cross-checks the stable tag, version-1 manifest, and exact Mac asset, and
+  never carries a GitHub token. It has no vote in connection state. The
+  connection pane still gates the rest by controlling which rows the sidebar has
+  at all:
   `BackendSettingsPane` renders
   `/api/config`'s metadata through a local presentation catalog
   (`ManagedBackendSettingDescriptor` — titles, sections, and control shapes

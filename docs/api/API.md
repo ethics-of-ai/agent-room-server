@@ -19,9 +19,23 @@ Secrets are never returned by API responses.
   "ok": true,
   "uptimeSeconds": 12,
   "runnerKind": "codex",
-  "mode": "agent-bridge"
+  "mode": "agent-bridge",
+  "release": {
+    "backendVersion": "0.3.1",
+    "apiVersion": "2026-05-12",
+    "minimumSupportedClientApiVersion": "2026-05-12",
+    "compatibleClients": {
+      "macos": { "minimumVersion": "0.1.0" },
+      "visionos": { "minimumVersion": "0.1.0" }
+    }
+  }
 }
 ```
+
+`release` is the connected backend's compatibility authority. A client checks
+both the product-version floor for its platform and the API-version floors. It
+may be absent on an older backend; absence means unverified, not compatible.
+The envelope contains public release policy only and is not bearer-gated.
 
 ## Status
 

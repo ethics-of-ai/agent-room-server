@@ -320,8 +320,14 @@ creates when the same tag is pushed here) or by `workflow_dispatch`. Runs on
    `workflow_dispatch` input `unsigned: true` skips this step for a smoke
    build that is never attached to a release.
 5. `node scripts/package-macos.mjs`. Rename the output to
-   `AgentRoom-<version>-arm64.dmg`, write `SHA256SUMS.txt`, and
-   `gh release create <tag> --generate-notes` with both files attached.
+   `AgentRoom-<version>-arm64.dmg`, then run
+   `scripts/generate-release-manifest.mjs`. The generator imports the compiled
+   backend compatibility record used by `/health`, refuses a mismatched tag or
+   DMG name, and writes `AgentRoom-<version>-release.json` with schema version
+   1. A prerelease tag keeps its full suffix in the tag, DMG, and manifest file
+   names, while its `X.Y.Z` marketing base must match the backend compatibility
+   version. Write `SHA256SUMS.txt` over both the DMG and manifest, then
+   `gh release create <tag> --generate-notes` with all three files attached.
    Prerelease when the tag has a `-` suffix.
 
 Apple Silicon only at first. The Xcode build is universal but the bundled Node

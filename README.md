@@ -59,9 +59,12 @@ layers.
 ## Download
 
 Each release on the [Releases page](https://github.com/ethics-of-ai/agent-room-server/releases)
-carries `AgentRoom-<version>-arm64.dmg` and `SHA256SUMS.txt`. The app is signed
-with a Developer ID certificate and notarized by Apple, so it opens like any
-other downloaded Mac app. Apple Silicon only.
+carries `AgentRoom-<version>-arm64.dmg`,
+`AgentRoom-<version>-release.json`, and `SHA256SUMS.txt`. The manifest records
+the backend/API compatibility policy used by AgentRoom clients. Both the DMG
+and manifest are covered by the checksums. The app is signed with a Developer
+ID certificate and notarized by Apple, so it opens like any other downloaded
+Mac app. Apple Silicon only.
 
 Verify the download before opening it:
 

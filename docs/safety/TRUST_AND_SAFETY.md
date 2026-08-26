@@ -1687,6 +1687,20 @@ Current posture:
   arms that check before asynchronous startup and compares once immediately, so
   an app that dies before Node reaches the watchdog is still detected.
 - Backend sidecar crash restarts are capped.
+- Backend compatibility has one local authority and one public advisory source.
+  `GET /health.release` contains only public product/API versions and client
+  floors; visionOS retains that exact response, blocks known-incompatible pairs
+  before authenticated reads or the event socket, and treats missing or invalid
+  metadata as unverified rather than as proof of compatibility. The optional
+  **Get AgentRoom for Mac** lookup goes directly to the public GitHub Releases
+  API with no token, sends no backend address or bearer token, caches only
+  public release metadata in device-local defaults for 24 hours, and uses ETag
+  revalidation. A DMG is offered only after a version-1 manifest agrees with
+  the stable release tag and an exact `arm64` asset in the same release. A
+  GitHub failure can fall back to that previously validated advisory cache, but
+  the client labels it as a failed refresh and keeps the stable releases link
+  visible. It can never change the connected-backend decision or install
+  anything.
 - Stopping an active turn records only that turn as cancelled. Restorable
   runners return to idle for a follow-up steering turn; stopping DeepSeek kills
   its non-restorable runtime and requires a new AgentRoom session.

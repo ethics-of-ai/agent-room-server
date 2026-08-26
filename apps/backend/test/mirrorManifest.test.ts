@@ -88,6 +88,7 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       "apps/shared/AgentRoomClient/Package.swift",
       "scripts/package-macos.mjs",
       "scripts/install-macos.mjs",
+      "scripts/generate-release-manifest.mjs",
       "scripts/codesign/node-runtime.entitlements",
       "docs/operations/OPEN_SOURCE_MIRROR.md",
       "docs/operations/LOCAL_MAC_SERVER.md",

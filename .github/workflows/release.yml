@@ -175,9 +175,16 @@ jobs:
           set -euo pipefail
           OUT=build/distribution/macos
           DMG="AgentRoom-$VERSION-arm64.dmg"
+          MANIFEST="AgentRoom-$VERSION-release.json"
           mv "$OUT/AgentRoom.dmg" "$OUT/$DMG"
-          (cd "$OUT" && shasum -a 256 "$DMG" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          node scripts/generate-release-manifest.mjs \
+            --output "$OUT/$MANIFEST" \
+            --release-tag "$TAG" \
+            --dmg-name "$DMG" \
+            --architecture arm64
+          (cd "$OUT" && shasum -a 256 "$DMG" "$MANIFEST" > SHA256SUMS.txt && cat SHA256SUMS.txt)
           echo "dmg=$OUT/$DMG" >> "$GITHUB_OUTPUT"
+          echo "manifest=$OUT/$MANIFEST" >> "$GITHUB_OUTPUT"
           echo "sums=$OUT/SHA256SUMS.txt" >> "$GITHUB_OUTPUT"
 
       - name: Gatekeeper assessment of the packaged app
@@ -195,6 +202,7 @@ jobs:
           name: AgentRoom-${{ steps.version.outputs.version }}-arm64
           path: |
             build/distribution/macos/AgentRoom-*.dmg
+            build/distribution/macos/AgentRoom-*-release.json
             build/distribution/macos/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -203,21 +211,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DMG: ${{ steps.artifacts.outputs.dmg }}
+          MANIFEST: ${{ steps.artifacts.outputs.manifest }}
           SUMS: ${{ steps.artifacts.outputs.sums }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
           NODE_VERSION: ${{ steps.node_runtime.outputs.version }}
         run: |
           set -euo pipefail
-          NOTES="Apple Silicon build, signed with Developer ID and notarized. Bundles Node.js $NODE_VERSION (darwin-arm64). Verify the download against SHA256SUMS.txt."
+          NOTES="Apple Silicon build, signed with Developer ID and notarized. Bundles Node.js $NODE_VERSION (darwin-arm64). Compatibility is recorded in the release manifest. Verify both files against SHA256SUMS.txt."
           # Spelled out rather than assembled into an array: this runs on a
           # macOS runner, whose bash is 3.2, where expanding an empty array
           # under `set -u` is an unbound-variable error.
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" --clobber "$DMG" "$SUMS"
+            gh release upload "$TAG" --clobber "$DMG" "$MANIFEST" "$SUMS"
           elif [ "$PRERELEASE" = "true" ]; then
-            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" --prerelease "$DMG" "$SUMS"
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" --prerelease "$DMG" "$MANIFEST" "$SUMS"
           else
-            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "$DMG" "$SUMS"
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "$DMG" "$MANIFEST" "$SUMS"
           fi
 
       - name: Remove the signing keychain

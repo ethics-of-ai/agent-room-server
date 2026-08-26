@@ -1,6 +1,6 @@
 import Foundation
 
-public struct BackendReleaseCompatibility: Codable, Hashable {
+public struct BackendReleaseCompatibility: Codable, Hashable, Sendable {
     public var backendVersion: String
     public var apiVersion: String
     public var minimumSupportedClientApiVersion: String
@@ -18,7 +18,7 @@ public struct BackendReleaseCompatibility: Codable, Hashable {
         self.compatibleClients = compatibleClients
     }
 
-    public struct CompatibleClients: Codable, Hashable {
+    public struct CompatibleClients: Codable, Hashable, Sendable {
         public var macos: Client
         public var visionos: Client
 
@@ -28,7 +28,7 @@ public struct BackendReleaseCompatibility: Codable, Hashable {
         }
     }
 
-    public struct Client: Codable, Hashable {
+    public struct Client: Codable, Hashable, Sendable {
         public var minimumVersion: String
 
         public init(minimumVersion: String) {
@@ -37,7 +37,7 @@ public struct BackendReleaseCompatibility: Codable, Hashable {
     }
 }
 
-public struct HealthResponse: Codable, Hashable {
+public struct HealthResponse: Codable, Hashable, Sendable {
     public var ok: Bool
     public var uptimeSeconds: Int
     public var runnerKind: String
