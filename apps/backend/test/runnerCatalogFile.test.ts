@@ -39,7 +39,8 @@ describe("offline runner catalog file", () => {
       runners: [
         { runnerKind: "codex", displayName: "Codex", registered: true, configured: true, enabled: true },
         { runnerKind: "claude_code", displayName: "Claude Code", registered: true, configured: true, enabled: true },
-        { runnerKind: "deepseek", displayName: "DeepSeek Harness", registered: true, configured: false, enabled: true }
+        { runnerKind: "deepseek", displayName: "DeepSeek Harness", registered: true, configured: false, enabled: true },
+        { runnerKind: "cursor", displayName: "Cursor", registered: true, configured: true, enabled: true }
       ]
     });
   });

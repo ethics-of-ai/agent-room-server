@@ -51,6 +51,15 @@ enum ManagedBackendSettingKey: String, CaseIterable {
     // Tier 2 — the harness's own approval posture, whose vocabulary belongs to
     // the composed profile rather than to AgentRoom, so it carries no options.
     case deepseekPermissionMode
+    // Cursor.
+    case cursorModel
+    case cursorReasoningEffort
+    case cursorServiceTier
+    // Tier 2 — the SDK's own posture: the sandbox (writes and network, not
+    // reads), the server-side auto review, and the workspace `project` source.
+    case cursorSandbox
+    case cursorAutoReview
+    case cursorLoadWorkspaceSettings
 }
 
 extension ManagedBackendSettingKey {
@@ -65,7 +74,8 @@ extension ManagedBackendSettingKey {
     static let runnerNamespaces: [(prefix: String, runnerKind: String)] = [
         ("codex", "codex"),
         ("claudeCode", "claude_code"),
-        ("deepseek", "deepseek")
+        ("deepseek", "deepseek"),
+        ("cursor", "cursor")
     ]
 
     /// The two sections of the settings document. Declared beside the settings

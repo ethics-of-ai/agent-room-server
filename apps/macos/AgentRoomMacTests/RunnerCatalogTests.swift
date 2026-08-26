@@ -23,10 +23,11 @@ final class RunnerCatalogTests: XCTestCase {
     func testTheOfflineFloorNamesTheRunnersThisBuildShipsKnowing() {
         XCTAssertEqual(
             RunnerCatalog.builtIn.descriptors.map(\.runnerKind),
-            ["codex", "claude_code", "deepseek"]
+            ["codex", "claude_code", "deepseek", "cursor"]
         )
         XCTAssertEqual(RunnerCatalog.builtIn.displayName(for: "codex"), "Codex")
         XCTAssertEqual(RunnerCatalog.builtIn.displayName(for: "deepseek"), "DeepSeek Harness")
+        XCTAssertEqual(RunnerCatalog.builtIn.displayName(for: "cursor"), "Cursor")
     }
 
     func testASyntheticThirdDescriptorRendersUnderItsOwnName() {
@@ -43,7 +44,7 @@ final class RunnerCatalogTests: XCTestCase {
         // the next change to something they never chose.
         let offered = RunnerCatalog.builtIn.includingSelection("acp_demo")
 
-        XCTAssertEqual(offered.map(\.runnerKind), ["codex", "claude_code", "deepseek", "acp_demo"])
+        XCTAssertEqual(offered.map(\.runnerKind), ["codex", "claude_code", "deepseek", "cursor", "acp_demo"])
         XCTAssertEqual(offered.last?.displayName, "Acp Demo")
     }
 

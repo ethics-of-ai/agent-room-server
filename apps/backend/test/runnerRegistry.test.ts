@@ -37,13 +37,14 @@ describe("runner registry", () => {
   it("registers exactly the runner ids this build ships", () => {
     // The rollout gate from docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md, which
     // opened for `deepseek` on 2026-08-18
-    // (docs/engineering/DEEPSEEK_HARNESS_RUNNER.md). It still guards something
-    // specific: a bundled id reaches `global.runnerKind`, which is a *known*
-    // settings key, so an older AgentRoom that meets a file naming this runner
-    // treats the whole file as unusable and drops the operator's trust posture
-    // onto defaults. Adding an id here is that decision being made, so this
-    // assertion is the gate rather than a tautology.
-    expect([...registeredRunnerKinds]).toEqual(["codex", "claude_code", "deepseek"]);
+    // (docs/engineering/DEEPSEEK_HARNESS_RUNNER.md) and for `cursor` on
+    // 2026-08-26 (docs/engineering/CURSOR_SDK_RUNNER.md). It still guards
+    // something specific: a bundled id reaches `global.runnerKind`, which is a
+    // *known* settings key, so an older AgentRoom that meets a file naming this
+    // runner treats the whole file as unusable and drops the operator's trust
+    // posture onto defaults. Adding an id here is that decision being made, so
+    // this assertion is the gate rather than a tautology.
+    expect([...registeredRunnerKinds]).toEqual(["codex", "claude_code", "deepseek", "cursor"]);
   });
 
   it("has one descriptor per registered id, keyed by its own id", () => {
@@ -114,6 +115,33 @@ describe("runner registry", () => {
     expect(deepseek.workspaceSkills.mode).toBe("none");
     expect([...deepseek.skillSourceDirs]).toEqual([]);
     expect(deepseek.restoreStrategy).toBe("unsupported");
+
+    const cursor = runnerDescriptor("cursor");
+    // `AgentOptions` has no system-prompt parameter and the stream has no
+    // turn-level diff, so the contract rides the turn prompt and the diff is
+    // derived at settlement. Questions are a real custom-tool callback, and
+    // `Agent.resume` continues a persisted agent from a fresh process.
+    expect(cursor.promptDelivery).toBe("turn");
+    expect(cursor.turnDiffSource).toBe("settle_time_git");
+    expect(cursor.clarifyingQuestions.mode).toBe("native");
+    expect(cursor.workspaceSkills.mode).toBe("gated");
+    // All four skill directories load under the `project` source, in the
+    // vendor's documented precedence (fact 6 of the plan).
+    expect([...cursor.skillSourceDirs]).toEqual([".cursor/skills", ".agents/skills", ".claude/skills", ".codex/skills"]);
+    expect(cursor.skillInvocationPrefix).toBe("/");
+    expect(cursor.restoreStrategy).toBe("native_resume");
+    // Step 5 of the plan: three preferences and three trust booleans, each
+    // with its env name; the tier-2 defaults are the conservative direction
+    // (sandboxed, no auto review) except the `project` source, which follows
+    // Claude Code's documented default.
+    expect(cursor.settings.map((setting) => [setting.field, setting.tier, setting.env, setting.defaultValue])).toEqual([
+      ["model", 1, "CURSOR_MODEL", undefined],
+      ["reasoningEffort", 1, "CURSOR_REASONING_EFFORT", undefined],
+      ["serviceTier", 1, "CURSOR_SERVICE_TIER", undefined],
+      ["sandbox", 2, "CURSOR_SANDBOX", true],
+      ["autoReview", 2, "CURSOR_AUTO_REVIEW", false],
+      ["loadWorkspaceSettings", 2, "CURSOR_LOAD_WORKSPACE_SETTINGS", true]
+    ]);
   });
 
   describe("workspace-skill availability", () => {
@@ -169,6 +197,14 @@ describe("runner registry", () => {
       // value the backend must hold. Whether the operator is signed in is Mac
       // bootstrap readiness — a different authority, and Phase 6's problem.
       expect(runnerAvailability("claude_code", config()).configured).toBe(true);
+    });
+
+    it("treats Cursor as configured without a bootstrap value", () => {
+      // The Cursor SDK is bundled and resolves its own credential (an explicit
+      // `CURSOR_API_KEY`, else the stored web sign-in), the Claude Code
+      // precedent. Sign-in presence is the Mac's answer; an expired key is the
+      // runtime probe's.
+      expect(runnerAvailability("cursor", config()).configured).toBe(true);
     });
   });
 
@@ -235,7 +271,8 @@ describe("runner registry", () => {
         // Registered but not configured: no DEEPSEEK_EXECUTABLE in this config.
         // The states stay separate precisely so a client cannot read one as
         // another and offer a runner the backend could not start.
-        { runnerKind: "deepseek", displayName: "DeepSeek Harness", registered: true, configured: false, enabled: true }
+        { runnerKind: "deepseek", displayName: "DeepSeek Harness", registered: true, configured: false, enabled: true },
+        { runnerKind: "cursor", displayName: "Cursor", registered: true, configured: true, enabled: true }
       ]);
     });
 

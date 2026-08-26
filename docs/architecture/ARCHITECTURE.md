@@ -15,10 +15,10 @@ Fastify backend on Mac
   backend turn context assembly
   session attachment storage
   bounded harness actions
-  AgentRunner registry (codex | claude_code | deepseek)
+  AgentRunner registry (codex | claude_code | deepseek | cursor)
   EventBus + audit log
       |
-local Codex app-server / Claude Code session / DeepSeek Harness runtime
+local Codex app-server / Claude Code session / DeepSeek Harness runtime / Cursor SDK host
 ```
 
 ## Boundaries
@@ -63,8 +63,9 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime
   process) per AgentRoom session, streamed partial-message deltas, and
   `interrupt()`-based turn cancellation. Persistent runner children are
   idle-reaped after 30 minutes only when the adapter declares a restore path.
-  Codex and Claude Code resume their native thread (Codex `thread/resume`, SDK
-  `resume`) after reaping or child loss. DeepSeek declares restoration
+  Codex, Claude Code, and Cursor resume their native thread (Codex
+  `thread/resume`, Claude Agent SDK `resume`, Cursor `Agent.resume`) after
+  reaping or child loss. DeepSeek declares restoration
   unsupported, so its child stays resident while idle and a cancelled or lost
   runtime makes that AgentRoom session uncontinuable rather than silently
   starting a fresh conversation.
@@ -104,9 +105,11 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime
   bounded and a timeout is reported as a timeout, never as a default choice; the
   audit keeps the decision while the thread keeps the words. Claude Code asks
   through its `AskUserQuestion` tool over the SDK callback; Codex through
-  `item/tool/requestUserInput`; DeepSeek, whose SDK has no request channel,
-  through a descriptor-owned bounded prompt block that the adapter resumes with
-  a second Harness prompt inside the same AgentRoom turn. A runner whose
+  `item/tool/requestUserInput`; Cursor through one `ask_user_question` custom
+  tool the host relays to the backend as a `question/ask` request; DeepSeek,
+  whose SDK has no request channel, through a descriptor-owned bounded prompt
+  block that the adapter resumes with a second Harness prompt inside the same
+  AgentRoom turn. A runner whose
   descriptor declares neither path has nothing outstanding. One tier-1 setting
   turns the channel off for every runner.
 - Backend turn context assembly combines the original user message, selected
@@ -159,7 +162,7 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime
 - Live artifacts are model-authored sketches the runner writes in-band as an
   `<artifact kind="svg|mermaid">` region of its assistant text. The backend
   parses that region out of the unified assistant delta stream (identical for
-  both runners), keeps it out of the chat transcript, and republishes it as
+  every runner), keeps it out of the chat transcript, and republishes it as
   `coding_artifact_*` events backed by a bounded, per-session, in-memory store
   released on session deletion. Nothing is written into the registered
   workspace. The channel is gated by `ARTIFACTS_ENABLED`.

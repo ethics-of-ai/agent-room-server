@@ -1,9 +1,9 @@
 # Clarifying Questions
 
-Status: **Phases 1–4 landed for the three bundled runners** (backend channel +
-Claude Code adapter, the Codex adapter, the shared client + visionOS deck, then
-the DeepSeek Harness prompt-contract adapter, 2026-08-23). ACP remains
-explicitly `none`. Written after
+Status: **Phases 1–5 landed for the four bundled runners** (backend channel +
+Claude Code adapter, the Codex adapter, the shared client + visionOS deck, the
+DeepSeek Harness prompt-contract adapter on 2026-08-23, then the Cursor
+custom-tool adapter on 2026-08-26). ACP remains explicitly `none`. Written after
 [Registered Runner Completeness](REGISTERED_RUNNER_COMPLETENESS.md) closed, and
 it assumes that plan's answer channel for permissions: the shared waiting store,
 the optional `AgentRunner` hook, the one bearer-gated route, audit of the
@@ -294,9 +294,9 @@ system hover (10073 t=312/t=548, 10076 t=724); text entry (10073 t=639).
 
 - `RunnerDescriptor.clarifyingQuestions` is the dispatch policy:
   `{ mode: "native" }`, `{ mode: "prompt_contract", instruction }`, or
-  `{ mode: "none" }`. Codex and Claude Code are native; DeepSeek owns its
-  prompt instruction on the prompt-contract row; external ACP adapters remain
-  `none`. The field and instruction are deliberately absent from
+  `{ mode: "none" }`. Codex, Claude Code, and (since Phase 5) Cursor are
+  native; DeepSeek owns its prompt instruction on the prompt-contract row;
+  external ACP adapters remain `none`. The field and instruction are deliberately absent from
   `GET /api/runners`' safe/public projection.
 - `AgentTurnContextAssembler` injects the descriptor-owned instruction only for
   a prompt-contract runner and only while `clarifyingQuestionsEnabled` is on.
@@ -341,6 +341,48 @@ system hover (10073 t=312/t=548, 10076 t=724); text entry (10073 t=639).
   syntax. Its descriptor stays `none` until a separate rollout proves a
   contract.
 
+## Phase 5 — Cursor custom tool — **landed**
+
+The fourth bundled runner ([Cursor SDK runner](CURSOR_SDK_RUNNER.md)) asks
+through a tool rather than a prompt grammar, and the tool is one AgentRoom
+registers rather than one the SDK ships.
+
+- `@cursor/sdk`'s built-in `askQuestion` is absent from the headless tool
+  catalog (the plan's fact 3): asked to use it, the model reported it missing
+  and asked in prose. The adapter still passes `disallowedTools:
+  ["askQuestion"]` on every `agent/start`, so a later SDK that adds it headless
+  cannot open a question path AgentRoom has no answer for.
+- The channel is `local.customTools`: in-process callbacks the SDK exposes to
+  the model as the `custom-user-tools` MCP server, whose `execute` may be
+  asynchronous and never needs interactive approval. While
+  `clarifyingQuestionsEnabled` is on, `agent/start` carries
+  `questionTool: true` and the host registers one tool, `ask_user_question`,
+  whose input schema is the shared vocabulary (up to 8 sets of up to 8
+  options, `single`/`multiple`, free text `none`/`optional`/`required`,
+  `sensitive`). Off, no tool is registered and no prompt mentions one.
+- The SDK runs in a host child, so the callback crosses AgentRoom's own wire:
+  `execute` sends one `question/ask` request from the host to the backend over
+  the same newline-framed JSON-RPC the turn rides, and awaits the answer. The
+  backend (`runner/cursor/questions.ts`) mints every set and option id, opens
+  the same `PendingQuestionRequests` wait, and emits the same canonical
+  `question_requested`; the answer route settles it; the tool result the model
+  sees is the person's option labels and invited text, never an AgentRoom id.
+  A timeout returns a tool result saying nobody answered and asking the model
+  to continue on its best judgment. A `sensitive` set's text enters the tool
+  result and is absent from the canonical resolution, transcript, audit, and
+  logs.
+- The descriptor row is `clarifyingQuestions: { mode: "native" }`: the model
+  calls a real tool and the adapter receives a real callback. That the
+  callback rides AgentRoom's wire is adapter-internal. It differs from
+  DeepSeek's prompt contract in the way that matters: no parser, no grammar the
+  model can get wrong, and a question that arrives mid-turn as a tool call the
+  SDK itself sequences.
+- Tests: `cursorHost.test.ts` (the tool is registered only when asked for,
+  `askQuestion` always disallowed) and `cursorRunner.test.ts` (the
+  `question/ask` round trip, its timeout, the kill switch, a sensitive
+  resolution, and the HTTP end-to-end flow through re-seed, answer, transcript,
+  audit, and turn completion).
+
 ## Verification
 
 Backend: `pnpm typecheck`, `pnpm --filter @agentroom/backend build`,
@@ -353,6 +395,9 @@ user message in `/messages`, and `agent_question_resolved` in `/api/audit`
 without the free text; repeat with Codex. For DeepSeek, use a trusted scratch
 workspace and ask it to use its AgentRoom clarification block before proceeding;
 expect one AgentRoom turn to remain running across the request and the follow-up
-Harness prompt, then complete after the answer. Repeat with
+Harness prompt, then complete after the answer. For Cursor, ask it to use its
+`ask_user_question` tool before proceeding; expect `coding_question_requested`
+while the SDK's tool call stays open, the answer to arrive as that tool's
+result, and the turn to complete. Repeat with
 `CLARIFYING_QUESTIONS_ENABLED=false` and confirm no question block is requested
-or intercepted.
+or intercepted and no question tool is registered.

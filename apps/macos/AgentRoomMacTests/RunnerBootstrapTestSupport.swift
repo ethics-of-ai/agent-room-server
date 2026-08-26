@@ -13,11 +13,13 @@ enum RunnerBootstrapTestSupport {
         codexCandidates: [URL] = [],
         claudeCandidates: [URL] = [],
         deepseekCandidates: [URL] = [],
-        keychainStatus: OSStatus = errSecItemNotFound
+        keychainStatus: OSStatus = errSecItemNotFound,
+        filePresence: FilePresenceProbe = signedOutFilePresence
     ) -> RunnerBootstrapProber {
         RunnerBootstrapProber(
             environment: [:],
             keychain: KeychainPresenceProbe(lookup: { _ in keychainStatus }),
+            filePresence: filePresence,
             searchOverrides: [
                 RunnerBootstrapProber.overrideKey(runnerKind: "codex", probeID: "executable"):
                     search(binaryName: "codex", candidates: codexCandidates),
@@ -28,6 +30,15 @@ enum RunnerBootstrapTestSupport {
             ]
         )
     }
+
+    /// A file-presence probe whose `~` is a directory that does not exist, so
+    /// the bundled Cursor sign-in check reads absent regardless of whether the
+    /// developer running the suite is signed in to Cursor.
+    static let signedOutFilePresence = FilePresenceProbe(
+        homeDirectory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("agentroom-tests-no-such-home-\(UUID().uuidString)", isDirectory: true)
+            .path
+    )
 
     /// The bundled DeepSeek source-checkout contract with its interpreter search
     /// pointed at the test's own fake `node`, so the walk under test does not

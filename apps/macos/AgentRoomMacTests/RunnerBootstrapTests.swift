@@ -150,6 +150,70 @@ final class RunnerBootstrapTests: XCTestCase {
         XCTAssertNil(signedIn.status.resolvedPath)
     }
 
+    func testCursorSignInProbeChecksPresenceAndNeverOpensTheFile() throws {
+        let descriptor = RunnerBootstrapTestSupport.descriptor("cursor")
+        let probe = try XCTUnwrap(descriptor.probe("signIn"))
+        let home = temporaryURL(named: "home")
+        let signIn = home.appendingPathComponent(".cursor/sdk/auth.json")
+        let prober = RunnerBootstrapTestSupport.prober(filePresence: FilePresenceProbe(homeDirectory: home.path))
+
+        let signedOut = prober.run(probe, of: descriptor) { _ in nil }
+
+        XCTAssertEqual(signedOut.status, .absent)
+        XCTAssertEqual(
+            probe.blockingItem(for: signedOut.status),
+            "Sign in to Cursor with the sign-in command so Cursor turns can authenticate."
+        )
+
+        try FileManager.default.createDirectory(
+            at: signIn.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(#"{"apiKey":"fixture-cursor-key"}"#.utf8).write(to: signIn)
+        // The SDK writes the file 0600. Make this one unreadable outright: a
+        // probe that is satisfied by a file it could not have read is what
+        // proves it stats the path and never opens it.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: signIn.path)
+        addTeardownBlock {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: signIn.path)
+        }
+
+        let signedIn = prober.run(probe, of: descriptor) { _ in nil }
+
+        XCTAssertEqual(signedIn.status, .satisfied(detail: nil))
+        // Presence only: no path, no slot, and nothing from inside the file.
+        XCTAssertNil(signedIn.status.resolvedPath)
+        XCTAssertNil(signedIn.resolvedSlot)
+        XCTAssertEqual(probe.message(for: signedIn.status), "Cursor is signed in. Turns bill your Cursor account.")
+        XCTAssertNil(probe.blockingItem(for: signedIn.status))
+    }
+
+    func testCursorSignInProbeDoesNotMistakeADirectoryForTheSignInFile() throws {
+        let descriptor = RunnerBootstrapTestSupport.descriptor("cursor")
+        let probe = try XCTUnwrap(descriptor.probe("signIn"))
+        let home = temporaryURL(named: "home")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".cursor/sdk/auth.json"),
+            withIntermediateDirectories: true
+        )
+        let prober = RunnerBootstrapTestSupport.prober(filePresence: FilePresenceProbe(homeDirectory: home.path))
+
+        XCTAssertEqual(prober.run(probe, of: descriptor) { _ in nil }.status, .absent)
+    }
+
+    func testCursorDeclaresNoSlotSoItsBootstrapAddsNoEnvironmentName() throws {
+        // The SDK is bundled and its credential is a file it owns, so there is
+        // nothing for this app to hold: no executable, no arguments, no key.
+        // The descriptor therefore grows the launch allowlist by nothing.
+        let descriptor = RunnerBootstrapTestSupport.descriptor("cursor")
+
+        XCTAssertTrue(descriptor.slots.isEmpty)
+        XCTAssertFalse(RunnerBootstrapCatalog.environmentNames.contains { $0.hasPrefix("CURSOR_") })
+        let probe = try XCTUnwrap(descriptor.probe("signIn"))
+        XCTAssertEqual(probe.requirement, .required)
+        XCTAssertNil(probe.resolvedSlotID)
+    }
+
     func testAnInformationalPrerequisiteNeverBlocksSetup() throws {
         let descriptor = RunnerBootstrapTestSupport.descriptor("claude_code")
         let signIn = try XCTUnwrap(descriptor.probe("signIn"))

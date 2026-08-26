@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { constants } from "node:fs";
-import { access, chmod, cp, lstat, mkdir, open, readdir, readlink, rm, symlink, unlink } from "node:fs/promises";
+import { access, chmod, cp, lstat, mkdir, open, readdir, readlink, realpath, rm, stat, symlink, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -44,6 +44,81 @@ export function xcodebuildVersionOverrides(env = process.env) {
     overrides.push(`CURRENT_PROJECT_VERSION=${build}`);
   }
   return overrides;
+}
+
+/**
+ * The Node floor the bundled runtime must meet: `@cursor/sdk` persists agent
+ * state through `node:sqlite`, which is absent below this version, so a lower
+ * runtime would turn the first Cursor turn into a stack trace. `@cursor/sdk`'s
+ * own `engines.node` is `>=22.13`.
+ */
+export const CURSOR_SDK_NODE_FLOOR = "22.13.0";
+
+/**
+ * Cursor 1.0.28 does not resolve its native helper through Node's package
+ * resolver. It walks up from the host entrypoint and looks for this literal
+ * package path, so the backend must declare the Darwin packages directly.
+ */
+export function cursorSandboxPlatformPackage(platform = process.platform, arch = process.arch) {
+  if (platform !== "darwin" || (arch !== "arm64" && arch !== "x64")) {
+    throw new Error(`The macOS distribution cannot package Cursor's sandbox helper for ${platform}-${arch}.`);
+  }
+  return `@cursor/sdk-${platform}-${arch}`;
+}
+
+/**
+ * Fail before signing when Cursor's literal package lookup would miss the
+ * sandbox helper. The resolved file must stay inside the resource bundle so a
+ * copied app never keeps a pnpm link back to the build checkout.
+ */
+export async function assertPackagedCursorSandboxHelper({
+  backendNodeModules,
+  bundleRoot,
+  platform = process.platform,
+  arch = process.arch
+}) {
+  const packageName = cursorSandboxPlatformPackage(platform, arch);
+  const helperPath = resolve(backendNodeModules, packageName, "bin/cursorsandbox");
+  let resolvedPath;
+  let helperStats;
+
+  try {
+    resolvedPath = await realpath(helperPath);
+    helperStats = await stat(resolvedPath);
+    await access(helperPath, constants.X_OK);
+  } catch (error) {
+    throw new Error(
+      `Packaged Cursor sandbox helper is missing or not executable at ${helperPath}. `
+        + `Declare ${packageName} as a direct optional backend dependency.`,
+      { cause: error }
+    );
+  }
+
+  if (!helperStats.isFile()) {
+    throw new Error(`Packaged Cursor sandbox helper is not a regular file at ${resolvedPath}.`);
+  }
+
+  const root = await realpath(bundleRoot);
+  if (resolvedPath !== root && !resolvedPath.startsWith(`${root}${sep}`)) {
+    throw new Error(`Packaged Cursor sandbox helper resolves outside the app bundle: ${resolvedPath}.`);
+  }
+
+  return { helperPath, resolvedPath };
+}
+
+/** True when `version` (with or without a leading `v`) is at least `floor`. */
+export function meetsNodeFloor(version, floor = CURSOR_SDK_NODE_FLOOR) {
+  const parse = (value) =>
+    String(value)
+      .trim()
+      .replace(/^v/, "")
+      .split(".")
+      .map((part) => Number.parseInt(part, 10));
+  const [vMajor = 0, vMinor = 0, vPatch = 0] = parse(version);
+  const [fMajor, fMinor, fPatch] = parse(floor);
+  if (vMajor !== fMajor) return vMajor > fMajor;
+  if (vMinor !== fMinor) return vMinor > fMinor;
+  return vPatch >= fPatch;
 }
 
 const MACH_O_MAGICS = new Set([0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca]);
@@ -228,6 +303,10 @@ async function main() {
     recursive: true,
     verbatimSymlinks: true
   });
+  await assertPackagedCursorSandboxHelper({
+    backendNodeModules: resolve(appPath, "Contents/Resources/backend/node_modules"),
+    bundleRoot: resolve(appPath, "Contents/Resources")
+  });
 
   if (signingIdentity) {
     await requireExecutable("codesign");
@@ -237,6 +316,10 @@ async function main() {
   }
 
   await createDmgStaging(dmgStagingPath, appPath);
+  await assertPackagedCursorSandboxHelper({
+    backendNodeModules: resolve(dmgStagingPath, "AgentRoom.app/Contents/Resources/backend/node_modules"),
+    bundleRoot: resolve(dmgStagingPath, "AgentRoom.app/Contents/Resources")
+  });
   if (signingIdentity) {
     // Verify the copy that actually goes into the DMG, not just the original the
     // signing pass checked. Anything the staging copy disturbs shows up here as
@@ -340,6 +423,10 @@ async function packageBackendResources(repoRoot, destinationRoot, env) {
     backendDestinationNodeModules: resolve(backendDestination, "node_modules"),
     resourceNodeModules: resolve(destinationRoot, "node_modules")
   });
+  await assertPackagedCursorSandboxHelper({
+    backendNodeModules: resolve(backendDestination, "node_modules"),
+    bundleRoot: destinationRoot
+  });
   await copyNodeRuntime(nodeDestination, env);
 }
 
@@ -411,6 +498,7 @@ async function copyNodeRuntime(destination, env) {
     await cp(resolve(runtimeDir), destination, { recursive: true, dereference: true });
     await assertPath(resolve(destination, "bin/node"), "AGENTROOM_NODE_RUNTIME_DIR must contain bin/node.");
     await chmod(resolve(destination, "bin/node"), 0o755);
+    assertNodeRuntimeFloor(resolve(destination, "bin/node"));
     return;
   }
 
@@ -418,9 +506,29 @@ async function copyNodeRuntime(destination, env) {
   await cp(inferredRuntimeRoot, destination, { recursive: true, dereference: true });
   await assertPath(resolve(destination, "bin/node"), `Could not infer a Node runtime root from ${process.execPath}.`);
   await chmod(resolve(destination, "bin/node"), 0o755);
+  assertNodeRuntimeFloor(resolve(destination, "bin/node"));
   console.log(
     `Copied the current Node runtime from ${inferredRuntimeRoot}. For portable release builds, set AGENTROOM_NODE_RUNTIME_DIR to a full Node.js macOS runtime.`
   );
+}
+
+/**
+ * Fail packaging when the bundled runtime is below the Cursor SDK's floor. A
+ * lower Node has no `node:sqlite`, so the failure would otherwise land as a
+ * first-turn stack trace in a shipped DMG rather than here.
+ */
+function assertNodeRuntimeFloor(nodeBinPath) {
+  const result = spawnSync(nodeBinPath, ["--version"], { encoding: "utf8" });
+  const version = (result.stdout ?? "").trim();
+  if (result.status !== 0 || !version) {
+    throw new Error(`Could not read the bundled Node runtime version from ${nodeBinPath}.`);
+  }
+  if (!meetsNodeFloor(version)) {
+    throw new Error(
+      `Bundled Node runtime ${version} is below the ${CURSOR_SDK_NODE_FLOOR} floor the Cursor SDK's node:sqlite persistence needs. Set AGENTROOM_NODE_RUNTIME_DIR to a newer runtime.`
+    );
+  }
+  console.log(`Bundled Node runtime ${version} meets the ${CURSOR_SDK_NODE_FLOOR} floor.`);
 }
 
 /**
@@ -449,12 +557,22 @@ export async function createDmgStaging(stagingPath, appPath) {
 
 /**
  * Binaries the signing pass leaves exactly as their publisher shipped them.
+ *
  * Anthropic's terms for preinstalling Claude Code require the binary to run as
  * published, so the Claude Agent SDK's platform package (which carries it) is
- * never re-signed; it ships with Anthropic's own signature.
+ * never re-signed; it ships with Anthropic's own signature. Cursor's SDK ships
+ * `cursorsandbox`, `rg`, and tree-sitter `binding.node` files in its
+ * `@cursor/sdk-darwin-*` platform package, signed by Anysphere with the
+ * hardened runtime and no entitlements (fact 4 of
+ * docs/engineering/CURSOR_SDK_RUNNER.md); AgentRoom bundles the SDK unmodified,
+ * so those keep their publisher's signature too. See
+ * mirror/overlay/THIRD_PARTY_NOTICES.md.
  */
 export function isPublisherSignedBinary(path) {
-  return /\/@anthropic-ai\/claude-agent-sdk-darwin-[^/]+\//.test(path);
+  return (
+    /\/@anthropic-ai\/claude-agent-sdk-darwin-[^/]+\//.test(path) ||
+    /\/@cursor\/sdk-darwin-[^/]+\//.test(path)
+  );
 }
 
 /**

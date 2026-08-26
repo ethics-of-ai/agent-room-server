@@ -10,6 +10,7 @@ struct RunnerBootstrapProber {
     var environment: [String: String]
     var fileManager: FileManager
     var keychain: KeychainPresenceProbe
+    var filePresence: FilePresenceProbe
     /// Overrides the search a descriptor declares, keyed by `runnerKind/probeID`.
     /// Tests point a probe at a temporary directory with it; production passes
     /// none and the descriptor's own search is used.
@@ -19,11 +20,13 @@ struct RunnerBootstrapProber {
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default,
         keychain: KeychainPresenceProbe = KeychainPresenceProbe(),
+        filePresence: FilePresenceProbe = FilePresenceProbe(),
         searchOverrides: [String: ExecutableSearch] = [:]
     ) {
         self.environment = environment
         self.fileManager = fileManager
         self.keychain = keychain
+        self.filePresence = filePresence
         self.searchOverrides = searchOverrides
     }
 
@@ -98,6 +101,17 @@ struct RunnerBootstrapProber {
                     status: .failed(message: probe.messages.filled(probe.messages.failure, with: reason)),
                     resolvedSlot: nil
                 )
+            }
+
+        case .filePresence(let path):
+            // Presence carries no detail on purpose: the path is the
+            // credential's location, and the status row, the setup checklist,
+            // and the diagnostics log all render what this returns.
+            switch filePresence.presence(at: path) {
+            case .present:
+                return Outcome(status: .satisfied(detail: nil), resolvedSlot: nil)
+            case .absent:
+                return Outcome(status: .absent, resolvedSlot: nil)
             }
         }
     }

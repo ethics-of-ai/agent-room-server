@@ -11,7 +11,7 @@ import Foundation
 /// but this build has no bootstrap for simply contributes no local check, which
 /// is the honest answer rather than another runner's.
 enum RunnerBootstrapCatalog {
-    static let builtIn: [RunnerBootstrapDescriptor] = [codex, claudeCode, deepseek]
+    static let builtIn: [RunnerBootstrapDescriptor] = [codex, claudeCode, deepseek, cursor]
 
     static func descriptor(for runnerKind: String) -> RunnerBootstrapDescriptor? {
         builtIn.first { $0.runnerKind == runnerKind }
@@ -341,5 +341,45 @@ enum RunnerBootstrapCatalog {
         // The field above replaced it, and the explanation went with it — a
         // caption about a value now belongs to that value's own slot.
         notes: []
+    )
+
+    private static let cursor = RunnerBootstrapDescriptor(
+        runnerKind: "cursor",
+        // No slots. The SDK is bundled with the backend, so there is no
+        // executable to find on PATH and no argument list, and its credential
+        // is a file the SDK owns rather than a value this app holds. So this
+        // descriptor adds no name to the launch-environment allowlist.
+        // `CURSOR_API_KEY` deliberately has no Keychain slot in this pass: a
+        // required sign-in probe that a filled secret slot could satisfy is a
+        // composition the probe model does not have, and an operator who
+        // prefers a key sets it in $AGENTROOM_HOME/config/.env, which the
+        // backend reads itself.
+        slots: [],
+        probes: [
+            RunnerBootstrapProbe(
+                id: "signIn",
+                // The file `Cursor.auth.login()` writes (0600): the minted user
+                // API key. Presence only, exactly as the Claude Code Keychain
+                // lookup: the path is stat'ed and never opened, because the
+                // file *is* the credential. Presence cannot tell an expired
+                // key from a live one; that is the backend's `ready`, and the
+                // two stay separate authorities.
+                kind: .filePresence(path: "~/.cursor/sdk/auth.json"),
+                requirement: .required,
+                actionTitle: "Check Cursor sign-in",
+                actionSymbol: "person.badge.key",
+                messages: RunnerBootstrapProbeMessages(
+                    satisfied: "Cursor is signed in. Turns bill your Cursor account.",
+                    detected: "Cursor is signed in. Turns bill your Cursor account.",
+                    // The command itself lives in the docs, where it can be
+                    // corrected without shipping the app again.
+                    absent: "No Cursor sign-in found. Run the Cursor sign-in command in Terminal, then rerun this check. See docs/clients/MACOS.md.",
+                    failure: "Could not verify Cursor sign-in (%@).",
+                    blockingAbsent: "Sign in to Cursor with the sign-in command so Cursor turns can authenticate.",
+                    blockingFailed: "Resolve the Cursor sign-in check error.",
+                    blockingUnchecked: "Sign in to Cursor with the sign-in command so Cursor turns can authenticate."
+                )
+            )
+        ]
     )
 }

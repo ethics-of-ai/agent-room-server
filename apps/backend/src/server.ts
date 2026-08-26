@@ -6,6 +6,7 @@ import type { AgentRunnerKind, ServiceConfig } from "./domain/models";
 import type { AgentRunner } from "./runner/AgentRunner";
 import { ClaudeCodeRunner } from "./runner/claudeCode/ClaudeCodeRunner";
 import { DeepSeekHarnessRunner } from "./runner/deepseek/DeepSeekHarnessRunner";
+import { CursorSdkRunner } from "./runner/cursor/CursorSdkRunner";
 import { CodexAppServerRunner } from "./runner/codex/CodexAppServerRunner";
 import { AcpRunner } from "./runner/acp/AcpRunner";
 import { readAcpAdapterConfigs } from "./runner/acp/config";
@@ -63,6 +64,7 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     codex: new CodexAppServerRunner(input.config),
     claude_code: new ClaudeCodeRunner(input.config),
     deepseek: new DeepSeekHarnessRunner(input.config),
+    cursor: new CursorSdkRunner(input.config),
     // Externally configured (tier-3) ACP adapters, admitted by stage 1 of
     // startup. The definition list is already parsed and validated by then, so
     // this only instantiates what the registry accepted — and when the channel

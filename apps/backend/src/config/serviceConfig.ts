@@ -139,6 +139,11 @@ export function getServiceConfig(): ServiceConfig {
     // nothing by itself — the composition above is what decides which plugins,
     // and therefore which tools, the agent has.
     deepseekArgs: listEnv("DEEPSEEK_ARGS", []),
+    // An explicit Cursor key wins over the SDK's stored web sign-in; without it
+    // the host passes nothing and the SDK reads `~/.cursor/sdk/auth.json`. Both
+    // are credentials-class and stay out of the settings file.
+    cursorApiKey: optionalEnv("CURSOR_API_KEY"),
+    cursorBackendUrl: optionalEnv("CURSOR_BACKEND_URL"),
     terminalShell: optionalEnv("TERMINAL_SHELL")
   });
   // `sceneEngineEnabled` rides outside the domain schema parse (which strips

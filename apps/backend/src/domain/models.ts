@@ -69,6 +69,32 @@ export interface ServiceConfig {
   // would have to keep in step with a developer preview. Tier 2: it widens what
   // the agent may do. See docs/safety/TRUST_AND_SAFETY.md.
   deepseekPermissionMode?: string;
+  // Cursor SDK runner (docs/engineering/CURSOR_SDK_RUNNER.md). The six managed
+  // settings are declared on the `cursor` descriptor in `runner/registry.ts`
+  // and resolve into these fields by name; the tier-2 defaults live in
+  // domain/runnerDefaults.ts so the adapter and the declaration read one value.
+  cursorModel?: string;
+  // Tier 1, open id: each Cursor model declares its own depth parameter
+  // (`effort` or `reasoning`) and vocabulary, so the operator's default is
+  // applied only to a model that offers the value. A turn's own selection is
+  // refused when the model does not.
+  cursorReasoningEffort?: string;
+  // Tier 1: `standard` or `fast`, the model's `fast` parameter.
+  cursorServiceTier?: string;
+  // Tier 2: `local.sandboxOptions.enabled`. Default true; the bound is writes
+  // and network, not reads (fact 7). See docs/safety/TRUST_AND_SAFETY.md.
+  cursorSandbox?: boolean;
+  // Tier 2: `local.autoReview`, a server-side classifier. Default false.
+  cursorAutoReview?: boolean;
+  // Tier 2: `settingSources: ['project']` when true, else `[]`. Default true;
+  // gate for the descriptor's workspaceSkills. Same class of trust decision as
+  // Claude Code's `project` source.
+  cursorLoadWorkspaceSettings?: boolean;
+  // Tier 3, environment-only, never a managed key: an operator-supplied Cursor
+  // key that wins over the stored web sign-in, and an optional backend URL.
+  // Never logged, returned, or placed in a commandAudit row.
+  cursorApiKey?: string;
+  cursorBackendUrl?: string;
   // When false, the in-band artifact channel is disabled: assistant text is not
   // parsed for <artifact> regions and no artifact prompt instruction is injected.
   artifactsEnabled?: boolean;

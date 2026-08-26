@@ -58,6 +58,22 @@ final class BackendSupervisorRunnerBootstrapTests: XCTestCase {
         XCTAssertFalse(blocking.contains { $0.contains("model list") })
     }
 
+    func testSignedOutCursorBlocksSetupOnlyWhenCursorIsTheDefaultRunner() {
+        let cursorDefault = makeSupervisor(runnerKind: "cursor", prober: RunnerBootstrapTestSupport.prober())
+        let codexDefault = makeSupervisor(prober: RunnerBootstrapTestSupport.prober())
+
+        XCTAssertEqual(cursorDefault.bootstrapStatus(runnerKind: "cursor", probeID: "signIn"), .absent)
+        XCTAssertTrue(
+            cursorDefault.setupReadiness.blockingItems.contains(
+                "Sign in to Cursor with the sign-in command so Cursor turns can authenticate."
+            )
+        )
+        // The same absent sign-in is not a setup failure on a Mac whose backend
+        // is going to start Codex.
+        XCTAssertEqual(codexDefault.bootstrapStatus(runnerKind: "cursor", probeID: "signIn"), .absent)
+        XCTAssertFalse(codexDefault.setupReadiness.blockingItems.contains { $0.contains("Cursor") })
+    }
+
     func testMissingDeepSeekCompositionBlocksSetupAfterTheRuntimeIsFound() throws {
         let runtime = try makeExecutable(named: "dsh-jsonrpc-agent")
         let supervisor = makeSupervisor(
@@ -143,7 +159,7 @@ final class BackendSupervisorRunnerBootstrapTests: XCTestCase {
 
         XCTAssertEqual(
             supervisor.runnerSettingsDescriptors.map(\.runnerKind),
-            ["acp_demo", "codex", "claude_code", "deepseek"]
+            ["acp_demo", "codex", "claude_code", "deepseek", "cursor"]
         )
         XCTAssertEqual(supervisor.runnerSettingsDescriptors.first?.ready, false)
         XCTAssertNil(supervisor.runnerBootstrapDescriptor(for: "acp_demo"))

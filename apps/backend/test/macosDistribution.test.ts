@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -86,7 +86,106 @@ describe("macOS distribution packaging", () => {
         "/x/AgentRoom.app/Contents/Resources/node_modules/.pnpm/node-pty@1.1.0/node_modules/node-pty/prebuilds/darwin-arm64/pty.node"
       )
     ).toBe(false);
+    // Cursor's SDK ships Anysphere-signed binaries (cursorsandbox, rg,
+    // tree-sitter) in its platform package; the signing pass must leave them
+    // alone the same way it leaves Claude Code's. See docs/engineering/CURSOR_SDK_RUNNER.md.
+    expect(
+      distribution.isPublisherSignedBinary(
+        "/x/AgentRoom.app/Contents/Resources/node_modules/.pnpm/@cursor+sdk-darwin-arm64@1.0.28/node_modules/@cursor/sdk-darwin-arm64/bin/cursorsandbox"
+      )
+    ).toBe(true);
     expect(distribution.nodeRuntimeEntitlementsPath).toBe(resolve(repoRoot, "scripts/codesign/node-runtime.entitlements"));
+  });
+
+  it("holds the bundled Node runtime to the floor the Cursor SDK's node:sqlite needs", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+
+    expect(distribution.CURSOR_SDK_NODE_FLOOR).toBe("22.13.0");
+    expect(distribution.meetsNodeFloor("v22.13.0")).toBe(true);
+    expect(distribution.meetsNodeFloor("22.13.1")).toBe(true);
+    expect(distribution.meetsNodeFloor("v24.2.0")).toBe(true);
+    expect(distribution.meetsNodeFloor("v22.12.0")).toBe(false);
+    expect(distribution.meetsNodeFloor("v20.19.0")).toBe(false);
+  });
+
+  it("pins the macOS Cursor sandbox helpers to the SDK version", async () => {
+    const backendPackage = JSON.parse(await readFile(resolve(repoRoot, "apps/backend/package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    const sdkVersion = backendPackage.dependencies?.["@cursor/sdk"];
+
+    expect(sdkVersion).toBe("1.0.28");
+    expect(backendPackage.optionalDependencies).toMatchObject({
+      "@cursor/sdk-darwin-arm64": sdkVersion,
+      "@cursor/sdk-darwin-x64": sdkVersion
+    });
+  });
+
+  it("accepts a packaged Cursor sandbox helper only when its link resolves inside the bundle", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    const root = await mkdtemp(join(tmpdir(), "agentroom-cursor-sandbox-package-"));
+    const bundleRoot = resolve(root, "bundle");
+    const backendNodeModules = resolve(bundleRoot, "backend/node_modules");
+    const packageName = "@cursor/sdk-darwin-arm64";
+    const platformPackage = resolve(
+      bundleRoot,
+      "node_modules/.pnpm/@cursor+sdk-darwin-arm64@1.0.28/node_modules",
+      packageName
+    );
+    const helperPath = resolve(platformPackage, "bin/cursorsandbox");
+    const packageLink = resolve(backendNodeModules, packageName);
+
+    try {
+      await mkdir(resolve(platformPackage, "bin"), { recursive: true });
+      await mkdir(resolve(backendNodeModules, "@cursor"), { recursive: true });
+      await writeFile(helperPath, "#!/bin/sh\nexit 0\n");
+      await chmod(helperPath, 0o755);
+      await symlink(platformPackage, packageLink);
+
+      await expect(
+        distribution.assertPackagedCursorSandboxHelper({
+          backendNodeModules,
+          bundleRoot,
+          platform: "darwin",
+          arch: "arm64"
+        })
+      ).resolves.toEqual({
+        helperPath: resolve(packageLink, "bin/cursorsandbox"),
+        resolvedPath: await realpath(helperPath)
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a Cursor sandbox helper link that escapes the packaged bundle", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    const root = await mkdtemp(join(tmpdir(), "agentroom-cursor-sandbox-escape-"));
+    const bundleRoot = resolve(root, "bundle");
+    const backendNodeModules = resolve(bundleRoot, "backend/node_modules");
+    const outsidePackage = resolve(root, "outside/@cursor/sdk-darwin-arm64");
+    const helperPath = resolve(outsidePackage, "bin/cursorsandbox");
+    const packageLink = resolve(backendNodeModules, "@cursor/sdk-darwin-arm64");
+
+    try {
+      await mkdir(resolve(outsidePackage, "bin"), { recursive: true });
+      await mkdir(resolve(backendNodeModules, "@cursor"), { recursive: true });
+      await writeFile(helperPath, "#!/bin/sh\nexit 0\n");
+      await chmod(helperPath, 0o755);
+      await symlink(outsidePackage, packageLink);
+
+      await expect(
+        distribution.assertPackagedCursorSandboxHelper({
+          backendNodeModules,
+          bundleRoot,
+          platform: "darwin",
+          arch: "arm64"
+        })
+      ).rejects.toThrow(/resolves outside the app bundle/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("builds notarization commands without exposing app-specific passwords in log text", async () => {

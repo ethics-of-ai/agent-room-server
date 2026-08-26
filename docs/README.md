@@ -32,6 +32,9 @@ documents here link to them; those links do not resolve in this tree.
   runner-specific decisions to registry fields.
 - [DeepSeek Harness runner](engineering/DEEPSEEK_HARNESS_RUNNER.md) documents
   the built-in DeepSeek adapter and its remaining real-runtime checks.
+- [Cursor SDK runner](engineering/CURSOR_SDK_RUNNER.md) is the plan and
+  record for the fourth built-in runner, driven through `@cursor/sdk` in a host
+  child.
 - [ACP real-agent conformance](engineering/ACP_CONFORMANCE.md) describes the
   attended checks that CI cannot perform without a provider credential.
 

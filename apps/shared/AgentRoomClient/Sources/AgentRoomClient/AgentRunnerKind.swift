@@ -17,6 +17,7 @@ public enum AgentRunnerKind: String, Codable, Hashable, Sendable {
     case codex
     case claudeCode = "claude_code"
     case deepseek
+    case cursor
 
     /// Human-readable label for pickers and menus.
     public var displayName: String {
@@ -27,6 +28,8 @@ public enum AgentRunnerKind: String, Codable, Hashable, Sendable {
             return "Claude Code"
         case .deepseek:
             return "DeepSeek Harness"
+        case .cursor:
+            return "Cursor"
         }
     }
 

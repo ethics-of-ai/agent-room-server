@@ -65,6 +65,22 @@ runner is a row of data rather than a column of exceptions:
 | `isConfigured` | `DEEPSEEK_EXECUTABLE` **and** `DEEPSEEK_CORDIS_CONFIG` present | Tier 3, like Codex's, but two values rather than one: the runtime demands an explicit Cordis composition and exits nonzero without it, so an executable alone would advertise a runner that fails its first turn. |
 | `capabilityDiscoveryCost` | spawns a probe child, cached 5 min | The wire has no `model/list`, so the catalog is static and the probe proves the handshake instead. |
 
+A fourth built-in, `cursor`, was admitted on 2026-08-26
+(`docs/engineering/CURSOR_SDK_RUNNER.md`); its row is declared in the registry
+and its adapter follows the completed plan, so the values below describe the
+implemented policy:
+
+| Policy | Cursor | Why |
+|---|---|---|
+| `promptDelivery` | `turn` | `AgentOptions` has no system-prompt parameter, so the standing contract rides each turn prompt, as for Codex and DeepSeek. |
+| `turnDiffSource` | `settle_time_git` | The SDK stream carries per-call tool results but no turn-level diff, so `AgentTurnGitDiffTracker` derives one at settlement. |
+| `clarifyingQuestions` | `native` | The adapter registers one in-process custom tool (`local.customTools`) whose `execute` holds the SDK's tool call open on the shared question wait. The model calls a real tool and the adapter receives a real callback; that the callback rides AgentRoom's own wire to the host child is adapter-internal. The built-in `askQuestion` is absent from the headless catalog (fact 3) and is disallowed regardless. |
+| `workspaceSkills` | `gated` | `loadsCursorWorkspaceSettings` in `runner/cursor/settings.ts`, driven by the tier-2 `runners.cursor.loadWorkspaceSettings`: `settingSources: ["project"]` loads `AGENTS.md`, `.cursor/rules`, hooks, MCP servers, and skills, and `[]` loads nothing (fact 6). The registry names that a gate exists; the adapter owns what it is. |
+| `skillSources` / `skillInvocationPrefix` | `.cursor/skills`, `.agents/skills`, `.claude/skills`, `.codex/skills` / `/` | The `project` source loads all four workspace directories and none of the user-level ones, in the vendor's documented precedence. |
+| `restoreStrategy` | `native_resume` | `Agent.resume(agentId)` continues a persisted agent from a fresh process when the SQLite store is pinned under `STATE_DIR` (fact 1). The model is passed again on resume. |
+| `isConfigured` | always | The SDK is bundled with the backend and resolves its own credential (`CURSOR_API_KEY`, else the stored web sign-in), the Claude Code precedent. Sign-in presence is Mac bootstrap readiness; an expired key is the runtime probe's `ready: false`. |
+| `capabilityDiscoveryCost` | spawns a host child, `models/list`, cached 5 min | The catalog is live (`Cursor.models.list()`) with a static fallback seeded from the recorded catalog; the probe is the readiness proof. |
+
 | Policy | Codex | Claude Code | Decided by today | Registry field | Phase |
 |---|---|---|---|---|---|
 | `promptDelivery` | `turn` | `system` | — *retired; the assembler reads the descriptor* | `promptDelivery: "turn" \| "system"` | **3 — done** |
@@ -87,8 +103,9 @@ Notes on the rows that are easy to get wrong:
 - **`restoreStrategy` was decided in Phase 1, not 3, and has landed.** It is the
   one policy the shared session host needs before any registry exists: the host
   must not arm an idle timer for a runner it cannot restore, because reaping a
-  non-restorable child silently loses the conversation. Codex and Claude Code
-  are `native_resume`; DeepSeek is `unsupported` and is therefore not idle-reaped.
+  non-restorable child silently loses the conversation. Codex, Claude Code, and
+  Cursor are `native_resume`; DeepSeek is `unsupported` and is therefore not
+  idle-reaped.
   Phase 3 completed the handoff: the
   descriptor is now the source, and each adapter reads
   `runnerDescriptor(kind).restoreStrategy` instead of declaring a local constant.

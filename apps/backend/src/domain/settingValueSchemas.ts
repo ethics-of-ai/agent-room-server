@@ -95,3 +95,26 @@ export const deepseekProviderSchema = z.string().trim().min(1).max(80).regex(/^[
  * docs/safety/TRUST_AND_SAFETY.md.
  */
 export const deepseekPermissionModeSchema = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9._:-]+$/);
+
+/**
+ * Cursor's reasoning-effort vocabulary, bounded by shape.
+ *
+ * Each Cursor model declares its own depth parameter and values (fact 5 of
+ * docs/engineering/CURSOR_SDK_RUNNER.md): `effort` with `low`…`xhigh`/`max` on
+ * Anthropic, Grok, and Gemini models, `reasoning` with `none`…`extra-high`/`max`
+ * on OpenAI, Kimi, and GLM models, and nothing at all on `default` and
+ * `composer-2.5`. No single enum describes that, and reporting one as this
+ * setting's `options` would offer values the selected model refuses. So the
+ * managed `runners.cursor.reasoningEffort` is an open id like a turn's, the
+ * live catalog is the vocabulary, and `runner/cursor/settings.ts` applies the
+ * operator's default only to a model that offers it.
+ */
+export const cursorReasoningEffortSchema = z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9._:-]+$/);
+
+/**
+ * Cursor's speed vocabulary. Every Cursor model that declares speed declares the
+ * same boolean `fast` parameter, so this one is a closed pair and `/api/config`
+ * reports it as `options`. It maps onto `fast: true`/`false` in the model
+ * selection's `params`; a model without the parameter runs at its own speed.
+ */
+export const cursorServiceTierSchema = z.enum(["standard", "fast"]);

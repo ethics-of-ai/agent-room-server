@@ -25,13 +25,16 @@ each package carrying its own license file in its directory:
 
 | License | Packages |
 | --- | --- |
-| MIT | 142 packages, including `fastify` and the `@fastify/*` plugins, `@anthropic-ai/sdk`, `node-pty`, `pino`, `zod`, `yaml`, `@babel/runtime` |
+| MIT | 143 packages, including `fastify` and the `@fastify/*` plugins, `@anthropic-ai/sdk`, `node-pty`, `pino`, `zod`, `@babel/runtime` |
+| Apache-2.0 | `@connectrpc/connect`, `@connectrpc/connect-node`, `@connectrpc/connect-web` (the Cursor SDK's RPC client) |
+| Apache-2.0 AND BSD-3-Clause | `@bufbuild/protobuf` |
 | BSD-2-Clause | `dotenv`, `json-schema-typed` |
 | BSD-3-Clause | `fast-uri`, `light-my-request`, `qs`, `secure-json-parse` |
-| ISC | 11 packages, including `fastq`, `inherits`, `isexe`, `once`, `semver`, `setprototypeof` |
+| ISC | 13 packages, including `@statsig/client-core`, `@statsig/js-client`, `fastq`, `inherits`, `isexe`, `once`, `semver`, `setprototypeof`, `yaml` |
 | BlueOak-1.0.0 | `glob`, `lru-cache`, `minimatch`, `minipass`, `path-scurry` |
 | Unlicense | `fast-sha256` |
 | Anthropic commercial terms | `@anthropic-ai/claude-agent-sdk`, `@anthropic-ai/claude-agent-sdk-darwin-arm64` (see below) |
+| Cursor Terms of Service | `@cursor/sdk`, `@cursor/sdk-darwin-arm64` (see below) |
 
 The package step copies the pnpm virtual store as installed, so a build may
 also carry development tooling alongside the production set. Those packages
@@ -57,6 +60,39 @@ Anthropic's published conditions for that, which AgentRoom follows:
 
 The Claude Code binary stays governed by Anthropic's terms wherever it is
 accessed from, including from inside this bundle.
+
+## Cursor SDK
+
+`@cursor/sdk` and its `darwin-arm64` platform package are "© Anysphere Inc.
+All rights reserved. Use is subject to Cursor's
+[Terms of Service](https://cursor.com/terms-of-service)." That sentence is the
+whole license file each package ships. The platform package carries the
+Anysphere-signed `cursorsandbox`, `rg`, and tree-sitter binaries the SDK's
+local agent runs, so the DMG ships with the Cursor SDK preinstalled. Cursor
+publishes no sentence equivalent to Anthropic's preinstall permission; what
+supports bundling is that the package is published on public npm for
+installation into products, and that Cursor staff have said on the record that
+embedding Cursor as a backend service in a product is a supported use of the
+SDK. The conditions AgentRoom binds itself to:
+
+- The SDK and its platform binaries ship unmodified. The signing pass leaves
+  Anysphere's signatures in place, so the bundle runs what Cursor published.
+- Each person authenticates with their own Cursor account, through the SDK's
+  own web sign-in or their own API key, on their own plan (Cursor Pro or
+  better). AgentRoom holds no Cursor credential, pays for no usage, and neither
+  resells nor intermediates Cursor access. Usage appears in that person's
+  Cursor dashboard under the SDK tag, and Cursor's Privacy Mode applies as it
+  does in the IDE.
+- AgentRoom does not use the Cursor or Anysphere names or logos in its own
+  name or branding; "Cursor" appears only as the runner's display name.
+- AgentRoom uses no output of the runner to train a model and makes no claim
+  about regulated data.
+
+The SDK stays governed by Cursor's terms wherever it is accessed from,
+including from inside this bundle. Whether shipping the unmodified package
+inside an installer is covered has not yet been confirmed in writing by Cursor;
+[Open source mirror](docs/operations/OPEN_SOURCE_MIRROR.md) (Decision 10)
+records that as the one open licensing item.
 
 ## Editor language catalog
 

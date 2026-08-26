@@ -112,6 +112,43 @@ owner's.
    package and resolve the user's own `claude` install. I recommend keeping
    the bundle, since the Claude Code runner is advertised as working out of
    the box with `claude login`, and recording the terms it ships under.
+10. **Cursor SDK inside the DMG.** **Decided 2026-08-26:** bundle, on the same
+    conditions as Claude Code, and say so. The backend pins both Darwin
+    platform packages as direct optional dependencies because Cursor 1.0.28
+    looks for `node_modules/@cursor/sdk-darwin-${arch}` rather than resolving
+    the package from pnpm's virtual store. The package step copies the store and
+    that direct link, then refuses to build if `cursorsandbox` is not executable
+    or resolves outside the app bundle. The DMG therefore ships `@cursor/sdk`
+    and the matching platform package with Anysphere's signed `cursorsandbox`,
+    `rg`, and tree-sitter binaries. Each package's whole license file is "©
+    Anysphere Inc. All rights reserved. Use is subject to Cursor's Terms of
+    Service."
+    Three surfaces, three answers. The dependency reference in `package.json`
+    and the lockfile is not a redistribution: whoever runs `pnpm install`
+    fetches from npm under Cursor's terms, as for the Anthropic SDK. The
+    operator's use is one Cursor staff have called, on the record, "a
+    supported and explicitly intended use of the Cursor SDK"; what they name
+    as prohibited (reselling access, training a competing model, regulated
+    data without a separate arrangement) is nothing this runner does. The DMG
+    is the one place the Claude Code precedent does not fully carry, because
+    Cursor publishes no sentence saying the package may ship inside an
+    installer. What supports bundling is that the package is on public npm for
+    installation into products and that the embedding statement covers
+    AgentRoom's shape: each person signs in with their own account on their
+    own plan (Cursor Pro or better), AgentRoom holds no Cursor credential and
+    intermediates nothing. The alternative, an operator-installed SDK the host
+    resolves from a tier-3 directory, would be the only runner whose runtime
+    the Mac cannot set up and would trade a licensing question for a bootstrap
+    surface with its own review. The conditions are in
+    `THIRD_PARTY_NOTICES.md`, and the signing pass leaves the Anysphere
+    binaries as published (`isPublisherSignedBinary`, pinned by
+    `macosDistribution.test.ts`). **Open item:** before the first public DMG
+    that carries the SDK, ask Cursor support for written confirmation that
+    shipping the unmodified package inside an installer is covered, and file
+    the answer here. If the answer is no, the fallback is the
+    operator-installed SDK above, and bundling becomes a build-time opt-in
+    until then. `docs/engineering/CURSOR_SDK_RUNNER.md` (*Licensing and
+    redistribution*) is the full record.
 
 ## What is mirrored
 
@@ -142,7 +179,7 @@ allowlisted tree (overlay wins):
 | `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `SECURITY.md` | Decisions 5 and 6. |
 | `.github/workflows/ci.yml` | Public CI (below). |
 | `.github/workflows/release.yml` | DMG build and GitHub Release (below). |
-| `THIRD_PARTY_NOTICES.md` | Sources and licenses of what the DMG bundles: Node.js, the production npm tree, the catalog grammars and themes, and the Claude Agent SDK and Claude Code binary under Anthropic's terms (Decision 9). |
+| `THIRD_PARTY_NOTICES.md` | Sources and licenses of what the DMG bundles: Node.js, the production npm tree, the catalog grammars and themes, the Claude Agent SDK and Claude Code binary under Anthropic's terms (Decision 9), and the Cursor SDK with its signed helper binaries under Cursor's terms (Decision 10). |
 
 Never mirrored: `apps/visionos/`, `docs/reference/`, `docs/clients/VISIONOS.md`,
 `docs/engineering/VISIONOS_DESIGN_PRINCIPLES.md`,
@@ -298,13 +335,16 @@ step copies the whole pnpm store, dev tooling binaries that have no business
 in the bundle (`esbuild`, `rolldown`, `lightningcss`, `fsevents`). Every
 Mach-O gets signed inside-out with the hardened runtime; `node` additionally
 gets `scripts/codesign/node-runtime.entitlements` (JIT, unsigned executable
-memory, no library validation). The one exception is the Claude Code binary
-inside `@anthropic-ai/claude-agent-sdk-darwin-*`, which is left exactly as
-Anthropic signed it (`isPublisherSignedBinary`), since the terms in Decision 9
-require the binary to run as published. That binary already carries what
-notarization asks of a nested executable (Developer ID Application: Anthropic
-PBC, hardened runtime, secure timestamp; checked on the 0.3.172 package), so
-leaving it alone costs nothing. The `node-pty` prebuilds and the dev tooling
+memory, no library validation). The exceptions are the publisher-signed
+binaries (`isPublisherSignedBinary`): the Claude Code binary inside
+`@anthropic-ai/claude-agent-sdk-darwin-*`, left exactly as Anthropic signed it
+since the terms in Decision 9 require the binary to run as published, and,
+since 2026-08-26, the `cursorsandbox`, `rg`, and tree-sitter `binding.node`
+files inside `@cursor/sdk-darwin-*`, left as Anysphere signed them for the same
+reason (Decision 10). Both already carry what notarization asks of a nested
+executable (a Developer ID Application identity, hardened runtime, secure
+timestamp; checked on the 0.3.172 and 1.0.28 packages), so leaving them alone
+costs nothing. The `node-pty` prebuilds and the dev tooling
 binaries are only ad-hoc linker-signed as shipped, which is why the pass has
 to sign them.
 
@@ -479,8 +519,11 @@ backend.
   package step depends on it. The parity test skips; the script is a dev tool.
 - Third-party content the DMG ships: the Node runtime (its `LICENSE` is in the
   tarball and must not be stripped when the runtime directory is copied), the
-  production npm tree, the catalog grammars and themes, and the Claude Agent
-  SDK with the Claude Code binary (Decision 9). The `THIRD_PARTY_NOTICES.md`
-  overlay file lists them. `pnpm licenses list --prod` is the source for the
-  npm portion; the SDK's `package.json` says `SEE LICENSE IN README.md`, and
-  that README points at Anthropic's Commercial Terms of Service.
+  production npm tree, the catalog grammars and themes, the Claude Agent SDK
+  with the Claude Code binary (Decision 9), and the Cursor SDK with its signed
+  helper binaries (Decision 10). The `THIRD_PARTY_NOTICES.md` overlay file
+  lists them. `pnpm licenses list --prod` is the source for the npm portion;
+  the Anthropic SDK's `package.json` says `SEE LICENSE IN README.md`, and that
+  README points at Anthropic's Commercial Terms of Service; the Cursor SDK's
+  says `SEE LICENSE IN LICENSE.md`, one line pointing at Cursor's Terms of
+  Service.

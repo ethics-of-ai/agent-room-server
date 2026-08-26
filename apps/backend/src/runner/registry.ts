@@ -1,7 +1,13 @@
 import { z } from "zod";
 import type { ServiceConfig } from "../domain/models";
 import type { ManagedSettingDefinition } from "../domain/managedSettings";
-import { defaultClaudeCodeLoadWorkspaceSkills, defaultClaudeCodePermissionMode } from "../domain/runnerDefaults";
+import {
+  defaultClaudeCodeLoadWorkspaceSkills,
+  defaultClaudeCodePermissionMode,
+  defaultCursorAutoReview,
+  defaultCursorLoadWorkspaceSettings,
+  defaultCursorSandbox
+} from "../domain/runnerDefaults";
 import {
   claudeCodePermissionModeSchema,
   codexApprovalPolicySchema,
@@ -9,11 +15,14 @@ import {
   codingAgentModelIdSchema,
   codingAgentReasoningEffortSchema,
   codingAgentServiceTierIdSchema,
+  cursorReasoningEffortSchema,
+  cursorServiceTierSchema,
   deepseekPermissionModeSchema,
   deepseekProviderSchema
 } from "../domain/settingValueSchemas";
 import type { RunnerRestoreStrategy } from "./shared/PersistentRunnerSessionHost";
 import { loadsWorkspaceSettings } from "./claudeCode/settings";
+import { loadsCursorWorkspaceSettings } from "./cursor/settings";
 import { DEEPSEEK_QUESTION_PROMPT_INSTRUCTION } from "./deepseek/promptQuestions";
 
 /**
@@ -36,9 +45,9 @@ import { DEEPSEEK_QUESTION_PROMPT_INSTRUCTION } from "./deepseek/promptQuestions
  *
  * Adding a bundled runner remains a deliberate rollout decision because the id
  * crosses `/api/runners`, `/api/config`, and `settings.json`. The built-in list
- * is currently `codex`, `claude_code`, and `deepseek`; a test rejects an
- * unreviewed fourth entry. See `DEEPSEEK_HARNESS_RUNNER.md` for the downgrade
- * hazard and Mac-side guard.
+ * is currently `codex`, `claude_code`, `deepseek`, and `cursor`; a test rejects
+ * an unreviewed fifth entry. See `DEEPSEEK_HARNESS_RUNNER.md` for the downgrade
+ * hazard and Mac-side guard, and `CURSOR_SDK_RUNNER.md` for the fourth id.
  */
 
 /**
@@ -198,7 +207,7 @@ export interface RunnerDescriptor {
  * posture onto defaults on a downgrade. That is a documented consequence with a
  * Mac-side guard, not a reason to relax the whole-file rule.
  */
-export const registeredRunnerKinds = ["codex", "claude_code", "deepseek"] as const;
+export const registeredRunnerKinds = ["codex", "claude_code", "deepseek", "cursor"] as const;
 
 export type RegisteredRunnerKind = (typeof registeredRunnerKinds)[number];
 
@@ -429,6 +438,93 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // one would put a runner in every picker that fails its first turn with the
     // child's one-line usage error.
     isConfigured: (config) => Boolean(config.deepseekExecutable && config.deepseekCordisConfig)
+  },
+  cursor: {
+    id: "cursor",
+    displayName: "Cursor",
+    // `AgentOptions` has no system-prompt parameter, so the standing contract
+    // rides each turn prompt, as it does for Codex and DeepSeek.
+    promptDelivery: "turn",
+    // The stream carries per-call tool results but no turn-level diff, so
+    // AgentTurnGitDiffTracker derives the turn's diff at settlement.
+    turnDiffSource: "settle_time_git",
+    // A real callback: the adapter registers one custom tool whose execute()
+    // holds the SDK's tool call open on the shared question wait
+    // (docs/engineering/CURSOR_SDK_RUNNER.md, "Clarifying questions over a
+    // custom tool"). The model calls a tool and the adapter receives a
+    // callback; that the callback rides AgentRoom's own wire to the host child
+    // is adapter-internal.
+    clarifyingQuestions: { mode: "native" },
+    workspaceSkills: {
+      mode: "gated",
+      // Called through, as for Claude Code: the rule is the adapter's.
+      gate: (config) => loadsCursorWorkspaceSettings(config)
+    },
+    // Cursor loads all four under its `project` settings source and none of
+    // the user-level directories (fact 6); the order is the vendor's documented
+    // precedence.
+    skillSourceDirs: [".cursor/skills", ".agents/skills", ".claude/skills", ".codex/skills"],
+    skillInvocationPrefix: "/",
+    settingsKeyPrefix: "cursor",
+    settings: [
+      { field: "model", schema: codingAgentModelIdSchema.optional(), tier: 1, env: "CURSOR_MODEL", valueKind: "string" },
+      // Open rather than the closed `codingAgentReasoningEffortSchema`: each
+      // Cursor model declares its own depth parameter and vocabulary, so the
+      // live catalog is the authority and the adapter applies this default only
+      // where the selected model offers it (`runner/cursor/settings.ts`).
+      {
+        field: "reasoningEffort",
+        schema: cursorReasoningEffortSchema.optional(),
+        tier: 1,
+        env: "CURSOR_REASONING_EFFORT",
+        valueKind: "string"
+      },
+      {
+        field: "serviceTier",
+        schema: cursorServiceTierSchema.optional(),
+        tier: 1,
+        env: "CURSOR_SERVICE_TIER",
+        valueKind: "string"
+      },
+      // Cursor's trust posture, three booleans the adapter passes straight to
+      // the SDK, and deliberately not reconciled with the Codex sandbox mode or
+      // the Claude Code permission mode: `sandbox` bounds writes and network,
+      // not reads (fact 7), which neither of those vocabularies can say. See
+      // docs/safety/TRUST_AND_SAFETY.md.
+      {
+        field: "sandbox",
+        schema: z.boolean().optional(),
+        tier: 2,
+        env: "CURSOR_SANDBOX",
+        valueKind: "boolean",
+        defaultValue: defaultCursorSandbox
+      },
+      {
+        field: "autoReview",
+        schema: z.boolean().optional(),
+        tier: 2,
+        env: "CURSOR_AUTO_REVIEW",
+        valueKind: "boolean",
+        defaultValue: defaultCursorAutoReview
+      },
+      {
+        field: "loadWorkspaceSettings",
+        schema: z.boolean().optional(),
+        tier: 2,
+        env: "CURSOR_LOAD_WORKSPACE_SETTINGS",
+        valueKind: "boolean",
+        defaultValue: defaultCursorLoadWorkspaceSettings
+      }
+    ],
+    // `Agent.resume(agentId)` continues a persisted agent from a fresh process
+    // when the store is pinned under STATE_DIR (fact 1).
+    restoreStrategy: "native_resume",
+    // The SDK is bundled and resolves its own credential (`CURSOR_API_KEY`,
+    // else the stored web sign-in), so there is no bootstrap value the backend
+    // must hold: the same answer as Claude Code's. Whether the operator is
+    // signed in is Mac bootstrap readiness, and the backend learns it from
+    // runtime capability discovery.
+    isConfigured: () => true
   }
 };
 
@@ -510,7 +606,7 @@ export function isRegisteredRunnerKind(value: string): boolean {
   );
 }
 
-/** True for the two ids this build ships, as opposed to a configured adapter. */
+/** True for an id this build ships, as opposed to a configured adapter. */
 export function isBuiltInRunnerKind(value: string): value is RegisteredRunnerKind {
   return Object.prototype.hasOwnProperty.call(builtInRunnerDescriptors, value);
 }

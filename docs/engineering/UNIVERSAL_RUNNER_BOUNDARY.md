@@ -522,6 +522,16 @@ deduplication in this phase.
 > Refusing is the point — rewriting `runnerKind` to something convertible would
 > move the operator's turns onto a different agent to save a file format. See
 > `docs/clients/MACOS.md` and `docs/operations/LOCAL_MAC_SERVER.md`.
+>
+> **Opened 2026-08-26 for `cursor`** (`docs/engineering/CURSOR_SDK_RUNNER.md`).
+> Same basis and same cost as `deepseek`: `global.runnerKind: "cursor"` is a
+> known key with a value an older build rejects, so a downgrade with Cursor
+> selected drops that operator's trust posture onto defaults. The guard is the
+> one already in place: `ManagedSettingsDocument.legacyDocumentRunnerKinds`
+> describes shipped flat-document readers and never grows, so the Mac's
+> rollback converter refuses while `runnerKind` names `cursor`. Nothing new was
+> built to open this one; the id, its descriptor row, and a skeleton adapter
+> landed together, with the host child following.
 
 **Acceptance criterion, corrected.** Not "no file outside `runner/` names a
 runner" — that is too absolute, since presentation assets legitimately do.
@@ -897,7 +907,9 @@ spawn it:
 - **Mac bootstrap readiness** — is the local prerequisite satisfied? Inspects
   Keychain and local executable configuration, and **must work while the backend
   is stopped**. Answered on the Mac from a descriptor-named *probe kind*
-  (`keychain_presence`, `executable_path`).
+  (`keychain_presence`, `executable_path`; since then `file_path` for
+  DeepSeek's composition and, on 2026-08-26, `file_presence` for Cursor's SDK
+  sign-in file, each a scoped Swift change with its own review).
 
 The Claude Code check stays a presence-only login Keychain lookup per
 `docs/safety/TRUST_AND_SAFETY.md` — it requests no item data and never reads the
@@ -962,7 +974,8 @@ readiness without adding a runner-id switch.
 >   conformance reference.
 > - **The built-in admission list stays closed to adapters.**
 >   `registeredRunnerKinds` is what this build ships — `codex` and `claude_code`
->   when this phase landed, plus `deepseek` since 2026-08-18 — and external
+>   when this phase landed, plus `deepseek` since 2026-08-18 and `cursor` since
+>   2026-08-26 — and external
 >   adapters join a *runtime* registry beside it rather than growing it. The Phase 4 rollout gate is about a **bundled**
 >   third id reaching an older Mac's settings file and dropping the operator's
 >   whole trust posture — which an id that Mac's own operator configured is not,

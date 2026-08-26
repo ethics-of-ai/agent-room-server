@@ -13,6 +13,8 @@ import {
   codingAgentReasoningEffortIdSchema,
   codingAgentReasoningEffortSchema,
   codingAgentServiceTierIdSchema,
+  cursorReasoningEffortSchema,
+  cursorServiceTierSchema,
   deepseekPermissionModeSchema,
   deepseekProviderSchema
 } from "./settingValueSchemas";
@@ -34,6 +36,8 @@ export {
   codexApprovalPolicySchema,
   codexSandboxModeSchema,
   claudeCodePermissionModeSchema,
+  cursorReasoningEffortSchema,
+  cursorServiceTierSchema,
   deepseekPermissionModeSchema,
   deepseekProviderSchema,
   codingAgentModelIdSchema,
@@ -116,6 +120,18 @@ export const serviceConfigSchema = z.object({
   deepseekProvider: deepseekProviderSchema.optional(),
   deepseekMaxTokens: z.number().int().positive().optional(),
   deepseekPermissionMode: deepseekPermissionModeSchema.optional(),
+  cursorModel: codingAgentModelIdSchema.optional(),
+  cursorReasoningEffort: cursorReasoningEffortSchema.optional(),
+  cursorServiceTier: cursorServiceTierSchema.optional(),
+  cursorSandbox: z.boolean().optional(),
+  cursorAutoReview: z.boolean().optional(),
+  cursorLoadWorkspaceSettings: z.boolean().optional(),
+  // Tier 3, environment-only: the optional explicit Cursor key that wins over
+  // the SDK's stored web sign-in, and the optional backend URL. Neither is a
+  // managed key, so neither has an entry in the settings file, the metadata,
+  // or the PATCH schema. See docs/safety/TRUST_AND_SAFETY.md.
+  cursorApiKey: z.string().min(1).optional(),
+  cursorBackendUrl: z.string().min(1).optional(),
   artifactsEnabled: z.boolean().default(true),
   clarifyingQuestionsEnabled: z.boolean().default(true),
   languageCatalogEnabled: z.boolean().default(true),

@@ -55,6 +55,16 @@ struct ManagedBackendSettings: Codable, Equatable {
     // shape the backend bounds it by and never a list of values it would have to
     // keep in step with a developer preview.
     var deepseekPermissionMode: String?
+    // Cursor.
+    var cursorModel: String?
+    // Open like the DeepSeek provider: each Cursor model declares its own effort
+    // vocabulary, so this app validates the shape the backend bounds it by.
+    var cursorReasoningEffort: String?
+    var cursorServiceTier: String?
+    // Tier 2 — the SDK's own posture, three booleans.
+    var cursorSandbox: Bool?
+    var cursorAutoReview: Bool?
+    var cursorLoadWorkspaceSettings: Bool?
 
     static let codexSandboxModeWorkspaceWrite = "workspace-write"
     static let codexSandboxModeDangerFullAccess = "danger-full-access"
@@ -108,6 +118,8 @@ struct ManagedBackendSettings: Codable, Equatable {
         deepseekModel = deepseekModel?.trimmingCharacters(in: .whitespacesAndNewlines)
         deepseekProvider = deepseekProvider?.trimmingCharacters(in: .whitespacesAndNewlines)
         deepseekPermissionMode = deepseekPermissionMode?.trimmingCharacters(in: .whitespacesAndNewlines)
+        cursorModel = cursorModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        cursorReasoningEffort = cursorReasoningEffort?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Returns the first mismatch with `managedSettingsSchema`. The backend
@@ -147,6 +159,15 @@ struct ManagedBackendSettings: Codable, Equatable {
         if let deepseekMaxTokens, !Self.isBackendInteger(deepseekMaxTokens, minimum: 1) {
             return Self.issue(for: "deepseekMaxTokens")
         }
+        if let cursorModel, !Self.isModelIdentifier(cursorModel) {
+            return Self.issue(for: "cursorModel")
+        }
+        if let cursorReasoningEffort, !Self.isServiceTierIdentifier(cursorReasoningEffort) {
+            return Self.issue(for: "cursorReasoningEffort")
+        }
+        if let cursorServiceTier, !Self.cursorServiceTiers.contains(cursorServiceTier) {
+            return Self.issue(for: "cursorServiceTier")
+        }
         if let gitCommandTimeoutMs, !Self.isBackendInteger(gitCommandTimeoutMs, minimum: 1) {
             return Self.issue(for: "gitCommandTimeoutMs")
         }
@@ -171,6 +192,9 @@ struct ManagedBackendSettings: Codable, Equatable {
     private static let claudeCodePermissionModes = ["default", "acceptEdits", "dontAsk", "bypassPermissions"]
     private static let codexApprovalPolicies = ["untrusted", "on-failure", "on-request", "never"]
     private static let codexSandboxModes = ["read-only", "workspace-write", "danger-full-access"]
+    // Mirrors `cursorServiceTierSchema`: the one closed Cursor vocabulary, since
+    // every Cursor model that declares speed declares the same boolean `fast`.
+    private static let cursorServiceTiers = ["standard", "fast"]
     private static let modelIdentifierCharacters = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:[]-"
     )

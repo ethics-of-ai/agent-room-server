@@ -3,6 +3,9 @@
   "version": "0.3.1",
   "private": true,
   "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "pnpm --filter @agentroom/backend dev",
     "test": "pnpm --filter @agentroom/backend test",

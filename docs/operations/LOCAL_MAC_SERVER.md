@@ -124,8 +124,9 @@ Running an older AgentRoom is supported, and the macOS app's Advanced pane
 not survive that trip, and it fails loudly rather than quietly.
 
 A runner an older build does not know is safe in the file *as a namespace*:
-`runners.deepseek.*` (or a configured `runners.acp_*.*`) is preserved and never
-applied by every reader, so those settings ride a downgrade untouched. But
+`runners.deepseek.*`, `runners.cursor.*`, or a configured `runners.acp_*.*` is
+preserved and never applied by every reader, so those settings ride a downgrade
+untouched. But
 `global.runnerKind` is a **known** key, and a malformed known value makes the
 whole file unusable — which drops the operator's entire trust posture onto the
 conservative defaults, not just the one setting. That rule is deliberate and is

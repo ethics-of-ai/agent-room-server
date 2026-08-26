@@ -280,11 +280,12 @@ app is deliberately only one of them (Phase 6 of
 What this app holds and probes per runner is a **bundled bootstrap descriptor**,
 not a hand-written case: a runner's tier-3 *slots* (each naming the environment
 variable its value is injected as) and its *probes* (`executable_path`,
-`keychain_presence`), plus the messages each probe shows. Slot values live in the
-Keychain blob keyed by runner id and slot id, so a runner that reuses an existing
-slot or probe kind gets its controls, its checks, its launch injection, and its
-diagnostics without new Swift. A genuinely new local primitive still needs a
-scoped change and a safety review.
+`file_path`, `keychain_presence`, `file_presence`), plus the messages each
+probe shows. Slot values live in the Keychain blob keyed by runner id and slot
+id, so a runner that reuses an existing slot or probe kind gets its controls,
+its checks, its launch injection, and its diagnostics without new Swift. A
+genuinely new local primitive still needs a scoped change and a safety review;
+`file_presence` was the one Cursor cost (below).
 
 The descriptors are bundled with the app **on purpose**. `GET /api/runners` and
 `config/runners.json` say which runners exist and never what starting one
@@ -372,6 +373,23 @@ exists a shell-exported `DEEPSEEK_API_KEY` no longer reaches the backend. A key
 in `$AGENTROOM_HOME/config/.env` still applies, because the backend reads that
 file itself.
 
+Cursor holds **no slot**. The SDK ships inside the backend, so there is no
+executable to find and no argument list, and its credential is a file the SDK
+owns rather than a value this app keeps, so the descriptor adds no name to the
+launch allowlist. Its one probe, `signIn`, is required and is the file analog
+of the Claude Code Keychain lookup: a `file_presence` check of
+`~/.cursor/sdk/auth.json`, the key `Cursor.auth.login()` writes with mode 0600.
+The probe stats the path and never opens, reads, returns, or logs it, because
+the file *is* the credential; a test holds it to that by satisfying the probe
+with a file it could not have read. Presence cannot tell an expired key from a
+live one. That is the backend's authority: an expired or absent key fails the
+capabilities read, so `GET /api/runners` reports `ready: false` and the first
+turn fails to authenticate, and the remedy is running the sign-in again.
+`CURSOR_API_KEY` deliberately has no Keychain slot in this release; an operator
+who prefers a dashboard-minted or service-account key sets it in
+`$AGENTROOM_HOME/config/.env`, which the backend reads itself, and accepts that
+the sign-in check stays a blocking line on the setup checklist.
+
 ### Setting up DeepSeek Harness from a clone
 
 The recommended way to get a runtime, because the checkout ships the example
@@ -433,9 +451,46 @@ typo passes step 4 and surfaces as Node's own `cannot find module` on the
 runtime readiness row. And stopping a turn ends that conversation: this runner has no
 verified resume path, so create a new session rather than sending a follow-up.
 
+### Signing in to Cursor
+
+The Cursor runner authenticates with the SDK's own web sign-in, not with the
+`cursor-agent` CLI's login, which the SDK does not read. The command runs where
+the browser is and is the same posture as "run `claude login` in Terminal": the
+app names the step and the person performs it.
+
+From a checkout:
+
+```bash
+pnpm --filter @agentroom/backend cursor:login
+```
+
+From the packaged app:
+
+```bash
+"/Applications/AgentRoom.app/Contents/Resources/node/bin/node" \
+  "/Applications/AgentRoom.app/Contents/Resources/backend/dist/runner/cursor/login.js"
+```
+
+Either way the SDK opens the browser when that is likely to work and the
+command prints the login URL as well, so an SSH or `NO_OPEN_BROWSER` session
+can finish the sign-in by hand. Completing it mints a user API key named
+"AgentRoom" in the Cursor dashboard, with a 90-day default lifetime, and writes
+it to `~/.cursor/sdk/auth.json`; the command then reports the stored sign-in
+and never prints the key. Press **Check Cursor sign-in** in Settings → Runner
+→ Cursor afterwards, or run the safe checks from the dashboard.
+
+Three things to expect. A Cursor Pro plan or better is required: the SDK
+refuses a free account at its model listing before anything runs, so the
+sign-in succeeds and the runtime readiness row still reports not ready. The
+key expires after 90 days, and the app cannot see that coming, because its
+check is presence only; when turns start failing to authenticate and
+`GET /api/runners` shows `ready: false`, run the command again. And
+`Cursor.auth.logout()` forgets the file without revoking the key; revocation is
+the dashboard's API-keys page.
+
 Only the **default runner's** unmet prerequisites block setup. A Codex or
-DeepSeek CLI that was never installed is not a setup failure on a Mac whose
-backend is going to start a different runner.
+DeepSeek CLI that was never installed, or a Cursor sign-in never run, is not a
+setup failure on a Mac whose backend is going to start a different runner.
 
 The AgentRoom auth token pane can generate a bearer token, reveal or hide it,
 and copy it to the clipboard for pairing visionOS clients. Generated tokens

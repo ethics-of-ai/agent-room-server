@@ -250,7 +250,8 @@ knows the id, `configured` means the bootstrap it cannot start without is
 present (Codex needs `CODEX_EXECUTABLE`; DeepSeek Harness needs both
 `DEEPSEEK_EXECUTABLE` and the `DEEPSEEK_CORDIS_CONFIG` composition its runtime
 refuses to start without; the Claude Agent SDK resolves its own
-bundled CLI, so Claude Code is configured without one), and `enabled` means the
+bundled CLI, so Claude Code is configured without one, and the bundled Cursor
+SDK resolves its own sign-in, so Cursor is too), and `enabled` means the
 operator has turned it on. Collapsing them is what produces a runner that reads
 ready in a client and cannot start.
 
@@ -278,8 +279,8 @@ and anything tier-3. An executable path, an environment variable name, or a
 Keychain slot is never in a descriptor, so `configured` reports *that* the
 operator supplied a runner's bootstrap without reporting what it is.
 
-The list is not fixed at build time. Besides the three runners AgentRoom ships
-(`codex`, `claude_code`, `deepseek`), it
+The list is not fixed at build time. Besides the four runners AgentRoom ships
+(`codex`, `claude_code`, `deepseek`, `cursor`), it
 includes any **externally configured ACP adapter** the operator defined in
 `ACP_ADAPTERS` while `ACP_ADAPTERS_ENABLED` is on (ids are namespaced `acp_*`).
 Such a runner appears here exactly like a built-in one — id, display name,
@@ -312,7 +313,7 @@ never resolved to a known runner. See `docs/safety/TRUST_AND_SAFETY.md` and
 
 `GET /api/coding-agent/capabilities` returns safe client-renderable controls
 for the configured coding agent. The optional
-`?runnerKind=codex|claude_code|deepseek`
+`?runnerKind=codex|claude_code|deepseek|cursor`
 query selects a specific runner; without it the route serves the backend's
 default runner (`RUNNER_KIND`). For Codex JSON-RPC, the backend asks the local
 Codex app-server for `model/list` and maps visible model, optional advertised
@@ -389,19 +390,45 @@ value. Agent-initiated `config_option_update` notifications replace the live
 session record even between turns, so a later selection is never skipped against
 stale state.
 
+For `cursor`, the backend reads the live catalog through the bundled Cursor SDK
+(`Cursor.models.list()`) inside a throwaway host child, and the read is the
+runtime-readiness probe: spawn, `initialize`, `models/list`, `shutdown`. Each
+model's depth parameter (`effort` on Anthropic, Grok, and Gemini models,
+`reasoning` on OpenAI, Kimi, and GLM models) becomes its `reasoningEfforts`,
+and the boolean `fast` parameter becomes `serviceTiers` (`standard`, `fast`). A
+model that declares neither carries empty lists rather than borrowed ones, and
+the variant Cursor marks as the model's default supplies
+`defaultReasoningEffort` and `defaultServiceTier`. `thinking` and `context` are
+not selectable AgentRoom turn settings. When the default variant declares a
+bounded `context` value such as `300k` or `1m`, it is projected as the model's
+`contextWindowTokens`; Cursor Auto and models without that metadata omit the
+field. A selection sent with a turn rides the SDK's `ModelSelection.params`
+under the parameter name the model declared;
+a value the model does not offer fails the turn rather than running at the
+model's default. The managed `runners.cursor.reasoningEffort` is different: it
+is one operator default for every model, so it applies where the selected model
+offers it and is otherwise left out, because Cursor's vocabularies differ per
+model and a default that fits Claude Opus 5 would otherwise fail every turn on
+Composer. Successful discovery is cached for five minutes; a failed probe
+returns the static fallback catalog with a bounded error and is not cached.
+
 Note that `reasoningEffort` on a turn is an **open id bounded by shape**, not a
 closed vocabulary: the list a client renders comes from the model's own
 `reasoningEfforts`, and a registered runner may advertise values the two built-in
-runners do not have (a configured ACP adapter can offer `max` or `ultra`). The
-closed `none|minimal|low|medium|high|xhigh` vocabulary still bounds the
-`codexReasoningEffort` and `claudeCodeReasoningEffort` *managed settings*, which
-`GET /api/config` reports as those keys' `options`.
+runners do not have (a configured ACP adapter can offer `max` or `ultra`; Cursor
+offers `extra-high` and `max`). The closed `none|minimal|low|medium|high|xhigh`
+vocabulary still bounds the `codexReasoningEffort` and
+`claudeCodeReasoningEffort` *managed settings*, which `GET /api/config` reports
+as those keys' `options`; `cursorReasoningEffort` is open for the reason above,
+so it reports none.
 
 The active thread's effective context window is exposed on agent sessions as
-`modelContextWindowTokens` after Codex emits `thread/tokenUsage/updated` for a
-turn. That runtime value is preferred over the optional model-list
-`contextWindowTokens` field because Codex may apply an effective thread window
-that differs from a catalog maximum.
+`modelContextWindowTokens` when a runner reports one. That runtime value is
+preferred over the optional model-list `contextWindowTokens` field because a
+runner may apply an effective thread window that differs from its catalog
+default. When a runner reports `contextWindowUsedTokens` without either
+capacity field, clients can still show the latest request footprint but must
+not present the missing capacity as still loading indefinitely.
 
 ## Editor Language Catalog
 
@@ -1575,8 +1602,9 @@ registered workspace.
 }
 ```
 
-`runnerKind` accepts `codex`, `claude_code`, or `deepseek` — plus the id of any
-configured ACP adapter — and defaults to the backend's configured `RUNNER_KIND`. A session pins its runner kind at creation; for
+`runnerKind` accepts `codex`, `claude_code`, `deepseek`, or `cursor` — plus the
+id of any configured ACP adapter — and defaults to the backend's configured
+`RUNNER_KIND`. A session pins its runner kind at creation; for
 `claude_code` the backend keeps one persistent Claude Agent SDK session per
 AgentRoom session, and for `deepseek` one DeepSeek Harness SDK runtime.
 
@@ -1599,9 +1627,9 @@ the session gains a bounded runner-agnostic `runner` block —
 `nativeSessionId`, `model`, `cwd`, and the runner's own `posture`
 (`{ label, value }`) and `sandbox` — plus, for these two runner ids only, the
 legacy `codex`/`claudeCode` projections of it that predate that block. New
-clients should read `runner`. Image
-attachments are supported for `claude_code`; the runner inlines them as base64
-image content blocks as described under turns below.
+clients should read `runner`. Image attachments are supported for
+`claude_code` and `cursor`; both SDK runners receive base64 image content as
+described under turns below.
 
 `gitBranch` is optional. If omitted, the backend records the workspace's
 current branch when the session is created. Existing sessions keep that branch
@@ -1637,13 +1665,15 @@ message as the original `message`.
 Optional `context.attachments` values are ids returned by
 `POST /api/agent-sessions/:sessionId/attachments`. Image attachments are stored
 under `STATE_DIR` and injected after the text prompt by the session's runner.
-Codex JSON-RPC mode passes them as `localImage` input parts; the Claude Code
+Codex JSON-RPC mode passes them as `localImage` input parts. The Claude Code
 runner inlines each one as a base64 image content block in the SDK user message
-(the Claude Agent SDK has no file-path image source). Attachment ids are
-session-scoped; a turn cannot attach files uploaded to another session. On
-Codex, image attachment turns require `CODEX_RUNNER_PROTOCOL=jsonrpc`; the
-`exec` compatibility fallback rejects them because it accepts only the text
-prompt. A configured ACP adapter takes them only if the agent advertised the
+because that SDK has no file-path image source. The Cursor runner reads the
+same bounded `localImage` input and passes its base64 data and MIME type through
+the SDK's local `send` image contract. Attachment ids are session-scoped; a
+turn cannot attach files uploaded to another session. On Codex, image
+attachment turns require `CODEX_RUNNER_PROTOCOL=jsonrpc`; the `exec`
+compatibility fallback rejects them because it accepts only the text prompt. A
+configured ACP adapter takes them only if the agent advertised the
 exact ACP boolean `promptCapabilities.image: true`. When every completed
 handshake for that adapter has reported non-support, turn start answers
 `400 <agent> does not support image attachments`. With no observation or mixed
@@ -2039,7 +2069,7 @@ The `coding_artifact_*` events stream a model-authored sketch the runner writes
 in-band as an `<artifact kind="svg|mermaid" title="…">…</artifact>` region that
 begins at the start of a line of its assistant text. The backend parses that
 region out of the unified assistant delta stream (so the channel is identical for
-Codex and Claude Code), keeps it out of the chat transcript, and republishes it
+every runner), keeps it out of the chat transcript, and republishes it
 as `coding_artifact_started` (`artifactId`, `kind`, optional `title`), one or
 more `coding_artifact_delta` (`artifactId`, `delta`) as it streams, and
 `coding_artifact_completed` (`artifactId`, `bytes`, optional `truncated`) when

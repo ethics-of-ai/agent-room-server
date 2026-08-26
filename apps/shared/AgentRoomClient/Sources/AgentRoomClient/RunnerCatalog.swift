@@ -32,6 +32,10 @@ public struct RunnerCatalog: Hashable, Sendable {
         RunnerDescriptor(
             runnerKind: AgentRunnerKind.deepseek.rawValue,
             displayName: AgentRunnerKind.deepseek.displayName
+        ),
+        RunnerDescriptor(
+            runnerKind: AgentRunnerKind.cursor.rawValue,
+            displayName: AgentRunnerKind.cursor.displayName
         )
     ])
 

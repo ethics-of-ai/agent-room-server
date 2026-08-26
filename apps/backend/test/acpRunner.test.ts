@@ -275,7 +275,7 @@ describe("external runner registration", () => {
     // file. An operator-configured adapter is a different thing, so admitting
     // one must never grow the tuple of ids this build ships.
     registerExternalRunnerDescriptors([acpRunnerDescriptor(adapterConfig("/bin/echo", { id: "acp_x" }))]);
-    expect([...registeredRunnerKinds]).toEqual(["codex", "claude_code", "deepseek"]);
+    expect([...registeredRunnerKinds]).toEqual(["codex", "claude_code", "deepseek", "cursor"]);
     expect(agentRunnerKindSchema.safeParse("acp_x").success).toBe(true);
     expect(agentRunnerKindSchema.safeParse("acp_unregistered").success).toBe(false);
   });

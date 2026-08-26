@@ -3,8 +3,9 @@
 Current posture:
 
 - Registered local workspaces are the only session targets.
-- The API accepts runner kinds `codex`, `claude_code`, and `deepseek`; all
-  three execute only on the backend behind the `AgentRunner` boundary.
+- The API accepts runner kinds `codex`, `claude_code`, `deepseek`, and
+  `cursor`; all four execute only on the backend behind the `AgentRunner`
+  boundary.
 - Clients send turn messages; they do not execute shell commands.
 - Runner execution stays behind the backend `AgentRunner` adapter.
 - Mutating routes require bearer auth when `AUTH_TOKEN` is configured.
@@ -221,16 +222,19 @@ Current posture:
     already covers.
   - **Mac bootstrap readiness** — is the local prerequisite satisfied? It
     inspects the operator's own machine (an installed executable, the
-    presence-only `claude login` Keychain lookup) and **must work while the
-    backend is stopped**, which is exactly when an operator is fixing why it
+    presence-only `claude login` Keychain lookup, the presence-only stat of
+    Cursor's SDK sign-in file) and **must work while the backend is stopped**, which is exactly when an operator is fixing why it
     would not start, so it is answered on the Mac and never served from here.
     The tier-3 material it reads — an executable path, an environment variable
     name, a Keychain account — is not in a public descriptor at all, so it can
     neither arrive from `/api/runners` nor be inferred from it. What the Mac
     reads is a **bundled** `RunnerBootstrapDescriptor` per runner: its tier-3
     slots (each naming the environment variable its value is injected as) and its
-    probes (`executablePath`; `keychainPresence`, which stays the presence-only
-    lookup described below). Bundled is the safety property — a descriptor that
+    probes (`executablePath`; `filePath`; `keychainPresence`, which stays the
+    presence-only lookup described below; and `filePresence`, its file analog,
+    which stats a path and never opens, reads, returns, or logs it, because
+    for Cursor the file `~/.cursor/sdk/auth.json` *is* the credential). Bundled
+    is the safety property — a descriptor that
     could be served would let a remote answer name a binary to run — and the
     launch environment is built by walking those descriptors, so a stored value
     for a runner or slot this build does not describe is preserved in Keychain
@@ -438,8 +442,9 @@ Current posture:
     does not gate.
   - **The posture stays per-runner.** This adds an answer channel; it does not
     reconcile the Codex approval policy, the Claude Code permission mode, and an
-    ACP adapter's `permissionPolicy` into one enum. Those two built-in runners
-    answer from their own postures and expose no outstanding request, so the
+    ACP adapter's `permissionPolicy` into one enum. The built-in runners
+    answer from their own postures and expose no outstanding request (Cursor's
+    SDK offers no approval callback at all), so the
     route's `404` is the honest answer for them — it reads the absence of a
     runner's approval channel, never which runner it is.
 - **Clarifying questions let an agent pause a turn to ask the person driving
@@ -549,6 +554,25 @@ Current posture:
     shared transcript and audit paths see it. Cancellation, child loss,
     session deletion, and disposal release the wait. This adds no route,
     permission, shell, or process surface.
+  - **Cursor's question channel is one custom tool AgentRoom registers, and
+    the SDK's own `askQuestion` is always disallowed.** The SDK's built-in tool
+    is absent from the headless catalog (fact 3 of
+    `docs/engineering/CURSOR_SDK_RUNNER.md`), and every `agent/start` passes
+    `disallowedTools: ["askQuestion"]` so a later SDK cannot open a question
+    path AgentRoom has no answer for. While `clarifyingQuestionsEnabled` is on,
+    the host registers `ask_user_question` as a `local.customTools` entry whose
+    input schema is the shared 8-set × 8-option vocabulary; its `execute` sends
+    one `question/ask` request to the backend over the host's own JSON-RPC and
+    awaits the answer, so the SDK's tool call stays open for exactly the shared
+    wait. The backend mints every id and emits the same canonical pair; the
+    tool result the model sees is the person's labels and invited text, never
+    an AgentRoom id; a timeout returns a result saying nobody answered and
+    asking the model to continue on its best judgment. A `sensitive` set's text
+    enters that tool result and is stripped from the canonical resolution,
+    transcript, audit, and logs. Off, no tool is registered and no prompt
+    mentions one. The vendor's note that a custom tool "never requires
+    interactive approval" is correct here: answering it authorizes nothing, and
+    the sandbox and auto-review posture are untouched by it.
   - **One tier-1 kill switch.** `clarifyingQuestionsEnabled` (env
     `CLARIFYING_QUESTIONS_ENABLED`, default on) is a preference, not a trust
     setting: answering a question widens nothing, and turning the channel off
@@ -756,8 +780,9 @@ Current posture:
   - **Commit runs the workspace's hooks.** `git commit` is not passed
     `--no-verify`, so the registered workspace's `pre-commit`/`commit-msg` hooks
     execute — the same committed-configuration trust the workspace already carries
-    for both runners (Codex's `.codex/config.toml` layer, Claude Code's `project`
-    settings source). A hook that rejects the commit surfaces its message; a hook
+    for the bundled runners (Codex's `.codex/config.toml` layer, Claude Code's
+    `project` settings source, Cursor's `.cursor/hooks.json`). A hook that
+    rejects the commit surfaces its message; a hook
     that hangs is bounded by the local command timeout.
   - **Bearer-authed, sanitized, and audited.** All eight are mutating POSTs, so the
     global preHandler requires the bearer token when `AUTH_TOKEN` is configured;
@@ -1008,22 +1033,118 @@ Current posture:
     quietly — and the same rungs reap the capability probe's throwaway child,
     because a runtime that ignores `SIGTERM` leaks whether or not anyone was
     talking to it.
+- **Cursor turns are sandboxed by default, and the sandbox bounds writes and
+  network, not reads.** The `cursor` runner drives the bundled `@cursor/sdk`
+  inside a host child the backend spawns (`apps/backend/src/runner/cursor`,
+  `docs/engineering/CURSOR_SDK_RUNNER.md`). Like Claude Code it is a bundled
+  runner with a bundled credential path, so there is no executable to admit and
+  `GET /api/runners` reports it `configured` without a bootstrap value. Posture:
+  - **The sandbox is the tier-2 managed `runners.cursor.sandbox`, default
+    `true`, and it is narrower than the vendor's reference says.** The run that
+    settled it (fact 7 of the plan): with `local.sandboxOptions.enabled` a write
+    outside the registered workspace failed, writes inside the workspace and
+    under `/private/tmp` succeeded, network egress failed at DNS, and a read of
+    a file in the home directory **succeeded**, `ls ~/.cursor/sdk` included. The
+    vendor's reference says reads outside the workspace are blocked; this entry
+    reports the run. So a sandboxed shell can read any file the operator can,
+    the SDK's own `~/.cursor/sdk/auth.json` among them, and the bound is on
+    what leaves the workspace and the Mac, not on what the model sees. Egress
+    is allowlisted by the workspace's own `.cursor/sandbox.json`, which the
+    workspace controls and AgentRoom cannot pin: the same class of clause as
+    Codex's `.codex/config.toml`, except that Codex's `network_access` pin has
+    no analog here. With `sandbox: false` the runner is
+    `bypassPermissions`-class like the Claude Code default and the interactive
+    terminal, in those words. The unsandboxed shell tool runs in the host
+    process's cwd rather than `local.cwd`, so the adapter spawns the host with
+    its cwd set to the registered workspace and the two agree either way.
+  - **There is no interactive approval channel.** The SDK exposes no approval
+    callback, so the adapter implements no `answerPermissionRequest` and the
+    permissions route's `404` reads the absence of a channel. The configured
+    posture is the only answer. `runners.cursor.autoReview` (tier 2, default
+    `false`) turns on the vendor's server-side review classifier, which denies
+    a blocked call rather than escalating it; it never widens. The
+    clarifying-question channel is unaffected: it rides one custom tool whose
+    callback the host relays to the backend, and answering authorizes nothing.
+  - **Loading the workspace's `project` settings source is the tier-2
+    `runners.cursor.loadWorkspaceSettings`, default `true`.** On, the SDK reads
+    the registered workspace's `AGENTS.md`, `.cursor/rules/*.mdc`, the hooks in
+    `.cursor/hooks.json`, the MCP servers in `.cursor/mcp.json`, and skills from
+    `.cursor/skills`, `.agents/skills`, `.claude/skills`, and `.codex/skills`
+    (fact 6: all four, and only the workspace's). Hooks and MCP servers take
+    effect inside the turn, which is the same class of trust decision as Claude
+    Code's `project` source; off passes `settingSources: []` and nothing on
+    disk loads. The capability-discovery probe always forces `settingSources:
+    []` in the backend's own cwd, so reading the model list never runs a hook.
+  - **The SDK runs in a host child, and the child's environment is the scrub.**
+    `@cursor/sdk` runs its agent loop inline in whatever process imports it, so
+    the backend never imports it: it spawns `runner/cursor/host.js` with its own
+    Node runtime and speaks JSON-RPC to it over stdio. The shell tool's children
+    inherit the host's environment verbatim (fact 2), so what the host gets is
+    what a turn's shell gets: the operator's environment minus `AUTH_TOKEN`, the
+    same unconditional scrub every other spawned child gets. The agent's
+    persisted state (the SQLite store `Agent.resume` continues from) is pinned
+    under `STATE_DIR/cursor/agents`, never `~/.cursor/projects` and never the
+    registered workspace. The `commandAudit` row names the Node runtime and one
+    argument, never a workspace path and never a credential.
+  - **Billing follows the sign-in, and the credential is tier 3.** A turn bills
+    the Cursor account signed in through the SDK's web login
+    (`~/.cursor/sdk/auth.json`, a minted user API key written `0600` with a
+    90-day default lifetime), or `CURSOR_API_KEY` when set, which wins.
+    `CURSOR_API_KEY` and `CURSOR_BACKEND_URL` are environment-only: absent from
+    the settings file, the `/api/config` metadata, and the PATCH schema by
+    construction, never logged, never returned, and never in an audit row. The
+    host passes `apiKey` to the SDK only when the key is configured and
+    otherwise passes nothing, so `HOME` stays the operator's. There is no third
+    path: the `cursor-agent` CLI's own login is not read. The Mac's probe checks
+    that the sign-in file exists and never opens it. An expired key surfaces as
+    `ready: false` on `GET /api/runners` and an authentication error on the
+    first turn; the remedy is running the sign-in again. `Cursor.auth.logout()`
+    forgets the file but does not revoke the key; revocation is the dashboard's.
+    A Cursor Pro plan or better is required; the SDK refuses a free account at
+    `/v1/models` before anything runs.
+  - **Turn settings are mapped, never passed through.** A turn's `model` is
+    an id the catalog listed or the operator configured; `reasoningEffort` and
+    `serviceTier` become `ModelSelection.params` under the parameter name the
+    selected model declared (`effort` or `reasoning`, and the boolean `fast`),
+    and a value the model does not offer fails the turn. `mode` (`agent` |
+    `plan`) is not a setting in this release. Nothing a client sends reaches
+    the SDK as a free string.
+  - **Telemetry.** The SDK reports run lifecycle, latency, failure events, and
+    feature-gate checks to Cursor under the API key's identity, with no opt-out
+    the bundle exposes; repository identity in those events follows the Cursor
+    account's privacy mode. Model inference leaves the Mac, as it does for every
+    runner. If a later SDK adds an opt-out it belongs in the host environment,
+    set unconditionally.
+  - **Sub-agents are processes inside the host.** The `task` tool starts them,
+    they inherit the host's environment, and AgentRoom neither bounds them
+    separately nor observes them beyond the `task` message.
+  - **Other runners' provider secrets reach this host**, as they reach every
+    bundled runner's child: a Cursor turn's shell can read `DEEPSEEK_API_KEY`
+    exactly as a DeepSeek turn's can read `CURSOR_API_KEY`. A per-runner scrub
+    of the other runners' tier-3 names is a change to all four bundled runners
+    and is listed under the plan's residuals rather than made here.
 - Claude Code billing is deterministic for trusted workspaces: the runner scrubs
   `ANTHROPIC_*` and `CLAUDE_CODE_OAUTH_TOKEN` from the child environment so turns
   bill the Mac user's `claude login` subscription, unless the operator explicitly
   sets `CLAUDE_CODE_INHERIT_PROVIDER_AUTH=true` (or a loaded workspace
   `.claude/settings.json` re-supplies credentials, as noted above).
 - Restorable persistent runner children are idle-reaped. Each AgentRoom
-  session keeps one runner child process; for Codex and Claude Code, after 30 idle
-  minutes the backend kills the child (matching the terminal's idle window),
-  keeping the session's recorded native thread/session id. The next turn — and
-  any turn after a child crash or an unresponsive-cancel kill — resumes that
-  conversation (Codex `thread/resume`, Claude Agent SDK `resume`) in a fresh
-  child with the **same explicit runtime settings and isolation posture as a
-  fresh start**: the Codex resume re-passes the operator's approval policy,
-  sandbox mode, and pinned network access (verified against codex-cli 0.146:
-  resume applies explicit overrides and echoes the effective sandbox), and the
-  Claude resume rebuilds the same `settingSources`/permission-mode gating. A
+  session keeps one runner child process; for Codex, Claude Code, and Cursor,
+  after 30 idle minutes the backend kills the child (matching the terminal's
+  idle window), keeping the session's recorded native thread/session/agent id.
+  The next turn — and any turn after a child crash or an unresponsive-cancel
+  kill — resumes that conversation (Codex `thread/resume`, Claude Agent SDK
+  `resume`, Cursor `Agent.resume` from the store pinned under `STATE_DIR`) in a
+  fresh child with the **same explicit runtime settings and isolation posture
+  as a fresh start**: the Codex resume re-passes the operator's approval
+  policy, sandbox mode, and pinned network access (verified against codex-cli
+  0.146: resume applies explicit overrides and echoes the effective sandbox),
+  the Claude resume rebuilds the same `settingSources`/permission-mode gating,
+  and the Cursor resume is the same `agent/start` as a fresh one (model,
+  sandbox, auto-review, settings source, question tool) with the kept agent id
+  added. When a Cursor child dies or the cancel ladder must kill it with a run
+  still active, the first resumed `agent/send` also sets the SDK's local
+  `force` recovery flag; idle-reaped sessions do not need it. A
   rejected resume (for example a thread with no recorded turn, which has no
   rollout) falls back to a fresh thread rather than failing the turn. Deleting
   an AgentRoom session forgets its resumable id, so an explicitly deleted

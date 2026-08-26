@@ -20,6 +20,13 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
         /// reads, returns, or logs the credential — see
         /// `docs/safety/TRUST_AND_SAFETY.md`.
         case keychainPresence(service: String)
+        /// Presence-only check that a file exists, the file analog of
+        /// `keychainPresence` and under the same rule: it stats the path and
+        /// never opens, reads, returns, or logs it, because the file *is* the
+        /// credential. Cursor's SDK sign-in lives in a file the SDK owns, not
+        /// in this app's Keychain, so a Keychain lookup cannot see it. `~` is
+        /// the operator's home.
+        case filePresence(path: String)
     }
 
     /// Whether an unsatisfied prerequisite blocks setup for the runner it
@@ -75,7 +82,7 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
             slotID
         case .filePath(let slotID):
             slotID
-        case .keychainPresence:
+        case .keychainPresence, .filePresence:
             nil
         }
     }

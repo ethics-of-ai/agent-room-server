@@ -4,10 +4,10 @@
 
 AgentRoom runs coding-agent sessions on a Mac and exposes them to clients over
 REST and WebSocket. The backend registers local folders as workspaces, starts
-Codex, Claude Code, DeepSeek Harness, or an external ACP agent inside them, owns
-session state, and streams typed events. The macOS app is the operator console:
-it configures runners, keeps secrets in Keychain, registers workspaces, starts
-and supervises the backend, and shows diagnostics.
+Codex, Claude Code, DeepSeek Harness, Cursor, or an external ACP agent inside
+them, owns session state, and streams typed events. The macOS app is the
+operator console: it configures runners, keeps secrets in Keychain, registers
+workspaces, starts and supervises the backend, and shows diagnostics.
 
 This repository holds the backend, the macOS app, and the Swift client library
 the Apple apps compile. It does not hold the visionOS app. That app is the main
@@ -25,7 +25,7 @@ flowchart TB
         operator["macOS operator app"]
         backend["Fastify backend"]
         workspaces["registered local workspaces"]
-        agents["Codex, Claude Code, DeepSeek, or ACP agent"]
+        agents["Codex, Claude Code, DeepSeek, Cursor, or ACP agent"]
 
         operator -->|launches, supervises, REST| backend
         backend -->|registers| workspaces
@@ -73,7 +73,9 @@ Open the DMG, drag `AgentRoom.app` to Applications, and launch it. The app
 bundles its own Node.js runtime and the compiled backend, so nothing else has to
 be installed to start the backend. You still need at least one runner: Codex
 (set its executable path in the app), Claude Code (sign in with `claude login`
-as the Mac user), or DeepSeek Harness (see the
+as the Mac user), Cursor (run the sign-in command in
+[Signing in to Cursor](docs/clients/MACOS.md#signing-in-to-cursor); a Cursor
+Pro plan or better is required), or DeepSeek Harness (see the
 [DeepSeek runner guide](docs/engineering/DEEPSEEK_HARNESS_RUNNER.md)).
 
 ## Build from source
@@ -99,8 +101,9 @@ executable path:
 CODEX_EXECUTABLE=/absolute/path/to/codex
 ```
 
-Claude Code uses the Mac user's existing `claude login`. Create a bearer token
-before connecting another device:
+Claude Code uses the Mac user's existing `claude login`. Cursor's SDK is
+bundled; `pnpm --filter @agentroom/backend cursor:login` completes the web
+sign-in it reads. Create a bearer token before connecting another device:
 
 ```bash
 npx pnpm --filter @agentroom/backend auth:init
@@ -178,6 +181,10 @@ repository you did not write:
   to the registered folder.
 - A DeepSeek turn is bounded by the operator-supplied Cordis composition, which
   AgentRoom cannot inspect.
+- A Cursor turn is sandboxed by default, and that sandbox bounds writes (the
+  workspace and `/private/tmp`) and network egress, not reads. It loads the
+  workspace's `.cursor/hooks.json`, `.cursor/mcp.json`, rules, and skills
+  unless `CURSOR_LOAD_WORKSPACE_SETTINGS` is off.
 - The optional terminal is off by default. On, it is a real shell on the Mac,
   unsandboxed after launch.
 - The backend binds to the LAN by default. Set `AUTH_TOKEN` before connecting a
@@ -189,7 +196,7 @@ an optimistic lock. Git routes accept fixed operations, not command strings. The
 full posture, including known gaps, is
 [Trust and safety](docs/safety/TRUST_AND_SAFETY.md).
 
-## Ships with Claude Code
+## Ships with Claude Code and the Cursor SDK
 
 The DMG bundles the Claude Agent SDK, which carries an unmodified Claude Code
 binary. AgentRoom starts it as published by Anthropic, and each person signs in
@@ -197,6 +204,13 @@ with their own `claude login`; by default AgentRoom strips Anthropic credentials
 from the child it spawns and intermediates no usage. Use of that binary is
 governed by
 [Anthropic's terms](https://code.claude.com/docs/en/legal-and-compliance).
+
+The DMG also bundles the Cursor SDK and its Anysphere-signed helper binaries,
+unmodified. Each person signs in with their own Cursor account through the
+SDK's web login, on their own plan (Cursor Pro or better); AgentRoom holds no
+Cursor credential and intermediates no usage. Use of the SDK is governed by
+[Cursor's Terms of Service](https://cursor.com/terms-of-service).
+
 Everything else the DMG bundles is listed in
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 

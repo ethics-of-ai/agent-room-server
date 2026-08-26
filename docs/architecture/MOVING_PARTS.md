@@ -163,8 +163,8 @@
   demands; `apps/backend/test/runnerRegistry.test.ts` holds the line by scanning
   the backend sources for a behavioral decision on runner identity outside
   `runner/` and the two legacy mapper shims, and by pinning the registered ids to
-  `codex`, `claude_code`, and `deepseek` — the list this build ships, which
-  grows only by a deliberate rollout-gate decision.
+  `codex`, `claude_code`, `deepseek`, and `cursor` — the list this build ships,
+  which grows only by a deliberate rollout-gate decision.
 - `src/runner/runtimeReadiness.ts`: the backend half of Phase 6's split
   readiness. It records what an adapter's own capability discovery proved —
   the child spawned, the handshake completed, the model list read — and reports
@@ -254,8 +254,10 @@
   also writes the rendered answer — `agent/questionTranscript.ts` — into the
   thread as a user message and publishes the `agent_question_resolved` audit).
   `clarifyingQuestionsEnabled` (tier 1) gates the channel for every runner.
-  Codex and Claude Code open that wait from their native request mechanisms;
-  DeepSeek opens it from its bounded prompt contract and holds the same
+  Codex, Claude Code, and Cursor open that wait from their native request
+  mechanisms (Cursor's is the `ask_user_question` custom tool whose callback the
+  host relays as one `question/ask` request); DeepSeek opens it from its bounded
+  prompt contract and holds the same
   AgentRoom turn across the answer's second Harness protocol prompt.
   See `docs/safety/TRUST_AND_SAFETY.md`.
 - `src/runner`: the `AgentRunner` boundary — which since Phase 2 also declares
@@ -312,9 +314,9 @@
   `history_replay`, or `unsupported`) is a registry descriptor field since
   Phase 3, not a local constant, and the host arms an idle timer only for a
   runner it can restore — reaping a child that cannot be restored would silently
-  start a fresh conversation under the same AgentRoom session id. Codex and
-  Claude Code are `native_resume`; DeepSeek is `unsupported`, so it is never
-  idle-reaped and cannot continue after its child is killed or lost (see
+  start a fresh conversation under the same AgentRoom session id. Codex,
+  Claude Code, and Cursor are `native_resume`; DeepSeek is `unsupported`, so it
+  is never idle-reaped and cannot continue after its child is killed or lost (see
   `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`).
 - `src/runner/deepseek`: the DeepSeek Harness adapter, driving the vendor's
   first-party SDK runtime over newline-delimited JSON-RPC on the child's stdio
@@ -354,6 +356,25 @@
   cancellation deliberately enters below the first rung. See
   `docs/safety/TRUST_AND_SAFETY.md` for the `bypassPermissions`-class posture and
   `docs/engineering/DEEPSEEK_HARNESS_RUNNER.md` for the plan.
+- `src/runner/cursor`: the Cursor SDK adapter
+  (`docs/engineering/CURSOR_SDK_RUNNER.md`). `@cursor/sdk` runs its agent loop
+  inline in whatever process imports it, so the adapter never imports it:
+  `host.ts` is the one file that does (through the require-based structural
+  loader in `sdk.ts`), and `CursorSdkRunner.ts` spawns it as one child per
+  AgentRoom session — with `AUTH_TOKEN` scrubbed — and drives it over the shared
+  newline-delimited JSON-RPC (`protocol.ts`). The host holds one `SDKAgent`,
+  forwards `run.stream()` messages and the one `shell-output-delta` worth
+  forwarding, and relays the clarifying-question custom tool's callback back as
+  one `question/ask` request; `messageMapper.ts` maps the SDK stream to the
+  canonical union, `questions.ts` mints the question ids and renders the answer,
+  and `capabilities.ts` maps the live `models/list` (with a static fallback).
+  Persisted agent state is pinned under `STATE_DIR/cursor/agents`, so
+  `restoreStrategy: native_resume` continues a reaped or crashed session's agent
+  in a fresh host. There is no permission channel (the SDK exposes no approval
+  callback), so no `answerPermissionRequest` and the permissions route's `404`
+  reads the absence of a channel. The `cursor` id, its descriptor row, and the
+  workspace-settings gate landed 2026-08-26 with the rollout gate; the host,
+  protocol, mapper, question tool, and real adapter landed the same day.
 - `src/util/parentExitWatchdog.ts`: exits the process when the one that launched
   it goes away, armed from `src/index.ts` only under
   `AGENTROOM_EXIT_WITH_PARENT`. The macOS app also supplies its pid through
@@ -525,7 +546,8 @@
   runner bootstrap slot value in Keychain — keyed by runner id and slot id, from
   one bundled `RunnerBootstrapDescriptor` per runner that also declares how to
   probe the local prerequisite (an installed executable, a presence-only
-  `claude login` lookup) and which environment variable each slot is injected as,
+  `claude login` Keychain lookup, a presence-only stat of Cursor's SDK sign-in
+  file) and which environment variable each slot is injected as,
   so the descriptors are the launch allowlist and a runner this build does not
   describe contributes no local check and no injected value —, answers Mac
   bootstrap readiness from those probes while showing the backend's own `ready`
