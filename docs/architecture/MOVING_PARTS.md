@@ -667,6 +667,17 @@
   backend PTY session — tabs tear out into their own window and merge across
   same-workspace windows by drag or chip menu, moving the live controller
   without ending its session (`TerminalPanelsStore`),
+  hosts one or more editor windows per workspace on the same panel model
+  (`EditorPanelsStore`, owned by `AppStore` because window-independent work —
+  a Git-status poll reloading clean buffers, a branch switch, a change-review
+  walk — reaches the same tabs): opening a file dedups into the workspace's
+  primary panel so the ordinary path is one window with tabs, and a tab tears
+  out or merges by the same drag and chip menu the terminal strip uses, carrying
+  its editor model — and therefore its unsaved draft and optimistic-lock token —
+  intact. A file is a tab in exactly one panel, which is what keeps that draft
+  and token single-owned; closing a split-off window returns its files to a
+  sibling rather than dropping them, and the workspace's last panel keeps its
+  tabs so reopening the editor lands back on them.
   derives context paths from explicit `@` file mentions, offers a `/` skill
   picker in the workspace window and scene composers (backed by the bounded
   workspace skills read; narrows while typing and inserts the runner's
