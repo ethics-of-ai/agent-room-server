@@ -12,8 +12,10 @@ import type {
   AgentTurnContext,
   AgentRunnerKind,
   CodingAgentTurnSettings,
+  DurableAgentSessionDocument,
   StatusSnapshot
 } from "../domain/models";
+import { DURABLE_AGENT_SESSION_SCHEMA_VERSION } from "../domain/schemas";
 import type { ArtifactSnapshot, ArtifactStore } from "../artifact/ArtifactStore";
 import type { EventBus } from "../events/EventBus";
 import { logger } from "../logging/logger";
@@ -24,7 +26,8 @@ import {
   type CanonicalQuestionAnswer
 } from "../runner/AgentRunner";
 import type { QuestionAnswerResult } from "../runner/shared/PendingQuestionRequests";
-import { runnerDescriptor } from "../runner/registry";
+import { isRegisteredRunnerKind, runnerDescriptor } from "../runner/registry";
+import type { DurableAgentSessionStore } from "../state/DurableAgentSessionStore";
 import {
   codingDiffUpdatedEvent,
   codingTurnCancelledEvent,
@@ -82,15 +85,39 @@ export interface StartAgentTurnInput {
   settings?: CodingAgentTurnSettings;
 }
 
+/**
+ * The fixed reason a turn that was running when the backend ended settles
+ * with. A restart is an interruption, not a decision: nobody chose, so the
+ * turn fails rather than being reported as cancelled or completed.
+ */
+export const BACKEND_RESTARTED_TURN_ERROR = "Backend restarted during this turn";
+
 export class AgentSessionService {
   private readonly sessions = new Map<string, AgentSession>();
   private readonly turns = new Map<string, AgentSessionTurn>();
-  private readonly messages = new AgentSessionMessageStore();
+  private readonly messages = new AgentSessionMessageStore({
+    onChange: (sessionId) => this.persist(sessionId)
+  });
   private readonly telemetry = new AgentTurnTelemetryStore();
   private readonly runnerEvents: AgentTurnEventApplier;
   private readonly turnGitDiffs: AgentTurnGitDiffTracker;
   private readonly cancelledTurnIds = new Set<string>();
   private readonly countedCancelledTurnIds = new Set<string>();
+  /**
+   * Hydrated sessions whose runner declares no restore path but which had a
+   * native conversation. Their next turn is refused rather than started as a
+   * fresh conversation under the old thread's id. Derived from the document
+   * and the descriptor at every hydration, never persisted.
+   */
+  private readonly uncontinuableSessionIds = new Set<string>();
+  /**
+   * The native id each hydrated session was seeded with, held until its
+   * runner reports a session start. A reported id that differs means the
+   * resume did not take and the agent is in a fresh conversation, which the
+   * person is told rather than left to discover. Consumed on first report,
+   * so the comparison runs once per hydrated session.
+   */
+  private readonly hydratedSeeds = new Map<string, string>();
   private completedTurns = 0;
   private failedTurns = 0;
   private cancelledTurns = 0;
@@ -109,6 +136,11 @@ export class AgentSessionService {
       attachments?: {
         deleteSessionAttachments(session: Pick<AgentSession, "workspaceId" | "id">): Promise<void>;
       };
+      /**
+       * Where session records outlive this process. Absent, the list is
+       * process-scoped exactly as it was before the store existed.
+       */
+      durableSessions?: Pick<DurableAgentSessionStore, "initialize" | "schedule" | "remove">;
     }
   ) {
     this.runnerEvents = new AgentTurnEventApplier({
@@ -121,11 +153,109 @@ export class AgentSessionService {
       completeCancelledTurn: (session, turn) => this.completeCancelledTurn(session, turn),
       recordTokenUsage: (session, turn, event) => this.recordTokenUsage(session, turn, event),
       succeedTurn: (session, turn, event) => this.succeedTurn(session, turn, event),
-      failTurn: (session, turn, error) => this.failTurn(session, turn, error)
+      failTurn: (session, turn, error) => this.failTurn(session, turn, error),
+      sessionChanged: (sessionId) => this.persist(sessionId),
+      takeHydratedSeed: (sessionId) => {
+        const seed = this.hydratedSeeds.get(sessionId);
+        this.hydratedSeeds.delete(sessionId);
+        return seed;
+      }
     });
     this.turnGitDiffs = new AgentTurnGitDiffTracker({
       gitStatus: (workspaceId) => deps.registry.gitStatus(workspaceId)
     });
+  }
+
+  /**
+   * Read every session record the durable store holds and restore it as if
+   * its mutations had happened in this process. Awaited before any route
+   * registers, so the first request sees the restored list.
+   *
+   * Three things happen per record beyond populating the maps. A turn that was
+   * running when the previous process ended settles through the ordinary
+   * failure path with a fixed reason, publishing at boot on purpose: the audit
+   * store is attached before this service is built, so the interruption reaches
+   * durable audit. A session with a native conversation id is seeded into its
+   * runner through the optional `rememberResumableId` hook, so the next turn
+   * resumes that conversation; a runner without the hook is left alone. And a
+   * session whose runner declares no restore path is marked uncontinuable, so
+   * a restart never begins a fresh conversation under an existing thread's id.
+   * None of it reads which runner a session belongs to — only the descriptor
+   * field and the hook's presence.
+   */
+  async initialize(): Promise<void> {
+    const store = this.deps.durableSessions;
+    if (!store) return;
+    const inventory = await store.initialize();
+    for (const document of inventory.documents) {
+      this.hydrate(document);
+    }
+    logger.info({ sessions: inventory.documents.length }, "Agent sessions restored from the durable store");
+  }
+
+  private hydrate(document: DurableAgentSessionDocument): void {
+    // The document validated `runnerKind` as a string so a thread from a
+    // runner this process does not register stays readable; the record type
+    // narrows it, and `requireRunner` is what refuses a turn on it.
+    const session = document.session as AgentSession;
+    if (this.sessions.has(session.id)) return;
+    this.sessions.set(session.id, session);
+    for (const turn of document.turns) {
+      this.turns.set(turn.id, turn);
+    }
+    this.messages.restore(session.id, document.messages);
+
+    const interruptedTurns = document.turns.filter((turn) => turn.status === "running");
+    for (const turn of interruptedTurns) {
+      this.failTurn(session, turn, BACKEND_RESTARTED_TURN_ERROR, { countMetric: false });
+    }
+    if (session.activeTurnId && !this.turns.has(session.activeTurnId)) {
+      // A record can only name a turn it also holds, so this is defensive:
+      // without clearing it the session would refuse every turn as busy.
+      session.activeTurnId = undefined;
+      session.status = "failed";
+      session.error = BACKEND_RESTARTED_TURN_ERROR;
+      session.updatedAt = new Date().toISOString();
+      this.persist(session.id);
+    }
+    const interrupted = interruptedTurns.length > 0;
+
+    const nativeSessionId = session.runner?.nativeSessionId;
+    if (!nativeSessionId) return;
+    if (isRegisteredRunnerKind(session.runnerKind) && runnerDescriptor(session.runnerKind).restoreStrategy === "unsupported") {
+      this.uncontinuableSessionIds.add(session.id);
+      return;
+    }
+    this.hydratedSeeds.set(session.id, nativeSessionId);
+    this.deps.runners[session.runnerKind]?.rememberResumableId?.({
+      sessionId: session.id,
+      nativeSessionId,
+      interrupted
+    });
+  }
+
+  /** Mark a session's durable record dirty. Cheap: one map write per call. */
+  private persist(sessionId: string): void {
+    const store = this.deps.durableSessions;
+    if (!store || !this.sessions.has(sessionId)) return;
+    void store.schedule(sessionId, () => this.snapshot(sessionId));
+  }
+
+  /**
+   * Taken at write time, not at mark time, so the file always reflects the
+   * newest state however many marks coalesced into the write.
+   */
+  private snapshot(sessionId: string): DurableAgentSessionDocument {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error("Agent session is no longer in memory");
+    }
+    return {
+      schemaVersion: DURABLE_AGENT_SESSION_SCHEMA_VERSION,
+      session: { ...session },
+      turns: [...this.turns.values()].filter((turn) => turn.sessionId === sessionId).map((turn) => ({ ...turn })),
+      messages: this.messages.list(sessionId)
+    };
   }
 
   listSessions(): AgentSession[] {
@@ -189,6 +319,7 @@ export class AgentSessionService {
     };
     this.sessions.set(session.id, session);
     this.messages.initializeSession(session.id);
+    this.persist(session.id);
     this.deps.eventBus.publish("agent_session_created", { session });
     return session;
   }
@@ -198,6 +329,16 @@ export class AgentSessionService {
     const session = this.requireSession(input.sessionId);
     if (session.activeTurnId) {
       throw new AgentSessionError("Agent session already has a running turn", 409);
+    }
+    if (this.uncontinuableSessionIds.has(session.id)) {
+      // The same refusal the adapter gives after cancellation or child loss.
+      // It has to live here as well because the adapter's own mark is
+      // in-memory and a restart empties it; without this the next turn would
+      // spawn a fresh runtime and begin a new conversation under this thread.
+      throw new AgentSessionError(
+        `${runnerDescriptor(session.runnerKind).displayName} cannot continue this session because its runtime stopped and no restore path is verified; create a new AgentRoom session`,
+        409
+      );
     }
     // Turn start only needs the workspace to still be registered; the branch
     // restore below probes git itself, so skip the full snapshot refresh here.
@@ -257,6 +398,7 @@ export class AgentSessionService {
     session.activeTurnId = turn.id;
     session.error = undefined;
     session.updatedAt = now;
+    this.persist(session.id);
 
     this.deps.eventBus.publish("agent_turn_started", {
       sessionId: session.id,
@@ -292,6 +434,7 @@ export class AgentSessionService {
         session.error = undefined;
       }
       session.updatedAt = now;
+      this.persist(session.id);
       this.deps.eventBus.publish("agent_turn_cancelled", { sessionId: session.id, turnId });
       this.publishCodingEvent(codingTurnCancelledEvent({
         sessionId: session.id,
@@ -378,6 +521,15 @@ export class AgentSessionService {
     await this.deps.runners[session.runnerKind]?.closeSession?.(sessionId);
 
     await this.deps.attachments?.deleteSessionAttachments(session);
+    // The document goes before the in-memory record and before the delete is
+    // reported, so an explicitly deleted thread is never hydrated; and after
+    // the runner and attachment releases, so a delete that fails midway leaves
+    // the file rather than losing it. Nothing below this line awaits, so no
+    // late runner event can mark the record between the unlink and the
+    // in-memory delete that makes the session not live.
+    await this.deps.durableSessions?.remove(sessionId);
+    this.uncontinuableSessionIds.delete(sessionId);
+    this.hydratedSeeds.delete(sessionId);
     this.deps.artifacts?.releaseSession(sessionId);
     this.sessions.delete(sessionId);
     this.messages.deleteSession(sessionId);
@@ -570,6 +722,7 @@ export class AgentSessionService {
     session.turnCount += 1;
     this.completedTurns += 1;
     session.updatedAt = now;
+    this.persist(session.id);
     this.deps.eventBus.publish("agent_turn_succeeded", { sessionId: session.id, turnId: turn.id });
     this.publishCodingEvent(codingTurnCompletedEvent({
       sessionId: session.id,
@@ -609,9 +762,15 @@ export class AgentSessionService {
       session.modelContextWindowTokens = event.modelContextWindowTokens;
     }
     session.updatedAt = new Date().toISOString();
+    this.persist(session.id);
   }
 
-  private failTurn(session: AgentSession, turn: AgentSessionTurn, error: string): void {
+  private failTurn(
+    session: AgentSession,
+    turn: AgentSessionTurn,
+    error: string,
+    options: { countMetric?: boolean } = {}
+  ): void {
     if (this.cancelledTurnIds.has(turn.id) || turn.status === "cancelled") {
       this.completeCancelledTurn(session, turn);
       return;
@@ -628,7 +787,8 @@ export class AgentSessionService {
     session.lastMessage = error;
     session.activeTurnId = undefined;
     session.updatedAt = now;
-    this.failedTurns += 1;
+    if (options.countMetric !== false) this.failedTurns += 1;
+    this.persist(session.id);
     this.deps.eventBus.publish("agent_turn_failed", { sessionId: session.id, turnId: turn.id, error });
     this.publishCodingEvent(codingTurnFailedEvent({
       sessionId: session.id,
@@ -659,6 +819,7 @@ export class AgentSessionService {
       session.error = undefined;
     }
     session.updatedAt = now;
+    this.persist(session.id);
     if (!this.countedCancelledTurnIds.has(turn.id)) {
       this.cancelledTurns += 1;
       this.countedCancelledTurnIds.add(turn.id);

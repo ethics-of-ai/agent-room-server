@@ -416,6 +416,13 @@ export class AcpRunner implements AgentRunner {
     this.permissions.releaseSession(sessionId);
   }
 
+  // An ACP session id hydrated from the durable session store: the next
+  // turn's acquire miss tries `session/resume` (or `session/load`) with it,
+  // exactly as after a reap.
+  rememberResumableId(input: { sessionId: string; nativeSessionId: string }): void {
+    this.sessions.rememberResumableId(input.sessionId, input.nativeSessionId);
+  }
+
   /**
    * The human answer to an outstanding permission request.
    *

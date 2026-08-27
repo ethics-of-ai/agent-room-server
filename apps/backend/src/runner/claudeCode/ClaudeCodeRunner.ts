@@ -339,6 +339,12 @@ export class ClaudeCodeRunner implements AgentRunner {
     this.sessions.close(sessionId);
   }
 
+  // An SDK session id hydrated from the durable session store: the next turn's
+  // acquire miss passes it as `resume` exactly as after a reap.
+  rememberResumableId(input: { sessionId: string; nativeSessionId: string }): void {
+    this.sessions.rememberResumableId(input.sessionId, input.nativeSessionId);
+  }
+
   async dispose(): Promise<void> {
     this.questions.releaseAll();
     this.sessions.disposeAll();

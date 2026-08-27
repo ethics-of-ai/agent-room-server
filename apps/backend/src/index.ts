@@ -3,12 +3,18 @@ import { getServiceConfig } from "./config/serviceConfig";
 import { writeRunnerCatalogFile } from "./config/runnerCatalogFile";
 import { booleanEnv } from "./config/env";
 import { startParentExitWatchdog } from "./util/parentExitWatchdog";
+import { installShutdownHandlers } from "./util/shutdown";
 import { logger } from "./logging/logger";
 
 async function main(): Promise<void> {
   armParentExitWatchdog();
   const config = getServiceConfig();
   const { app } = await buildServer({ config });
+  // Installed once the server exists and before it listens, so the SIGINT the
+  // macOS app sends on quit runs the close hooks (runner children SIGTERMed,
+  // terminals killed, the session store flushed) instead of Node's default
+  // immediate exit. See `util/shutdown.ts` for the ceiling.
+  installShutdownHandlers({ close: () => app.close() });
   await app.listen({ host: config.host, port: config.port });
   // Leave the macOS app a catalog of the runners this process registers, so its
   // settings panes can offer them while the backend is stopped — which is

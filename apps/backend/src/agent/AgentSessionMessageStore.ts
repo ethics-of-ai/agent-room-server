@@ -7,8 +7,23 @@ import type {
 export class AgentSessionMessageStore {
   private readonly messages = new Map<string, AgentSessionMessage[]>();
 
+  /**
+   * `onChange` fires after every mutation of a session's list, with that
+   * session's id. It is how the service marks the durable record dirty without
+   * every writer (the turn applier included) learning about the store.
+   */
+  constructor(private readonly options: { onChange?: (sessionId: string) => void } = {}) {}
+
   initializeSession(sessionId: string): void {
     this.messages.set(sessionId, []);
+  }
+
+  /**
+   * Seed a session's history read back from disk. Not a change: the record on
+   * disk is what this came from, so nothing is marked.
+   */
+  restore(sessionId: string, messages: AgentSessionMessage[]): void {
+    this.messages.set(sessionId, [...messages]);
   }
 
   list(sessionId: string): AgentSessionMessage[] {
@@ -27,6 +42,7 @@ export class AgentSessionMessageStore {
     const messages = this.messages.get(input.sessionId) ?? [];
     messages.push(message);
     this.messages.set(input.sessionId, messages);
+    this.options.onChange?.(input.sessionId);
     return message;
   }
 
@@ -51,6 +67,7 @@ export class AgentSessionMessageStore {
         at: new Date().toISOString()
       };
       this.messages.set(sessionId, messages);
+      this.options.onChange?.(sessionId);
       return messages[index];
     }
     return this.append({
@@ -78,6 +95,7 @@ export class AgentSessionMessageStore {
         at: new Date().toISOString()
       };
       this.messages.set(sessionId, messages);
+      this.options.onChange?.(sessionId);
       return;
     }
     if (fallbackContent) {

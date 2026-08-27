@@ -117,6 +117,21 @@ describe("PersistentRunnerSessionHost", () => {
     expect(host.resumableId("session-unrestorable")).toBeUndefined();
   });
 
+  it("hands back a seeded resume id before any session is registered", () => {
+    // The durable-session hydration path: the service seeds the id a previous
+    // process recorded, and the next acquire miss must see it as a resume.
+    const { host } = makeHost();
+    host.rememberResumableId("session-hydrated", "native-thread-hydrated");
+
+    expect(host.acquire("session-hydrated")).toBeUndefined();
+    expect(host.resumableId("session-hydrated")).toBe("native-thread-hydrated");
+
+    // The host, not the caller, decides whether a seed is honored.
+    const { host: unrestorable } = makeHost({ restoreStrategy: "unsupported" });
+    unrestorable.rememberResumableId("session-hydrated", "native-thread-hydrated");
+    expect(unrestorable.resumableId("session-hydrated")).toBeUndefined();
+  });
+
   it("forgets the resumable id when the AgentRoom session is closed", () => {
     const { host, teardowns } = makeHost();
     const session = makeSession("session-closed");

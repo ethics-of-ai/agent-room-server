@@ -103,9 +103,43 @@
   workspace snapshot past its cache so a client sees state after its own command.
   Deliberately excludes history rewriting and forced push; see
   `docs/safety/TRUST_AND_SAFETY.md`.
-- `src/agent/AgentSessionService.ts`: in-memory session lifecycle, turn
-  execution, Codex thread metadata, message history, stop/cancellation,
-  steering-safe metrics, and status snapshots.
+- `src/agent/AgentSessionService.ts`: session lifecycle, turn execution, runner
+  session metadata, message history, stop/cancellation, steering-safe metrics,
+  and status snapshots. The record is in memory and mirrored write-through to
+  `src/state/DurableAgentSessionStore.ts`: every site that mutates a session, a
+  turn, or the message list marks the record (the message store takes an
+  `onChange` callback so the turn applier never learns about the store, and the
+  applier's one direct session mutation, the runner metadata at session start,
+  marks through a `sessionChanged` callback of the same shape). `initialize()`
+  runs before any route registers and restores every readable document as if
+  its mutations had happened in this process, with three consequences per
+  record: a turn persisted as running settles through the ordinary `failTurn`
+  with the fixed reason `Backend restarted during this turn`, publishing at
+  boot on purpose so the already-attached audit store keeps it, without
+  incrementing the new process's `failedTurns` counter; a session with
+  a recorded native id is seeded into its runner through the optional
+  `AgentRunner.rememberResumableId` hook (with `interrupted` set when its turn
+  was reconciled), so the next turn resumes the conversation; and a session
+  whose descriptor declares `restoreStrategy: "unsupported"` and had a native
+  conversation is marked uncontinuable, so `startTurn` answers `409` with the
+  adapter's wording instead of spawning a fresh runtime under the old thread's
+  id. That mark is derived from the document and the descriptor at every
+  hydration and never persisted, and the whole path reads the descriptor field
+  and the hook's presence, never which runner a session belongs to. A session
+  whose runner this process does not register hydrates as history and its turn
+  gets the `400` `requireRunner` already returns. `deleteSession` removes the
+  document after the runner and attachment releases and before the in-memory
+  delete, so an explicitly deleted thread is never hydrated and a delete that
+  fails midway leaves the file. Process-scoped counters stay at zero across a
+  restart; `totalSessions` is derived from the map. A resume the runner did
+  not honor is reported rather than hidden: the service keeps each hydrated
+  session's seed until the applier assigns the runner metadata a
+  `session_started` activity carries, and a reported native id that differs
+  from the seed appends one `system` message to the thread (`This thread
+  could not be resumed after a backend restart…`) with the ids in the log,
+  never in the transcript. The comparison is two values of one field, so it
+  needs nothing runner-specific; it runs once per hydrated session, and a start
+  that reports no id proves nothing and is left alone.
 - `src/agent/AgentTurnContextAssembler.ts`: backend turn context assembly for
   combining the original user message, explicit workspace context paths, and
   session-scoped attachment ids into the runner prompt plus runner input parts.
@@ -317,7 +351,17 @@
   start a fresh conversation under the same AgentRoom session id. Codex,
   Claude Code, and Cursor are `native_resume`; DeepSeek is `unsupported`, so it
   is never idle-reaped and cannot continue after its child is killed or lost (see
-  `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`).
+  `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`). The same resume path is
+  what carries a thread across a backend process boundary: `AgentRunner` has an
+  optional `rememberResumableId` hook beside the two answer hooks, which the
+  four host-backed adapters implement as one call into the host so a native id
+  read back from the durable session store seeds the next turn's acquire-miss
+  resume branch. It remembers and spawns nothing; restoring stays in the
+  adapter with the same explicit settings as a fresh start. Cursor also marks
+  the session for a forced first send when the seed says the persisted turn was
+  running at the time the backend ended, the same recovery it takes for a host
+  that died with a send in flight. DeepSeek does not implement the hook, and
+  its absence is what the caller reads, never the runner's name.
 - `src/runner/deepseek`: the DeepSeek Harness adapter, driving the vendor's
   first-party SDK runtime over newline-delimited JSON-RPC on the child's stdio
   (`DeepSeekHarnessRunner`, `protocol.ts`, `sessionEventMapper.ts`, `settings.ts`,
@@ -383,6 +427,18 @@
   checks once immediately, and then polls the live parent pid. Both values are
   env-only and absent or off by default, so a backend an operator started
   themselves is never ended by a parent's exit.
+- `src/util/shutdown.ts`: `installShutdownHandlers`, installed from
+  `src/index.ts` once the server exists and before it listens. `SIGINT` and
+  `SIGTERM` run `app.close()` under a two-second ceiling and then exit `0`;
+  a second signal during the close exits at once. Without it Node's default
+  disposition ended the process before any `onClose` hook ran, so the runner
+  `dispose()` that SIGTERMs resident children, the terminal `disposeAll`, the
+  diagram trackers, and the durable session store's flush never fired on the
+  `SIGINT` the macOS app sends on quit. Two seconds sits inside the
+  supervisor's three-second `SIGINT` window, so its `SIGTERM` escalation
+  stays the backstop. The parent-exit watchdog keeps its own abrupt exit;
+  nobody is waiting on a drain there, and the store's write-through is what
+  makes that safe.
 - `src/events`: typed runtime event bus and bounded recent event memory.
 - `src/protocol/coding`: the canonical coding-agent event schemas and the
   runner-agnostic mapper (Phase 2 of the universal runner boundary). Adapters
@@ -517,6 +573,39 @@
   reuse the bounded workspace file PUT.
 - `src/state/FileAuditLogStore.ts`: sanitized durable audit entries under
   `STATE_DIR`.
+- `src/state/DurableAgentSessionStore.ts`: one JSON document per agent session
+  under `$STATE_DIR/sessions/<sessionId>.json` (the session record, its turns,
+  and its messages; `durableAgentSessionDocumentSchema` in `domain/schemas.ts`),
+  so a thread can outlive the process that created it. Write-through with the
+  audit store's discipline — at most one write in flight per session, later
+  marks coalesced into one follow-up, the snapshot taken at write time,
+  temp-plus-rename, a failed write logged and retried by the next mark — because
+  the backend can end without warning. Read back at startup as three groups:
+  documents this build can serve (written at this version, or at an older one
+  and brought up through `migrateDurableAgentSessionDocument`, one step per
+  version, whole and in memory, rewritten at this version only by their next
+  change — version 1 has no predecessor, so the step table is empty and exists
+  so the first migration is a function to add rather than a reader to
+  restructure); documents at a newer version, left untouched and counted as
+  unsupported (update the app, not reset the thread); and documents at a known
+  version that do not validate, are not JSON, are below the migration floor,
+  or are filed under another session's name, left in place and counted as
+  unreadable. Nothing is deleted on read, and one bad file never stops its
+  siblings. Unknown fields are not preserved: the in-memory record is the
+  source of every rewrite, so a field this build does not model is dropped on
+  the first change, and the newer-version rule above is what keeps a downgrade
+  from silently pruning what an upgrade wrote. `runnerKind` is
+  validated as a string at this boundary rather than against the live
+  registry, so a thread from an ACP adapter the operator has since removed
+  stays readable as history. Removing a session marks its id deleted before
+  waiting out any in-flight write, so late persistence marks are ignored and a
+  rename cannot resurrect the thread after unlinking. The directory is created
+  private to the operator (`0700`).
+  `server.ts` constructs it, hands it to `AgentSessionService`, awaits the
+  service's `initialize()` before any route registers, flushes it in an
+  `onClose` hook, and returns it on the built-server handle so a caller can
+  await `flush()`. See `docs/safety/TRUST_AND_SAFETY.md` (*Agent session
+  records are persisted*).
 - `src/routes`: health, auth, status/logs/audit, the managed settings read and
   write (`configRoutes.ts`), the registered-runner projection
   (`runnerRoutes.ts`), harness, workspaces,
@@ -828,8 +917,8 @@
     Restorable runners can accept a steering follow-up; DeepSeek requires a new
     AgentRoom session because stopping it kills its non-restorable runtime.
 11. Emit native turn updates, structured activity, and runner audit events.
-12. Update in-memory session state, message history, metrics, and status
-    snapshots.
+12. Update session state, message history, metrics, and status snapshots, and
+    write the session's durable record through.
 
 ## Generated And Local State
 

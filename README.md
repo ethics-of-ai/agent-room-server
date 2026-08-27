@@ -174,6 +174,13 @@ that key, and managed changes apply after a backend restart. The annotated
 [API reference](docs/api/API.md) documents the managed settings response and
 patch contract.
 
+Agent threads are stored under the state directory (`STATE_DIR/sessions/`,
+beside the audit log and attachments) and survive a backend restart, a crash,
+and an app update. The next turn on a restored thread continues the same
+native conversation; if the runner cannot resume it, the thread says so in a
+system message rather than continuing under the old name. Deleting a thread
+is the only way its record goes away.
+
 Registered does not mean sandboxed. Read these before pointing AgentRoom at a
 repository you did not write:
 

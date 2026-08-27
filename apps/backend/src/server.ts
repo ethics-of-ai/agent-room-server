@@ -12,6 +12,7 @@ import { AcpRunner } from "./runner/acp/AcpRunner";
 import { readAcpAdapterConfigs } from "./runner/acp/config";
 import { RunnerRuntimeReadiness } from "./runner/runtimeReadiness";
 import { FileAuditLogStore } from "./state/FileAuditLogStore";
+import { DurableAgentSessionStore } from "./state/DurableAgentSessionStore";
 import { EventBus } from "./events/EventBus";
 import { loggerOptions } from "./logging/logger";
 import { registerHealthRoutes } from "./routes/healthRoutes";
@@ -51,6 +52,8 @@ export interface BuiltServer {
   eventBus: EventBus;
   auditLogStore: AuditLogStore;
   agentSessions: AgentSessionService;
+  /** Exposed so a caller (tests, shutdown) can await `flush()`. */
+  durableSessions: DurableAgentSessionStore;
 }
 
 export async function buildServer(input: BuildServerInput): Promise<BuiltServer> {
@@ -123,6 +126,13 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     ...(diagramHumanEdits ? { diagramHumanEdits } : {}),
     ...(diagramRenderFeedback ? { diagramRenderFeedback } : {})
   });
+  // Session records outlive the process. The store is write-through, so the
+  // flush at close only drains what a mark left in flight; a crash loses at
+  // most one coalesced write. Hydration is awaited before any route registers
+  // so the first request sees the restored list, and the audit store above is
+  // already attached, so a turn the previous process left running reaches
+  // durable audit as the failure it is.
+  const durableSessions = new DurableAgentSessionStore(input.config);
   agentSessions = new AgentSessionService({
     registry: localWorkspaceRegistry,
     runners,
@@ -130,7 +140,12 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     eventBus,
     contextAssembler,
     ...(artifactStore ? { artifacts: artifactStore } : {}),
-    attachments: agentAttachments
+    attachments: agentAttachments,
+    durableSessions
+  });
+  await agentSessions.initialize();
+  app.addHook("onClose", async () => {
+    await durableSessions.flush();
   });
 
   app.addHook("preHandler", async (request, reply) => {
@@ -230,7 +245,7 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     );
   }
 
-  return { app, eventBus, auditLogStore, agentSessions };
+  return { app, eventBus, auditLogStore, agentSessions, durableSessions };
 }
 
 function isMutatingMethod(method: string): boolean {

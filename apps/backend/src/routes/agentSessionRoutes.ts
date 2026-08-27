@@ -75,9 +75,19 @@ export async function registerAgentSessionRoutes(
   attachments: AgentAttachmentStore,
   config: ServiceConfig
 ): Promise<void> {
-  app.get("/api/agent-sessions", async () => ({ sessions: agentSessions.listSessions() }));
+  app.get("/api/agent-sessions", async (request, reply) => {
+    // Session summaries carry lastMessage, which can contain user or model
+    // text. Treat the list as a content read when auth is configured.
+    if (!authorizedForRead(request.headers.authorization, config)) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+    return { sessions: agentSessions.listSessions() };
+  });
 
   app.get("/api/agent-sessions/:sessionId", async (request, reply) => {
+    if (!authorizedForRead(request.headers.authorization, config)) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
     const { sessionId } = sessionParamsSchema.parse(request.params);
     const session = agentSessions.getSession(sessionId);
     if (!session) return reply.code(404).send({ error: "Agent session was not found" });

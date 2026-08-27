@@ -619,10 +619,95 @@ Current posture:
   concurrent (unsandboxed Claude Code) turn; the atomic publish prevents torn
   files but not lost updates, and an active-turn `409` guard is the recommended
   next hardening.
-- Session content reads that expose model/user text — agent session messages
-  (`/messages`) and live artifacts (`/artifacts`) — also require the bearer token
-  when `AUTH_TOKEN` is configured, since the global preHandler only gates mutating
+- Session content reads that expose model/user text — the session list and
+  detail reads through their `lastMessage`, agent session messages (`/messages`),
+  and live artifacts (`/artifacts`) — also require the bearer token when
+  `AUTH_TOKEN` is configured, since the global preHandler only gates mutating
   methods. The shared read-auth check lives in `routes/readAuthorization.ts`.
+- **Agent session records are persisted under `STATE_DIR`**, one JSON document
+  per session at `sessions/<sessionId>.json` holding the session record, its
+  turns, and its message history: user text, assistant text, and the backend's
+  own question-answer messages. A backend restart, a crash, or a DMG update
+  therefore no longer empties `GET /api/agent-sessions`, and the next turn on a
+  restored thread continues the native conversation the runner was already
+  holding. This is the same class of data as session attachments (already under
+  `STATE_DIR`) and the runners' own transcripts (already on this disk under the
+  operator's home), not the audit log: it is **not** passed through
+  `redactSecrets`, because a redacted transcript is a corrupted thread, and it
+  is read back only through the routes that require the bearer token for
+  session content: the list and detail reads, `/messages`, and `/artifacts`.
+  The directory is created `0700`. Posture:
+  - **Write-through, never write-at-exit.** Every mutation of a session, a
+    turn, or the message list marks the record, and the store coalesces marks
+    into at most one write in flight per session, so a crash, the parent-exit
+    watchdog's abrupt exit, or a force quit loses at most one coalesced write.
+    Persistence never depends on a graceful shutdown. There is one now all
+    the same: `SIGINT` and `SIGTERM` run `app.close()` under a two-second
+    ceiling (`util/shutdown.ts`) — inside the macOS supervisor's three-second
+    `SIGINT` window, so its `SIGTERM` escalation stays the backstop — which is
+    what runs the runner `dispose()` hooks that end resident children, the
+    terminal teardown, and the store's flush. A second signal during the close
+    exits at once. The parent-exit watchdog keeps its abrupt exit; write-through
+    is what makes that safe.
+  - **A restart is an interruption, not a decision.** A turn that was running
+    when the process ended settles at the next startup through the ordinary
+    failure path with the fixed reason `Backend restarted during this turn`:
+    the assistant message for that turn is marked failed, the session drops to
+    `failed`, and `agent_turn_failed` reaches durable audit because the audit
+    store is attached before the session service is built. An outstanding
+    permission or question batch ends with that turn the way a cancelled one
+    does: nobody chose, and a restart is never a default choice.
+  - **The runner's memory is seeded from AgentRoom's record, never rebuilt
+    from the runner's transcript.** A hydrated session's recorded native id is
+    handed to its runner through the optional `AgentRunner.rememberResumableId`
+    hook, and the next turn takes the same acquire-miss resume branch a reaped
+    or crashed child takes, with the same explicit runtime settings and
+    isolation posture as a fresh start. Reading `~/.codex/sessions` or
+    `~/.claude/projects` to reconstruct a thread would put per-runner file
+    knowledge above the `AgentRunner` boundary and make AgentRoom's thread a
+    projection of a file another program owns and prunes.
+  - **A resume the runner did not honor is reported, not hidden.** A rejected
+    resume already falls back to a fresh native thread with a warning in the
+    log; after a restart that would be a silent memory wipe from the person's
+    side, with the transcript on screen and an agent that has never seen it.
+    So when a restored thread's runner reports a session start whose native id
+    differs from the seed, the backend appends one `system` message to the
+    thread saying the agent has started a new conversation and has not seen
+    the messages above. The native ids stay in the log; the thread carries
+    neither. The check compares two values of the same field and asks no
+    runner anything new. Which runners reach it depends on what each does
+    with a stale id: Codex and ACP fall back to a fresh thread (so they get
+    the message), while Claude Code fails the turn with the SDK's own error
+    (`No conversation found with session ID: …`, observed against CLI
+    2.1.246 after its transcript was deleted) and starts nothing. Either way
+    the person sees it, and a fresh conversation is never presented as the
+    old one.
+  - **A runner that declares no restore path never continues a restored
+    thread.** A hydrated session whose descriptor says
+    `restoreStrategy: "unsupported"` (DeepSeek) and that had a native
+    conversation hydrates as readable history, and its next turn is refused
+    with `409` and the adapter's own wording, so a restart never begins a fresh
+    conversation under an existing thread's id — the outcome the shared host
+    is built to prevent. The mark is derived from the document and the
+    descriptor at every hydration and never persisted; it reads a descriptor
+    field, never a runner's name. A session whose runner this process does not
+    register (an ACP adapter removed from `ACP_ADAPTERS`) hydrates the same way
+    and its turn gets the `400` an unconfigured runner already gets.
+  - **Deleting a thread removes its document before the delete is reported**,
+    after the runner's child and the attachments are released, so an
+    explicitly deleted thread is never hydrated and a delete that fails midway
+    leaves the file rather than losing it. The store marks the session id
+    deleted before it waits for an in-flight write, so a queued or late runner
+    event cannot schedule a replacement document while deletion yields. The
+    runner's resume token is forgotten in the same call as before.
+  - **Version skew follows the settings-file rules.** A document a newer build
+    wrote is left untouched, counted, and not served (update the app, not reset
+    the thread); a document this build cannot validate is left in place and
+    logged. Nothing is deleted on read.
+  - **No route, event, or bound is added.** `GET /api/agent-sessions` serves the
+    hydrated list through the same code path as a live one. There is no cap on
+    session count, thread length, or age; the delete route remains the one way
+    a thread goes away.
 - Workspace Git status reads are read-only, registered-workspace-only, bounded
   to changed file metadata, and bearer-authenticated when `AUTH_TOKEN` is
   configured because changed paths and line counts expose project structure.
@@ -1132,8 +1217,10 @@ Current posture:
   session keeps one runner child process; for Codex, Claude Code, and Cursor,
   after 30 idle minutes the backend kills the child (matching the terminal's
   idle window), keeping the session's recorded native thread/session/agent id.
-  The next turn — and any turn after a child crash or an unresponsive-cancel
-  kill — resumes that conversation (Codex `thread/resume`, Claude Agent SDK
+  The next turn — and any turn after a child crash, an unresponsive-cancel
+  kill, or a backend restart, since the id is persisted with the session
+  record and seeded back into the runner at startup — resumes that
+  conversation (Codex `thread/resume`, Claude Agent SDK
   `resume`, Cursor `Agent.resume` from the store pinned under `STATE_DIR`) in a
   fresh child with the **same explicit runtime settings and isolation posture
   as a fresh start**: the Codex resume re-passes the operator's approval

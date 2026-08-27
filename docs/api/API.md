@@ -1514,9 +1514,16 @@ contain secrets.
 
 ## Agent Sessions
 
-`GET /api/agent-sessions` lists in-memory sessions.
+`GET /api/agent-sessions` lists sessions. Sessions are persisted under
+`STATE_DIR/sessions/` and restored at startup, so the list survives a backend
+restart; a restored session is served through the same code path as a live
+one. A session whose turn was running when the backend stopped comes back
+`status: "failed"` with `error: "Backend restarted during this turn"`. The
+list requires the bearer token when `AUTH_TOKEN` is configured because each
+session summary can carry user or model text in `lastMessage`.
 
-`GET /api/agent-sessions/:sessionId` returns one session.
+`GET /api/agent-sessions/:sessionId` returns one session and has the same
+bearer-token requirement as the list.
 
 `GET /api/agent-sessions/:sessionId/messages` returns ordered message history
 for the session thread. Like the artifact read, it requires the bearer token when
@@ -1591,9 +1598,10 @@ Returns `404` for an unknown session. Like `/messages`, this read requires the
 bearer token when `AUTH_TOKEN` is configured, because it exposes model-authored
 content.
 
-`DELETE /api/agent-sessions/:sessionId` deletes an in-memory thread from the
-backend session list, removes its message history, and emits
-`agent_session_deleted`. If the thread has an active turn, deletion first
+`DELETE /api/agent-sessions/:sessionId` deletes a thread from the backend
+session list, removes its message history and its persisted record, and emits
+`agent_session_deleted`. This is the only way a thread's record goes away; a
+deleted thread is never restored at a later startup. If the thread has an active turn, deletion first
 requests cancellation through the runner boundary. Deletion also releases the
 runner's persistent per-session resources, including the spawned Codex
 app-server or Claude Code child process kept alive for the thread. The route
@@ -1669,7 +1677,18 @@ session branch before invoking the runner when needed.
 
 The backend starts one turn in the selected session and streams native updates
 through `WS /api/events`. In JSON-RPC mode, one Codex app-server thread is kept
-for the AgentRoom session and subsequent turns reuse that thread. Optional
+for the AgentRoom session and subsequent turns reuse that thread. A turn on a
+session restored after a backend restart resumes the runner's native
+conversation from the recorded `runner.nativeSessionId` (Codex
+`thread/resume`, Claude Agent SDK `resume`, Cursor `Agent.resume`, ACP
+`session/resume`), with the same runtime settings as a fresh start. If the
+runner reports a different native id instead — a rejected resume, a pruned
+transcript, a CLI upgrade — the backend appends one `role: "system"` message
+to the thread (`This thread could not be resumed after a backend restart. The
+agent has started a new conversation and has not seen the messages above.`)
+so the person knows the agent's memory does not include the transcript on
+screen. A restored `deepseek` session that had a conversation answers `409`
+on its next turn, since that runner declares no restore path. Optional
 `context.paths` values are workspace-relative paths selected by the client. The
 visionOS client derives those paths from `@` file mentions inserted in the turn
 composer. The backend resolves supplied paths safely, injects bounded file

@@ -270,6 +270,12 @@ export class CodexAppServerRunner implements AgentRunner {
     this.sessions.close(sessionId);
   }
 
+  // A thread id hydrated from the durable session store: the next turn's
+  // acquire miss takes the thread/resume branch exactly as after a reap.
+  rememberResumableId(input: { sessionId: string; nativeSessionId: string }): void {
+    this.sessions.rememberResumableId(input.sessionId, input.nativeSessionId);
+  }
+
   answerQuestionRequest(input: { sessionId: string; requestId: string; answers: CanonicalQuestionAnswer[] }): QuestionAnswerResult {
     return this.questions.answer(input.sessionId, input.requestId, input.answers);
   }

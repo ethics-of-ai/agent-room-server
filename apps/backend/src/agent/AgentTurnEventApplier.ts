@@ -1,5 +1,6 @@
 import type { AgentSession, AgentSessionTurn } from "../domain/models";
 import type { EventBus } from "../events/EventBus";
+import { logger } from "../logging/logger";
 import {
   boundedRunnerActivity,
   codingArtifactCompletedEvent,
@@ -31,6 +32,10 @@ export interface OutstandingQuestionRequest {
   turnId: string;
   questionSets: CanonicalQuestionSet[];
 }
+
+/** The thread message for a restored thread whose runner did not resume it. */
+export const RESUME_NOT_HONORED_MESSAGE =
+  "This thread could not be resumed after a backend restart. The agent has started a new conversation and has not seen the messages above.";
 
 export class AgentTurnEventApplier {
   // One in-band artifact parser per active turn, lazily created on the first
@@ -67,6 +72,20 @@ export class AgentTurnEventApplier {
       ): void;
       succeedTurn(session: AgentSession, turn: AgentSessionTurn, event: AgentRunnerEvent & { type: "run_succeeded" }): void;
       failTurn(session: AgentSession, turn: AgentSessionTurn, error: string): void;
+      /**
+       * The session record changed in a way no message-store write reports
+       * (the runner metadata assigned at session start). The service uses it
+       * to mark the durable record.
+       */
+      sessionChanged?(sessionId: string): void;
+      /**
+       * The native id a session restored from the durable store was seeded
+       * with, handed over once. Compared against the id the runner reports at
+       * session start so a resume the runner did not honor is told to the
+       * person in the thread rather than continued under the old thread's
+       * name. Runner-agnostic by construction: two values of the same field.
+       */
+      takeHydratedSeed?(sessionId: string): string | undefined;
     }
   ) {}
 
@@ -140,9 +159,11 @@ export class AgentTurnEventApplier {
     if (event.type === "agent_activity") {
       const runnerMetadata = runnerSessionMetadataFromActivity(event.activity);
       if (runnerMetadata) {
+        this.reportUnhonoredResume(session, turn, runnerMetadata.nativeSessionId);
         session.runner = runnerMetadata;
         // Legacy per-runner session blocks, projected from the canonical one.
         Object.assign(session, legacySessionMetadata(session.runnerKind, runnerMetadata));
+        this.deps.sessionChanged?.(session.id);
       }
       // The reconnect snapshot changes synchronously with the live event: a
       // subscriber that reacts to a request can immediately read it, and one
@@ -183,6 +204,33 @@ export class AgentTurnEventApplier {
     this.deps.recordTokenUsage(session, turn, event);
     this.flushStreamingArtifacts(session, turn);
     this.deps.failTurn(session, turn, event.error);
+  }
+
+  /**
+   * A restored thread whose runner reports a different native id than the one
+   * it was seeded with is in a fresh conversation: the transcript is on screen
+   * and the agent has never seen it. Say so in the thread, once. The runner's
+   * own warning stays in the log with the ids; the message carries neither,
+   * since the transcript is for the person and the ids are diagnostics. A
+   * start that reports no id at all proves nothing either way and is left
+   * alone.
+   */
+  private reportUnhonoredResume(session: AgentSession, turn: AgentSessionTurn, reportedId: string | undefined): void {
+    if (!reportedId) return;
+    const seed = this.deps.takeHydratedSeed?.(session.id);
+    if (!seed || reportedId === seed) return;
+    logger.warn(
+      { sessionId: session.id, turnId: turn.id, seededNativeSessionId: seed, reportedNativeSessionId: reportedId },
+      "Restored agent session was not resumed by its runner; the agent has started a new conversation"
+    );
+    this.deps.messages.append({
+      sessionId: session.id,
+      turnId: turn.id,
+      role: "system",
+      content: RESUME_NOT_HONORED_MESSAGE,
+      status: "sent",
+      at: new Date().toISOString()
+    });
   }
 
   /**

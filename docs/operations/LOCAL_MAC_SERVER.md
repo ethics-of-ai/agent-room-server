@@ -64,7 +64,9 @@ environment-only and never enter that file. The macOS-only sidecar controls
 - `PORT`: defaults to `8787`.
 - `AGENTROOM_HOME`: optional app-managed runtime root.
 - `WORKSPACE_ROOT`: default workspace root.
-- `STATE_DIR`: JSON state and audit directory.
+- `STATE_DIR`: JSON state and audit directory: `workspaces.json`,
+  `audit-log.json`, `attachments/`, and `sessions/` (one document per agent
+  thread, restored at startup; delete a thread through the API, not the file).
 - `AUTH_TOKEN`: optional bearer token for mutating routes.
 - `CODEX_EXECUTABLE`: Codex executable path.
 - `CODEX_ARGS`: comma-separated Codex arguments.

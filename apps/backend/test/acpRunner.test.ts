@@ -1117,6 +1117,24 @@ describe("AcpRunner turns", () => {
     expect(events.some((event) => event.type === "run_succeeded")).toBe(true);
   });
 
+  it("resumes a seeded session id on the first spawn of the process", async () => {
+    // The durable-session hydration path: no child has existed for this
+    // session in this process, and the first turn must still restore.
+    const { adapter, workspace } = agentFor("basic");
+    const runner = track(new AcpRunner(serviceConfig(), adapter));
+    runner.rememberResumableId({
+      sessionId: "session-seeded",
+      nativeSessionId: "acp-session-from-disk",
+      interrupted: false
+    });
+
+    const events = await collect(
+      runner.run({ runId: "run-seeded", sessionId: "session-seeded", workspacePath: workspace, prompt: "two" })
+    );
+    expect(assistantText(events)).toBe("RESTORED:resume Hello world");
+    expect(events.some((event) => event.type === "run_succeeded")).toBe(true);
+  });
+
   it("consumes a session/load replay without duplicating the transcript", async () => {
     // An agent with only `loadSession` replays history through session/update.
     // AgentRoom already holds that transcript, so the replay must emit nothing.

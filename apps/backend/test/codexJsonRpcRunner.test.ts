@@ -624,6 +624,39 @@ describe("CodexAppServerRunner JSON-RPC protocol mode", () => {
     await runner.dispose();
   });
 
+  it("resumes a seeded thread id on the first spawn of the process", async () => {
+    // The durable-session hydration path: no child has existed for this
+    // session in this process, and the first turn must still resume.
+    const fakeServer = await writeResumableCodexAppServer();
+    const serviceConfig = await config({
+      codexArgs: [fakeServer.path, fakeServer.logPath],
+      codexRunnerProtocol: "jsonrpc"
+    } as Partial<ServiceConfig>);
+    const runner = new CodexAppServerRunner(serviceConfig);
+    runner.rememberResumableId({
+      sessionId: "agentroom-session-seeded",
+      nativeSessionId: "codex-thread-from-disk",
+      interrupted: false
+    });
+
+    const events: AgentRunnerEvent[] = [];
+    for await (const event of runner.run({
+      runId: "agentroom-turn-seeded-1",
+      sessionId: "agentroom-session-seeded",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "seeded turn",
+      title: "Seeded turn"
+    })) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toEqual({ type: "run_succeeded", message: "Codex app-server turn completed" });
+
+    const methods = (await readFile(fakeServer.logPath, "utf8")).trim().split("\n");
+    expect(methods.filter((method) => method === "thread/start")).toHaveLength(0);
+    expect(methods.filter((method) => method === "thread/resume:codex-thread-from-disk")).toHaveLength(1);
+    await runner.dispose();
+  });
+
   it("falls back to a fresh thread when Codex rejects the resume", async () => {
     const fakeServer = await writeResumableCodexAppServer();
     const serviceConfig = await config({

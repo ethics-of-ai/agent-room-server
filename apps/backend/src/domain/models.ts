@@ -640,6 +640,21 @@ export interface AgentSessionMessageContext {
   questionRequestId?: string;
 }
 
+/**
+ * One agent session as written to `$STATE_DIR/sessions/<sessionId>.json`: the
+ * record `GET /api/agent-sessions/:id` serves, its turns, and its message
+ * history. The file boundary validates `session.runnerKind` as a string rather
+ * than against the live registry, so a thread from a runner this process does
+ * not register (an ACP adapter since removed from the environment) stays
+ * readable as history; whether it can take a turn is decided at turn time.
+ */
+export interface DurableAgentSessionDocument {
+  schemaVersion: 1;
+  session: AgentSession;
+  turns: AgentSessionTurn[];
+  messages: AgentSessionMessage[];
+}
+
 export interface AgentBridgeMetrics {
   totalSessions: number;
   runningSessions: number;

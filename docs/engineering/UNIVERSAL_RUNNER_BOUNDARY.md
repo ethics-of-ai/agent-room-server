@@ -220,7 +220,10 @@ Four findings that shape the design:
   AgentRoom's existing transcript. The v2 draft removes `session/load` and folds
   replay into `session/resume`, so resume-first is also the forward path.
 - **Production adapters must be restorable.** AgentRoom's documented behavior is
-  reap-and-resume, including after a child crash and backend restart. A runner
+  reap-and-resume, including after a child crash and backend restart (the
+  restart half is the durable session record and the `rememberResumableId`
+  seed; `docs/safety/TRUST_AND_SAFETY.md`, *Agent session records are
+  persisted*). A runner
   supporting neither stable-v1 restore path is not admitted as a production
   persistent runner in Phase 7; it may participate in the Phase 0 spike only.
   The host never reaps a child it cannot restore and never silently starts a
@@ -1070,7 +1073,9 @@ whole developer environment. Required before any of Phase 7 ships:
   `sessionCapabilities.resume` and `session/resume`; otherwise accept
   `loadSession` and use `session/load` with replay suppression. A production
   agent advertising neither is rejected rather than silently beginning a new
-  conversation after reap, crash, or backend restart.
+  conversation after reap, crash, or backend restart (across a restart the id
+  arrives through `AgentRunner.rememberResumableId`; see
+  `docs/safety/TRUST_AND_SAFETY.md`, *Agent session records are persisted*).
 - Treat `session/load` updates as reconstruction, not new AgentRoom output:
   validate and consume them to rebuild adapter state, but do not append a second
   copy to the persisted transcript or emit duplicate user-visible activity.

@@ -422,6 +422,16 @@ export class CursorSdkRunner implements AgentRunner {
     this.sessions.close(sessionId);
   }
 
+  // An agent id hydrated from the durable session store: the next turn's
+  // acquire miss starts a fresh host with it, exactly as after a reap. A turn
+  // that was running when the backend ended may have left the SDK's persisted
+  // run active, which is the same state a host crash mid-send leaves, so it
+  // gets the same `force` on the first send.
+  rememberResumableId(input: { sessionId: string; nativeSessionId: string; interrupted: boolean }): void {
+    this.sessions.rememberResumableId(input.sessionId, input.nativeSessionId);
+    if (input.interrupted) this.forceNextSends.add(input.sessionId);
+  }
+
   async dispose(): Promise<void> {
     this.questions.releaseAll();
     this.sessions.disposeAll();

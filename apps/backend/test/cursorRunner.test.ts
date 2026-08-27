@@ -280,6 +280,49 @@ describe("CursorSdkRunner", () => {
     expect(second.at(-1)).toMatchObject({ type: "run_succeeded" });
   });
 
+  it("resumes a seeded agent id on the first spawn, forcing the send only when the turn was interrupted", async () => {
+    // The durable-session hydration path. A seed for a turn that settled
+    // normally starts the agent with the kept id and a plain send; a seed for a
+    // turn the backend ended mid-run also forces the first send, the same
+    // recovery a host crash with a send in flight gets.
+    const host = await writeFakeHost();
+    const serviceConfig = await config();
+    const runner = new CursorSdkRunner(serviceConfig, { hostModulePath: host });
+    runner.rememberResumableId({
+      sessionId: "agent-session-seeded",
+      nativeSessionId: "agent-from-disk",
+      interrupted: false
+    });
+    runner.rememberResumableId({
+      sessionId: "agent-session-seeded-interrupted",
+      nativeSessionId: "agent-from-disk-interrupted",
+      interrupted: true
+    });
+
+    const settled = await collect(runner.run({
+      runId: "agentroom-turn-seeded-1",
+      sessionId: "agent-session-seeded",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "seeded"
+    }));
+    const interrupted = await collect(runner.run({
+      runId: "agentroom-turn-seeded-2",
+      sessionId: "agent-session-seeded-interrupted",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "seeded after interruption"
+    }));
+    await runner.dispose();
+
+    expect(assistantText(settled)).toContain("session=agent-from-disk ");
+    expect(assistantText(settled)).toContain("resumed=true");
+    expect(assistantText(settled)).toContain("force=false");
+    expect(settled.at(-1)).toMatchObject({ type: "run_succeeded" });
+    expect(assistantText(interrupted)).toContain("session=agent-from-disk-interrupted ");
+    expect(assistantText(interrupted)).toContain("resumed=true");
+    expect(assistantText(interrupted)).toContain("force=true");
+    expect(interrupted.at(-1)).toMatchObject({ type: "run_succeeded" });
+  });
+
   it("fails the turn with the host's own stderr when the child dies on send", async () => {
     const host = await writeFakeHost({ dieOnSend: true });
     const serviceConfig = await config();

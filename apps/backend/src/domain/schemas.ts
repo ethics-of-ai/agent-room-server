@@ -435,6 +435,22 @@ export const agentSessionMessageSchema = z.object({
   at: z.string().min(1)
 });
 
+export const DURABLE_AGENT_SESSION_SCHEMA_VERSION = 1;
+
+// The on-disk session document. `runnerKind` is a plain string here, not
+// `agentRunnerKindSchema`: that schema resolves against the runners this
+// process registered, and a thread whose runner is no longer configured must
+// stay readable as history rather than fail validation. Unknown keys are
+// stripped, as everywhere else in this file; the in-memory record is the
+// source of every rewrite, so a field this build does not model would be
+// dropped on the next write anyway.
+export const durableAgentSessionDocumentSchema = z.object({
+  schemaVersion: z.literal(DURABLE_AGENT_SESSION_SCHEMA_VERSION),
+  session: agentSessionSchema.extend({ runnerKind: z.string().min(1) }),
+  turns: z.array(agentSessionTurnSchema),
+  messages: z.array(agentSessionMessageSchema)
+});
+
 export const agentBridgeMetricsSchema = z.object({
   totalSessions: z.number().int().nonnegative(),
   runningSessions: z.number().int().nonnegative(),

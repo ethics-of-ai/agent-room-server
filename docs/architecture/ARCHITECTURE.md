@@ -24,7 +24,16 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime / Cursor
 ## Boundaries
 
 - The backend is the source of truth for registered workspaces, sessions, turns,
-  messages, metrics, recent events, and audit.
+  messages, metrics, recent events, and audit. Sessions, their turns, and their
+  messages are durable: one JSON document per session under
+  `STATE_DIR/sessions/`, written through on every mutation and read back
+  before any route registers, so a thread outlives the process that created
+  it. The runner keeps its own memory of the conversation, AgentRoom keeps its
+  record, and the recorded native id is the join: at startup the service seeds
+  that id back into the runner through the optional
+  `AgentRunner.rememberResumableId` hook, and the next turn resumes through the
+  same path a reaped child takes. A thread is never reconstructed from a
+  runner's transcript files. See `docs/safety/TRUST_AND_SAFETY.md`.
 - Clients create sessions and send turns through REST APIs. They do not launch
   Codex, run shell commands, or read provider credentials. The one mutation a
   client can request directly is a bounded single-file text write
@@ -357,8 +366,10 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime / Cursor
 4. For Git workspaces, expose local branch metadata and switch only to existing
    clean local branches through a fixed backend route.
 5. Read bounded workspace trees or file previews when clients browse context.
-6. Create an in-memory Codex session for a registered workspace and record the
-   current workspace branch when one exists.
+6. Create an agent session for a registered workspace and record the current
+   workspace branch when one exists. The record is written through to
+   `STATE_DIR/sessions/` from here on, and a restart hydrates it, settles any
+   turn that was running as failed, and seeds the runner's resume id.
 7. Start a turn with one user message, optional selected `context.paths`, and
    optional session-scoped attachment ids plus safe coding-agent settings
    selected from backend capabilities.

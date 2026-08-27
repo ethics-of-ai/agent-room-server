@@ -278,6 +278,31 @@ export interface AgentRunner {
     requestId: string;
     answers: CanonicalQuestionAnswer[];
   }): QuestionAnswerResult;
+  /**
+   * Seed the native id this runner would resume an AgentRoom session's
+   * conversation with, before any child for it exists in this process.
+   *
+   * The service calls it once per session it hydrated from the durable store
+   * at startup, so the next turn takes the same acquire-miss resume branch a
+   * reaped or crashed child takes. It remembers; it spawns nothing. Restoring
+   * stays in the adapter, with the same explicit runtime settings and
+   * isolation posture as a fresh start.
+   *
+   * Optional, like the two answer hooks: a runner whose descriptor declares
+   * `restoreStrategy: "unsupported"` has no resume token to hold, and its
+   * absence is what the service reads — never which runner this is.
+   */
+  rememberResumableId?(input: {
+    sessionId: string;
+    nativeSessionId: string;
+    /**
+     * The persisted turn was running when the backend ended. A runner whose
+     * native side can be left mid-run (Cursor's persisted active run) uses it
+     * to take the same recovery it takes for a child that died with a send in
+     * flight.
+     */
+    interrupted: boolean;
+  }): void;
   // Release per-session runner resources (persistent child processes, queues)
   // when the AgentRoom session is deleted.
   closeSession?(sessionId: string): Promise<void>;

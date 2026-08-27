@@ -496,6 +496,43 @@ describe("ClaudeCodeRunner", () => {
     await runner.dispose();
   });
 
+  it("resumes a seeded SDK session id on the first spawn of the process", async () => {
+    // The durable-session hydration path: the first query for this session in
+    // this process carries the id a previous process recorded.
+    const serviceConfig = await config();
+    const harness = fakeQueryHarness((message, query) => {
+      query.output.push({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        session_id: "claude-session-from-disk",
+        uuid: "uuid-result",
+        result: "Done."
+      });
+    });
+    const runner = new ClaudeCodeRunner(serviceConfig, { loadQuery: harness.loadQuery });
+    runner.rememberResumableId({
+      sessionId: "agentroom-session-seeded",
+      nativeSessionId: "claude-session-from-disk",
+      interrupted: false
+    });
+
+    const events: AgentRunnerEvent[] = [];
+    for await (const event of runner.run({
+      runId: "turn-seeded-1",
+      sessionId: "agentroom-session-seeded",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "seeded turn"
+    })) {
+      events.push(event);
+    }
+    expect(events.at(-1)).toEqual({ type: "run_succeeded", message: "Done." });
+    expect(harness.queries).toHaveLength(1);
+    expect(harness.queries[0].options.resume).toBe("claude-session-from-disk");
+
+    await runner.dispose();
+  });
+
   it("idle-reaps a quiet SDK session and resumes it on the next turn", async () => {
     const serviceConfig = await config();
     const harness = fakeQueryHarness(scriptedTurn);
