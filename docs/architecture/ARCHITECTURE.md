@@ -35,10 +35,14 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime / Cursor
   same path a reaped child takes. A thread is never reconstructed from a
   runner's transcript files. See `docs/safety/TRUST_AND_SAFETY.md`.
 - Clients create sessions and send turns through REST APIs. They do not launch
-  Codex, run shell commands, or read provider credentials. The one mutation a
-  client can request directly is a bounded single-file text write
-  (`PUT /api/workspaces/:id/file`); the backend still performs every write itself
-  behind the same path bounding, symlink guard, and secret filtering as reads.
+  Codex, run shell commands, or read provider credentials. Direct workspace
+  mutation is limited to bounded file PUT/DELETE, a non-recursive directory
+  POST, same-parent entry rename,
+  same-workspace entry move and copy, and recursive directory DELETE requests;
+  the backend performs them behind the same path bounding, symlink guard, secret
+  filtering, and optimistic locks as reads. Recursive delete and entry copy each
+  add a complete capped subtree preflight; directory creation carries no lock at
+  all, because it replaces nothing and refuses an occupied name.
 - The runner boundary is `AgentRunner`, and beside it sits the runner registry
   (`runner/registry.ts`), which answers every question about a runner that is not
   the runner's own protocol. One `RunnerDescriptor` per runner declares where the
@@ -130,14 +134,31 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime / Cursor
   editor's read-only side-by-side diff view, the skills listing that backs
   the composer slash picker, and the ranked file index plus literal-substring
   content search that back quick-open, the `@` mention picker, and
-  search-in-all-files) are
-  read-only; the lone write path is `WorkspaceExplorer.writeTextFile` behind
-  `PUT /api/workspaces/:id/file`, which accepts a bounded UTF-8 text body for a
+  search-in-all-files) are read-only. `WorkspaceExplorer.writeTextFile` behind
+  `PUT /api/workspaces/:id/file` accepts a bounded UTF-8 text body for a
   single existing-parent path, rejects secret-named and generated-directory
   segments, refuses symlink leaves, requires an optimistic-lock `baseModifiedAt`
   to overwrite, and publishes atomically (temp + rename). It intentionally
   dirties the working tree — unlike attachments/artifacts, which stay under
-  `STATE_DIR`.
+  `STATE_DIR`. `WorkspaceExplorer.deleteFile` behind DELETE on the same route
+  accepts regular files only, requires `baseModifiedAt`, and uses `unlink`.
+  `createDirectory` behind `POST /api/workspaces/:id/directory` makes one empty
+  directory under an existing parent — the container counterpart of the PUT's
+  create branch, deliberately not recursive, and the one mutation with no
+  optimistic-lock token, since exclusivity rather than a token is what keeps it
+  from adopting a folder someone else made.
+  `renameEntry` changes one file/folder leaf name without moving or overwriting;
+  `moveEntry` is that same relocation generalized to a second directory in the
+  same workspace, which is why rename delegates to it rather than repeating it,
+  and it adds the two refusals only a cross-directory operation can hit (a
+  folder landing in its own subtree, and a destination on another filesystem);
+  `copyEntry` duplicates an entry after inventorying it, staging it beside the
+  destination, and publishing it under the chosen name only once complete —
+  the one workspace write whose bytes never transit the API, so the subtree
+  caps bound it rather than the 256 KB body cap;
+  `deleteDirectory` inventories the full subtree before recursive removal and
+  refuses the workspace root, protected entries, symlinks, unsupported types,
+  more than 20,000 entries, or more than 1 GiB of regular-file data.
 - Git mutation is backend-owned and fixed. Clients drive source control through
   `WorkspaceGitService` (stage, unstage, discard, commit, fetch, pull, push,
   branch creation, plus the existing branch switch); each is a fixed argument

@@ -593,32 +593,147 @@ Current posture:
 - Workspace tree and file-preview APIs are read-only, registered-workspace-only,
   bounded, symlink-checked, and bearer-authenticated when `AUTH_TOKEN` is
   configured.
-- Workspace file writing is the one client-initiated mutation of a registered
-  workspace's contents: `PUT /api/workspaces/:id/file` →
-  `WorkspaceExplorer.writeTextFile`. It is mutating, so the global preHandler
-  requires bearer auth when `AUTH_TOKEN` is configured (it does not use the
-  read-auth helper). It reuses the read path's bounding: the relative path is
-  lexically normalized (rejecting NUL, absolute, and `..` segments) before any
-  filesystem call, containment is asserted against the realpath of the parent
-  directory (the leaf may not exist), the parent must already exist (no recursive
-  `mkdir`), and any secret-named (`.env*`, key material) or generated-directory
-  (`.git`, `.agentroom`, `node_modules`, build dirs) segment is refused. The body
-  is UTF-8 text only (NUL-rejected), capped at 256 KB. A symlink leaf and a
-  directory target are refused, so a write never follows a link out of the
-  workspace. Overwrites require an optimistic-lock `baseModifiedAt` matching the
-  current on-disk mtime — a missing or stale token returns `409`, so a blind
-  overwrite of a file changed since the client loaded it is rejected. The write
+- Workspace mutation is limited to seven fixed routes:
+  `PUT /api/workspaces/:id/file` → `WorkspaceExplorer.writeTextFile`,
+  `DELETE /api/workspaces/:id/file` → `WorkspaceExplorer.deleteFile`,
+  `POST /api/workspaces/:id/directory` → `WorkspaceExplorer.createDirectory`,
+  `POST /api/workspaces/:id/entry/rename` → `WorkspaceExplorer.renameEntry`,
+  `POST /api/workspaces/:id/entry/move` → `WorkspaceExplorer.moveEntry`,
+  `POST /api/workspaces/:id/entry/copy` → `WorkspaceExplorer.copyEntry`,
+  and `DELETE /api/workspaces/:id/directory` →
+  `WorkspaceExplorer.deleteDirectory`. All are mutating, so the global
+  preHandler requires bearer auth when `AUTH_TOKEN` is configured (they do not
+  use the read-auth helper). All reuse the read path's bounding: the relative
+  path is lexically normalized (rejecting NUL, absolute, and `..` segments)
+  before any filesystem call, the workspace root is not an entry target,
+  containment is asserted against the realpath of the existing parent, and any
+  secret-named (`.env*`, key material) or generated-directory (`.git`,
+  `.agentroom`, `node_modules`, build dirs) segment is refused in both the
+  caller path and the resolved parent. Mutations also refuse every name hidden
+  from tree and index reads, including `.DS_Store` and the internal
+  `.agentroom-tmp` staging suffix, so a caller cannot create a successful result
+  that the workspace APIs immediately conceal. An in-workspace directory
+  symlink cannot tunnel a mutation into an excluded directory, and a symlink
+  leaf is refused.
+
+  The PUT body is UTF-8 text only (NUL-rejected), capped at 256 KB. Overwrites
+  require an optimistic-lock `baseModifiedAt` matching the current on-disk mtime
+  — a missing or stale token returns `409`, so a blind overwrite of a file
+  changed since the client loaded it is rejected. If the token names a path
+  removed by a concurrent rename or delete, PUT also returns `409` instead of
+  recreating the old name. A PUT without that token is create-only. The write
   is atomic (sibling temp opened `O_EXCL`, then renamed over the leaf), uses
-  `node:fs` only (no shell, no Git), and the emitted `workspace_file_written`
-  event/audit entry records `workspaceId`/`workspacePath`/`path`/`sizeBytes`
-  only — never the file content (which can itself contain secrets). The write
-  intentionally dirties the working tree, which can later `409` a branch switch
-  or session-branch restore; that consequence is surfaced through the existing
+  `node:fs` only (no shell, no Git), and emits `workspace_file_written`.
+
+  File DELETE requires `baseModifiedAt` for every request, accepts regular files
+  only, and calls `node:fs.unlink` only after the token matches. It emits
+  `workspace_file_deleted`.
+
+  Directory POST creates one empty directory and is the only mutation with no
+  `baseModifiedAt` — it replaces nothing, so there is no prior version a caller
+  could be asked to prove it had seen. What stands in for the token is
+  exclusivity: `mkdir` runs **without** `recursive`, so an occupied name is
+  `EEXIST` rather than a silent success on a folder someone else made, and the
+  route answers the same `409` rename, move, and copy give. It is also what
+  keeps the route from becoming "materialize this whole path": the parent must
+  already exist, exactly as it must for the PUT, so one request creates one
+  directory. The path passes the same lexical bound, secret/generated refusal on
+  both the caller's text and the resolved parent, and realpath containment as
+  every other write, and the leaf goes through rename's own 255-byte name rule.
+  The response carries the new directory's `modifiedAt`, so it is immediately a
+  rename, move, paste, or delete target without a second read. It emits
+  `workspace_directory_created` (`workspaceId`, `workspacePath`, `path`) and is
+  deliberately the one mutation that does **not** invalidate the file index: that
+  index enumerates files, and an empty directory contributes none.
+
+  Rename also requires `baseModifiedAt` and accepts only a regular file or
+  directory. `newName` is one trimmed leaf name, at most 255 UTF-8 bytes; it
+  cannot contain `/`, name `.`/`..`, enter a protected path, change the parent,
+  or overwrite a sibling. A same-name request is an idempotent no-op, and the
+  same-inode exception allows a case-only rename on a case-insensitive Mac
+  filesystem only when both spellings resolve to that same directory entry;
+  a distinct hard link is an occupied sibling and returns `409`. A file
+  destination is claimed without overwrite by an exclusive hard link before
+  the old link is removed; a directory destination is first reserved as an
+  empty directory before `node:fs.rename`. If another process wins either
+  destination race, the request fails rather than replacing its entry.
+  Case-only same-entry renames use `node:fs.rename` directly. A successful
+  change emits `workspace_entry_renamed`
+  with `oldPath`, the new `path`, `entryType`, and file size when applicable.
+
+  Move is rename generalized to a second directory, and it is **one
+  implementation**: rename calls it with the entry's own parent, so the
+  no-overwrite claim above is the same code in both contracts rather than two
+  that can drift. `destinationParent` is bounded exactly as every other written
+  parent is (lexical bound, realpath containment, secret/generated refusal on
+  the caller's text *and* the resolved path, and it must be a real directory);
+  `newName` is optional and an omitted one keeps the entry's own name. Two
+  refusals exist only because a second directory is involved: a folder moving
+  into itself or a descendant is refused on realpaths, so a symlinked
+  destination cannot smuggle the source's own subtree past a lexical check, and
+  a destination on another filesystem (a volume mounted inside a registered
+  workspace) is reported rather than surfacing as an unhandled `EXDEV`. Move
+  never takes a collision strategy: silently renaming an entry someone asked to
+  *move* would apply a decision they did not make, so an occupied destination is
+  the same `409` rename gives. If a symlinked parent spelling resolves back to
+  the source's existing directory entry, move returns an idempotent no-op and
+  emits no event. Success emits `workspace_entry_moved`, whose payload matches
+  the rename event so a client re-keys the old path identically. This is still
+  not a general move surface: no shell, no path pair the caller assembles, and
+  no destination outside the same registered workspace.
+
+  Copy duplicates one entry inside the same workspace and is the **one workspace
+  write whose bytes never transit the API**, which changes what bounds it: the
+  256 KB cap is a request-body bound and says nothing here, so copy is bounded
+  by the recursive-delete caps instead — 20,000 entries and 1 GiB — applied to a
+  single file as much as to a tree, with the same refusals for symlinks,
+  protected/generated names, and unsupported entry types. That is a deliberate
+  widening over what a client could previously write in one request, and the
+  residual it leaves is disk fill by repetition, which the PUT already has at
+  256 KB a time. Everything is inventoried before a byte is written, the result
+  is staged beside the destination and published under the caller's chosen name
+  only once complete (so a failure leaves nothing partial for someone to mistake
+  for the copy they asked for), and the copy pass re-checks every entry rather
+  than trusting the inventory, since the two passes run over a live filesystem.
+  Regular files are opened with `O_NOFOLLOW`; the opened device/inode, size, and
+  mtime must still match the entry the walk selected, the bytes are read through
+  that pinned handle under the 1 GiB cap, and the handle is statted again before
+  publication. Selected directories are likewise checked before and after
+  listing. A source swapped for a symlink or another inode therefore fails the
+  copy instead of redirecting it, and the response counts come from the copy
+  pass rather than the earlier inventory.
+  `baseModifiedAt` is required even though copy touches nothing: it is not
+  protecting the source from loss, it is what makes "this is a copy of the entry
+  I was looking at" true, and a stale token means re-read and copy again.
+  `onCollision` defaults to `fail` — the same refusal rename gives — and
+  `keep_both` walks a bounded `-2`…`-5` name ladder that suffixes the stem
+  rather than the extension and then refuses, so the server never renames unless
+  asked and always reports the name it took. Success emits
+  `workspace_entry_copied`, carrying `sourcePath` rather than `oldPath` because
+  a copy vacates nothing.
+
+  Directory DELETE requires the rendered directory's `baseModifiedAt` and
+  inventories the complete subtree before removal. The preflight refuses any
+  symlink, protected/generated name, socket/device/other non-file entry, more
+  than 20,000 entries including the selected directory, or more than 1 GiB of
+  regular-file data. A failure removes nothing. After inventory the selected
+  directory's type and mtime are checked again, then `node:fs.rm` removes that
+  directory recursively; the workspace root is never accepted. Success emits
+  `workspace_directory_deleted` with file/directory counts and total regular-file
+  bytes. A symlink introduced after preflight is unlinked rather than followed,
+  but a concurrent process can add or alter a contained regular file after its
+  check and before removal. The operation is therefore bounded and symlink-safe,
+  not a transactional filesystem snapshot.
+
+  Mutation events carry workspace identity, relative paths, types/counts, and
+  byte counts only — never file content. Durable audit entries retain the event
+  type and workspace identity, not file bytes. Every mutation intentionally
+  dirties the working tree, which can later `409` a branch switch or
+  session-branch restore; that consequence is surfaced through the existing
   Git-status refresh, not auto-committed or stashed. This slice does not block
-  writes while a runner turn is active, so a client write can still race a
-  concurrent (unsandboxed Claude Code) turn; the atomic publish prevents torn
-  files but not lost updates, and an active-turn `409` guard is the recommended
-  next hardening.
+  workspace mutation while a runner turn is active, so a client action can race
+  a concurrent unsandboxed turn; optimistic tokens narrow that race but do not
+  make mtime checks transactional with rename/unlink/removal.
 - Session content reads that expose model/user text — the session list and
   detail reads through their `lastMessage`, agent session messages (`/messages`),
   and live artifacts (`/artifacts`) — also require the bearer token when
@@ -786,9 +901,9 @@ Current posture:
     Git-status cap, so a large or hostile repository degrades to a partial answer
     rather than an unbounded request.
   - **Shared Git stdout ceiling.** Adding `ls-files` required raising the
-    `execFile` stdout ceiling in `LocalWorkspaceGit.ts` from Node's 1 MB default
-    to 16 MB: past the limit `execFile` fails the *whole* command with `ENOBUFS`,
-    which `ls-files` hits on a large repository and a very dirty tree's
+    `execFile` stdout ceiling in `workspace/git/execution.ts` from Node's 1 MB
+    default to 16 MB: past the limit `execFile` fails the *whole* command with
+    `ENOBUFS`, which `ls-files` hits on a large repository and a very dirty tree's
     `status --porcelain` could hit too. The raise is shared by every fixed Git
     invocation; each consumer still caps how much of the output it retains.
 - Git branch switching is limited to a fixed registered-workspace endpoint. It
@@ -1501,7 +1616,9 @@ Current posture:
   the override layer through the existing optimistic-locked PUT, so this adds no
   route, event, or write path either. The service keeps **no state**: it composes on
   every read, with no watcher, tracked-scene registry, or new event type;
-  clients reuse `workspace_file_written` and turn settlement signals. While
+  clients reuse `workspace_file_written`, `workspace_file_deleted`,
+  `workspace_directory_deleted`, `workspace_entry_renamed`, and turn settlement
+  signals. While
   Named flows (base `schemaVersion: 2`, optional `flows`) are bounded the same
   way — 16 flows of at most 32 steps, each step an id that must reference a
   declared edge — and compose resolves them to already-composed connector ids,

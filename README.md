@@ -49,7 +49,10 @@ The backend supports persistent agent threads with live assistant text,
 reasoning, tool activity, plans, diffs, token usage, and permission events;
 explicit file and directory context, runner-native skill discovery, and PNG,
 JPEG, or WebP turn attachments; bounded workspace browsing, quick open, literal
-content search, and a single bounded UTF-8 file write; Git status, branches,
+content search, UTF-8 file writes, single-folder creation, same-parent entry
+rename, same-workspace
+entry move and copy, and bounded
+file/folder deletion; Git status, branches,
 staging, discard, commit, fetch, fast-forward pull, push, and branch creation
 through fixed operations; an optional terminal that opens a real shell on the
 Mac (off by default); live SVG and Mermaid sketches; and composition of

@@ -84,6 +84,188 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(status.files.first?.path, "README.md")
     }
 
+    func testDeleteWorkspaceFileSendsOptimisticLockPayload() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.responseBody = Data("""
+        {"workspaceId":"workspace 1","path":"Sources/App.swift","sizeBytes":42,"deleted":true}
+        """.utf8)
+
+        let response = try await client.deleteWorkspaceFile(
+            workspaceId: "workspace 1",
+            path: "Sources/App.swift",
+            baseModifiedAt: "2026-08-27T01:02:03.000Z"
+        )
+
+        let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
+        let body = try XCTUnwrap(RequestCapturingURLProtocol.lastRequestBody)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(request.httpMethod, "DELETE")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://example.test/agent-room/api/workspaces/workspace%201/file"
+        )
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(payload["path"], "Sources/App.swift")
+        XCTAssertEqual(payload["baseModifiedAt"], "2026-08-27T01:02:03.000Z")
+        XCTAssertTrue(response.deleted)
+        XCTAssertEqual(response.path, "Sources/App.swift")
+    }
+
+    func testCreateWorkspaceDirectoryPostsPathWithoutAnOptimisticLockToken() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.responseBody = Data("""
+        {"workspaceId":"workspace 1","path":"Sources/Generated","modifiedAt":"2026-08-29T01:02:03.000Z","created":true}
+        """.utf8)
+
+        let response = try await client.createWorkspaceDirectory(
+            workspaceId: "workspace 1",
+            path: "Sources/Generated"
+        )
+
+        let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
+        let body = try XCTUnwrap(RequestCapturingURLProtocol.lastRequestBody)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(request.httpMethod, "POST")
+        // Create and recursive delete share the `/directory` path and differ by
+        // method, the way the file PUT and DELETE do.
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://example.test/agent-room/api/workspaces/workspace%201/directory"
+        )
+        XCTAssertEqual(payload["path"], "Sources/Generated")
+        // Nothing is being replaced, so there is no version to prove we had seen.
+        XCTAssertNil(payload["baseModifiedAt"])
+        XCTAssertTrue(response.created)
+        XCTAssertEqual(response.path, "Sources/Generated")
+        // The returned token makes the new folder an immediate mutation target.
+        XCTAssertEqual(response.modifiedAt, "2026-08-29T01:02:03.000Z")
+    }
+
+    func testDeleteWorkspaceDirectorySendsRecursiveEndpointPayload() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.responseBody = Data("""
+        {"workspaceId":"workspace 1","path":"Sources/Generated","fileCount":3,"directoryCount":2,"sizeBytes":84,"deleted":true}
+        """.utf8)
+
+        let response = try await client.deleteWorkspaceDirectory(
+            workspaceId: "workspace 1",
+            path: "Sources/Generated",
+            baseModifiedAt: "2026-08-27T01:02:03.000Z"
+        )
+
+        let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
+        let body = try XCTUnwrap(RequestCapturingURLProtocol.lastRequestBody)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(request.httpMethod, "DELETE")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://example.test/agent-room/api/workspaces/workspace%201/directory"
+        )
+        XCTAssertEqual(payload["path"], "Sources/Generated")
+        XCTAssertEqual(payload["baseModifiedAt"], "2026-08-27T01:02:03.000Z")
+        XCTAssertTrue(response.deleted)
+        XCTAssertEqual(response.fileCount, 3)
+        XCTAssertEqual(response.directoryCount, 2)
+    }
+
+    func testRenameWorkspaceEntrySendsLeafNameAndOptimisticLockPayload() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.responseBody = Data("""
+        {"workspaceId":"workspace 1","oldPath":"Sources/App.swift","path":"Sources/Main.swift","entryType":"file","sizeBytes":42,"renamed":true}
+        """.utf8)
+
+        let response = try await client.renameWorkspaceEntry(
+            workspaceId: "workspace 1",
+            path: "Sources/App.swift",
+            newName: "Main.swift",
+            baseModifiedAt: "2026-08-27T01:02:03.000Z"
+        )
+
+        let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
+        let body = try XCTUnwrap(RequestCapturingURLProtocol.lastRequestBody)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://example.test/agent-room/api/workspaces/workspace%201/entry/rename"
+        )
+        XCTAssertEqual(payload["path"], "Sources/App.swift")
+        XCTAssertEqual(payload["newName"], "Main.swift")
+        XCTAssertEqual(payload["baseModifiedAt"], "2026-08-27T01:02:03.000Z")
+        XCTAssertEqual(response.oldPath, "Sources/App.swift")
+        XCTAssertEqual(response.path, "Sources/Main.swift")
+        XCTAssertEqual(response.entryType, "file")
+        XCTAssertTrue(response.renamed)
+    }
+
+    func testMoveWorkspaceEntrySendsDestinationParentAndNoCollisionStrategy() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.responseBody = Data("""
+        {"workspaceId":"workspace 1","oldPath":"Sources/App.swift","path":"docs/App.swift","entryType":"file","sizeBytes":42,"moved":true}
+        """.utf8)
+
+        let response = try await client.moveWorkspaceEntry(
+            workspaceId: "workspace 1",
+            path: "Sources/App.swift",
+            destinationParent: "docs",
+            baseModifiedAt: "2026-08-27T01:02:03.000Z"
+        )
+
+        let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
+        let body = try XCTUnwrap(RequestCapturingURLProtocol.lastRequestBody)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://example.test/agent-room/api/workspaces/workspace%201/entry/move"
+        )
+        XCTAssertEqual(payload["path"], "Sources/App.swift")
+        XCTAssertEqual(payload["destinationParent"], "docs")
+        XCTAssertEqual(payload["baseModifiedAt"], "2026-08-27T01:02:03.000Z")
+        // An omitted `newName` keeps the entry's own name, and a move never asks
+        // the backend to rename around a collision.
+        XCTAssertNil(payload["newName"])
+        XCTAssertNil(payload["onCollision"])
+        XCTAssertEqual(response.oldPath, "Sources/App.swift")
+        XCTAssertEqual(response.path, "docs/App.swift")
+        XCTAssertTrue(response.moved)
+    }
+
+    func testCopyWorkspaceEntrySendsCollisionStrategyAndReportsCounts() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.responseBody = Data("""
+        {"workspaceId":"workspace 1","sourcePath":"Sources","path":"Sources-2","entryType":"directory","fileCount":3,"directoryCount":2,"sizeBytes":84,"copied":true}
+        """.utf8)
+
+        let response = try await client.copyWorkspaceEntry(
+            workspaceId: "workspace 1",
+            path: "Sources",
+            destinationParent: "",
+            baseModifiedAt: "2026-08-27T01:02:03.000Z",
+            onCollision: .keepBoth
+        )
+
+        let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
+        let body = try XCTUnwrap(RequestCapturingURLProtocol.lastRequestBody)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "http://example.test/agent-room/api/workspaces/workspace%201/entry/copy"
+        )
+        XCTAssertEqual(payload["path"], "Sources")
+        // "" is the workspace root, a real paste target rather than an omission.
+        XCTAssertEqual(payload["destinationParent"], "")
+        XCTAssertEqual(payload["onCollision"], "keep_both")
+        // The backend reports the name it actually took, so the client never guesses.
+        XCTAssertEqual(response.sourcePath, "Sources")
+        XCTAssertEqual(response.path, "Sources-2")
+        XCTAssertEqual(response.fileCount, 3)
+        XCTAssertEqual(response.directoryCount, 2)
+        XCTAssertTrue(response.copied)
+    }
+
     func testFetchWorkspaceGitFileBaselineUsesFileBaseEndpoint() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RequestCapturingURLProtocol.self]

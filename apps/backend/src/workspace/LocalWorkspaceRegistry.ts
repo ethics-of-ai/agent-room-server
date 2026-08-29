@@ -20,6 +20,7 @@ import {
   type GitFileAtHeadResult,
   type GitListFilesResult
 } from "./LocalWorkspaceGit";
+import { GitSnapshotCache } from "./git/snapshotCache";
 
 export class LocalWorkspaceRegistryError extends Error {
   constructor(
@@ -63,10 +64,8 @@ export class LocalWorkspaceRegistry {
    * environment as the reads here — one place where a git command can be formed.
    */
   readonly git: LocalWorkspaceGit;
-  private readonly gitSnapshotTtlMs: number;
   private registryCache?: LocalWorkspace[];
-  private readonly gitSnapshotCache = new Map<string, { snapshot: LocalWorkspace["git"]; atMs: number }>();
-  private readonly gitSnapshotInFlight = new Map<string, Promise<LocalWorkspace["git"]>>();
+  private readonly gitSnapshots: GitSnapshotCache;
 
   constructor(
     private readonly config: ServiceConfig,
@@ -87,7 +86,10 @@ export class LocalWorkspaceRegistry {
         ?? options.runGit
         ?? defaultGitExecutor(config.gitNetworkTimeoutMs ?? defaultGitNetworkTimeoutMs)
     );
-    this.gitSnapshotTtlMs = options.gitSnapshotTtlMs ?? defaultGitSnapshotTtlMs;
+    this.gitSnapshots = new GitSnapshotCache(
+      (workspacePath) => this.git.snapshot(workspacePath),
+      options.gitSnapshotTtlMs ?? defaultGitSnapshotTtlMs
+    );
   }
 
   async list(): Promise<LocalWorkspaceRegistrySnapshot> {
@@ -117,20 +119,14 @@ export class LocalWorkspaceRegistry {
   }
 
   async gitStatus(workspaceId: string): Promise<LocalWorkspaceGitStatus> {
-    const workspace = await this.findByIdWithoutGitRefresh(workspaceId);
-    if (!workspace) {
-      throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
-    }
+    const workspace = await this.requireWorkspace(workspaceId);
     return this.git.status(workspace.id, workspace.path);
   }
 
   // Fixed read-only `git cat-file` lookup of a file's HEAD blob. The relative path
   // must already be lexically bounded by the caller (WorkspaceExplorer).
   async gitFileAtHead(workspaceId: string, relPath: string, maxBytes: number): Promise<GitFileAtHeadResult> {
-    const workspace = await this.findByIdWithoutGitRefresh(workspaceId);
-    if (!workspace) {
-      throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
-    }
+    const workspace = await this.requireWorkspace(workspaceId);
     return this.git.fileAtHead(workspace.path, relPath, maxBytes);
   }
 
@@ -138,10 +134,7 @@ export class LocalWorkspaceRegistry {
   // index. Pass-through only: the returned paths are raw git output and must be
   // filtered by the caller (WorkspaceExplorer) before they reach a client.
   async gitListFiles(workspaceId: string, maxPaths: number): Promise<GitListFilesResult> {
-    const workspace = await this.findByIdWithoutGitRefresh(workspaceId);
-    if (!workspace) {
-      throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
-    }
+    const workspace = await this.requireWorkspace(workspaceId);
     return this.git.listFiles(workspace.path, maxPaths);
   }
 
@@ -176,7 +169,7 @@ export class LocalWorkspaceRegistry {
       kind: input.kind ?? existing?.kind ?? "user_selected",
       trustedAt: existing?.trustedAt ?? now,
       lastOpenedAt: now,
-      git: await this.freshGitSnapshot(workspacePath)
+      git: await this.gitSnapshots.refresh(workspacePath)
     };
 
     if (existingIndex >= 0) {
@@ -336,31 +329,19 @@ export class LocalWorkspaceRegistry {
   ): Promise<LocalWorkspace> {
     return {
       ...workspace,
-      git: options.fresh ? await this.freshGitSnapshot(workspace.path) : await this.cachedGitSnapshot(workspace.path)
+      // A post-mutation refresh bypasses the TTL because it must observe the
+      // state after its own git command.
+      git: options.fresh ? await this.gitSnapshots.refresh(workspace.path) : await this.gitSnapshots.get(workspace.path)
     };
   }
 
-  private async cachedGitSnapshot(workspacePath: string): Promise<LocalWorkspace["git"]> {
-    const cached = this.gitSnapshotCache.get(workspacePath);
-    if (cached && Date.now() - cached.atMs < this.gitSnapshotTtlMs) {
-      return cached.snapshot;
+  /** The one lookup that refuses an unregistered id, shared by the git reads. */
+  private async requireWorkspace(workspaceId: string): Promise<LocalWorkspace> {
+    const workspace = await this.findByIdWithoutGitRefresh(workspaceId);
+    if (!workspace) {
+      throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
     }
-    // Concurrent cache misses for the same workspace share one snapshot instead of
-    // racing duplicate git subprocess batches. Post-mutation refreshes bypass this
-    // via `fresh` because they must observe state after their own git switch.
-    const inFlight = this.gitSnapshotInFlight.get(workspacePath);
-    if (inFlight) return inFlight;
-    const fetch = this.freshGitSnapshot(workspacePath).finally(() => {
-      this.gitSnapshotInFlight.delete(workspacePath);
-    });
-    this.gitSnapshotInFlight.set(workspacePath, fetch);
-    return fetch;
-  }
-
-  private async freshGitSnapshot(workspacePath: string): Promise<LocalWorkspace["git"]> {
-    const snapshot = await this.git.snapshot(workspacePath);
-    this.gitSnapshotCache.set(workspacePath, { snapshot, atMs: Date.now() });
-    return snapshot;
+    return workspace;
   }
 
   private async resolveExistingDirectory(inputPath: string): Promise<string> {

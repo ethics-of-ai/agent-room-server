@@ -3,49 +3,36 @@ import type {
   LocalWorkspaceGitOperation,
   LocalWorkspaceGitOperationResult
 } from "../domain/models";
+import { gitErrorMessage, isStagedEntry, type GitChangedEntry } from "./LocalWorkspaceGit";
+import { WorkspaceGitServiceError } from "./git/errors";
 import {
-  gitErrorMessage,
-  isRenamedEntry,
-  isStagedEntry,
-  isUntrackedEntry,
-  type GitChangedEntry
-} from "./LocalWorkspaceGit";
+  assertIndexableStagedPaths,
+  planDiscardOperations,
+  resolveExplicitPaths,
+  selectAllChangedPaths,
+  selectExplicitChangedPaths,
+  type ResolvedPaths
+} from "./git/pathSelection";
 import { LocalWorkspaceRegistryError, type LocalWorkspaceRegistry } from "./LocalWorkspaceRegistry";
-import { indexableRelativePath } from "./WorkspaceExplorer";
 
-export class WorkspaceGitServiceError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
+export { WorkspaceGitServiceError } from "./git/errors";
 
 export interface WorkspaceGitPathsInput {
   paths?: string[];
-  /** Act on every changed path git reports instead of a caller-supplied list. */
   all?: boolean;
 }
 
 export interface WorkspaceGitCommitInput {
   message: string;
-  /** Stage every changed path first, so "commit everything" is one request. */
   stageAll?: boolean;
 }
 
 export interface WorkspaceGitPushInput {
-  /** Publish a branch that has no upstream yet (`push --set-upstream`). */
   setUpstream?: boolean;
 }
 
 export interface WorkspaceGitCreateBranchInput {
   branch: string;
-}
-
-interface ResolvedPaths {
-  accepted: string[];
-  skipped: string[];
 }
 
 /**
@@ -57,12 +44,15 @@ interface ResolvedPaths {
  * - Every command is a fixed argv assembled in `LocalWorkspaceGit`. A caller
  *   contributes pathspecs and a commit message, never a flag, a refspec, or a
  *   remote — so this is not a shell and cannot become one.
- * - Every caller-supplied path goes through `indexableRelativePath`, the same
- *   filter the tree read and file index use, so a `.env`, key file, or
- *   generated-directory path can be neither staged nor discarded here.
+ * - Which paths an operation may touch is decided in `./git/pathSelection.ts`,
+ *   where every caller-supplied path goes through `indexableRelativePath`, the
+ *   same filter the tree read and file index use.
  * - Nothing rewrites history: no amend, no reset, no rebase, and no forced push.
  *   Pull is fast-forward only, because a client with no conflict-resolution
  *   surface should not be able to create a conflicted worktree.
+ *
+ * What lives here is the order the fixed commands run in, and the mapping from
+ * a git failure to a refusal a route can answer with.
  *
  * See docs/safety/TRUST_AND_SAFETY.md.
  */
@@ -72,8 +62,8 @@ export class WorkspaceGitService {
   async stage(workspaceId: string, input: WorkspaceGitPathsInput): Promise<LocalWorkspaceGitOperationResult> {
     const workspace = await this.repositoryWorkspace(workspaceId);
     const resolved = input.all
-      ? await this.changedPathsForStaging(workspace)
-      : await this.changedPathsForExplicitOperation(workspace, input.paths);
+      ? selectAllChangedPaths(await this.readChangedEntries(workspace))
+      : await selectExplicitChangedPaths(input.paths, () => this.readChangedEntries(workspace));
 
     if (resolved.accepted.length > 0) {
       await this.run("Git stage failed", () => this.registry.git.stagePaths(workspace.path, resolved.accepted));
@@ -84,8 +74,8 @@ export class WorkspaceGitService {
   async unstage(workspaceId: string, input: WorkspaceGitPathsInput): Promise<LocalWorkspaceGitOperationResult> {
     const workspace = await this.repositoryWorkspace(workspaceId);
     const resolved = input.all
-      ? await this.changedPathsForStaging(workspace, isStagedEntry)
-      : await this.changedPathsForExplicitOperation(workspace, input.paths, isStagedEntry);
+      ? selectAllChangedPaths(await this.readChangedEntries(workspace), isStagedEntry)
+      : await selectExplicitChangedPaths(input.paths, () => this.readChangedEntries(workspace), isStagedEntry);
 
     if (resolved.accepted.length > 0) {
       const hasCommits = await this.registry.git.hasCommits(workspace.path);
@@ -104,54 +94,20 @@ export class WorkspaceGitService {
   async discard(workspaceId: string, input: WorkspaceGitPathsInput): Promise<LocalWorkspaceGitOperationResult> {
     const workspace = await this.repositoryWorkspace(workspaceId);
     const resolved = resolveExplicitPaths(input.paths);
-
-    const entries = await this.readChangedEntries(workspace);
-    const byPath = new Map(entries.map((entry) => [entry.path, entry]));
-    const restore: string[] = [];
-    const unstage: string[] = [];
-    const remove: string[] = [];
-
-    for (const path of resolved.accepted) {
-      const entry = byPath.get(path);
-      // A path with no pending change has nothing to discard; treat it as a
-      // no-op rather than an error so a stale client list stays harmless.
-      if (!entry) continue;
-      if (isUntrackedEntry(entry)) {
-        // Never entered the index, so `clean` alone removes it. Unstaging it
-        // would fail the whole batch on a pathspec git does not know.
-        remove.push(path);
-        continue;
-      }
-      if (entry.oldPath && isRenamedEntry(entry)) {
-        // A staged rename is two paths: bring the original back from HEAD and
-        // drop the new one, which HEAD does not have.
-        restore.push(entry.oldPath);
-        unstage.push(path);
-        remove.push(path);
-        continue;
-      }
-      if (entry.indexStatus === "A") {
-        // Added to the index but absent from HEAD, so "revert to HEAD" means
-        // unstaging it and deleting the file.
-        unstage.push(path);
-        remove.push(path);
-        continue;
-      }
-      restore.push(path);
-    }
+    const plan = planDiscardOperations(await this.readChangedEntries(workspace), resolved.accepted);
 
     await this.run("Git discard failed", async () => {
-      if (restore.length > 0) {
-        await this.registry.git.restoreFromHead(workspace.path, restore);
+      if (plan.restore.length > 0) {
+        await this.registry.git.restoreFromHead(workspace.path, plan.restore);
       }
-      if (unstage.length > 0) {
+      if (plan.unstage.length > 0) {
         const hasCommits = await this.registry.git.hasCommits(workspace.path);
         // `clean` only removes files git does not track, so anything in the
         // index has to leave it first.
-        await this.registry.git.unstagePaths(workspace.path, unstage, hasCommits);
+        await this.registry.git.unstagePaths(workspace.path, plan.unstage, hasCommits);
       }
-      if (remove.length > 0) {
-        await this.registry.git.cleanPaths(workspace.path, remove);
+      if (plan.remove.length > 0) {
+        await this.registry.git.cleanPaths(workspace.path, plan.remove);
       }
     });
 
@@ -167,7 +123,7 @@ export class WorkspaceGitService {
 
     let skipped: string[] = [];
     if (input.stageAll) {
-      const resolved = await this.changedPathsForStaging(workspace);
+      const resolved = selectAllChangedPaths(await this.readChangedEntries(workspace));
       skipped = resolved.skipped;
       if (resolved.accepted.length > 0) {
         await this.run("Git stage failed", () => this.registry.git.stagePaths(workspace.path, resolved.accepted));
@@ -178,7 +134,9 @@ export class WorkspaceGitService {
     // may have been staged outside AgentRoom. Re-check that complete staged set
     // immediately before committing so an externally staged secret, generated
     // file, or path outside a registered subdirectory cannot ride along.
-    await this.assertSafeStagedIndex(workspace);
+    assertIndexableStagedPaths(
+      await this.run("Git staged-index read failed", () => this.registry.git.stagedPaths(workspace.path))
+    );
 
     const commit = await this.run("Git commit failed", () => this.registry.git.commit(workspace.path, message));
     // The committed set is already reflected in the refreshed status, so a commit
@@ -295,90 +253,6 @@ export class WorkspaceGitService {
     );
   }
 
-  /**
-   * Every changed path git reports, filtered through the shared workspace path
-   * filter. Deliberately built from an uncapped porcelain read rather than the
-   * 200-file status projection, so "stage all" cannot silently miss files in a
-   * very dirty tree.
-   */
-  private async changedPathsForStaging(
-    workspace: LocalWorkspace,
-    predicate?: (entry: GitChangedEntry) => boolean
-  ): Promise<ResolvedPaths> {
-    const entries = await this.readChangedEntries(workspace);
-    const accepted: string[] = [];
-    const skipped: string[] = [];
-    const seen = new Set<string>();
-
-    for (const entry of entries) {
-      if (predicate && !predicate(entry)) continue;
-      // A rename's original path has to move too, or staging the pair leaves the
-      // deletion behind.
-      for (const candidate of entry.oldPath ? [entry.path, entry.oldPath] : [entry.path]) {
-        if (seen.has(candidate)) continue;
-        seen.add(candidate);
-        const safePath = indexableRelativePath(candidate);
-        if (safePath) accepted.push(safePath);
-        else skipped.push(candidate);
-      }
-    }
-    return { accepted, skipped };
-  }
-
-  /**
-   * Resolves caller-supplied paths against Git's exact changed-file entries.
-   * Merely passing the lexical filter is insufficient: `git add src` recurses
-   * through a directory and could otherwise stage a refused `src/.env` below
-   * it. Expanding renames here also keeps both sides of the change together.
-   */
-  private async changedPathsForExplicitOperation(
-    workspace: LocalWorkspace,
-    paths: string[] | undefined,
-    predicate?: (entry: GitChangedEntry) => boolean
-  ): Promise<ResolvedPaths> {
-    const resolved = resolveExplicitPaths(paths);
-    const entries = await this.readChangedEntries(workspace);
-    const byPath = new Map<string, GitChangedEntry>();
-    for (const entry of entries) {
-      byPath.set(entry.path, entry);
-      if (entry.oldPath) byPath.set(entry.oldPath, entry);
-    }
-
-    const accepted: string[] = [];
-    const seen = new Set<string>();
-    for (const requestedPath of resolved.accepted) {
-      const entry = byPath.get(requestedPath);
-      if (!entry || (predicate && !predicate(entry))) {
-        throw new WorkspaceGitServiceError("Path is not an eligible changed file", 409);
-      }
-      for (const candidate of entry.oldPath ? [entry.path, entry.oldPath] : [entry.path]) {
-        if (seen.has(candidate)) continue;
-        const safePath = indexableRelativePath(candidate);
-        if (!safePath) {
-          throw new WorkspaceGitServiceError(
-            "Changed path is outside the workspace, secret-named, or in a generated directory",
-            415
-          );
-        }
-        seen.add(candidate);
-        accepted.push(safePath);
-      }
-    }
-    return { accepted, skipped: [] };
-  }
-
-  private async assertSafeStagedIndex(workspace: LocalWorkspace): Promise<void> {
-    const paths = await this.run("Git staged-index read failed", () => this.registry.git.stagedPaths(workspace.path));
-    for (const candidate of paths) {
-      if (!candidate.withinWorkspace || !indexableRelativePath(candidate.path)) {
-        throw new WorkspaceGitServiceError(
-          "Git index contains a path outside the workspace, secret-named, or in a generated directory; unstage it before committing",
-          415
-        );
-      }
-    }
-  }
-
   private async readChangedEntries(workspace: LocalWorkspace): Promise<GitChangedEntry[]> {
     return this.run("Git status read failed", () => this.registry.git.changedEntries(workspace.path));
   }
@@ -412,24 +286,4 @@ export class WorkspaceGitService {
       throw new WorkspaceGitServiceError(gitErrorMessage(error, fallbackMessage), statusCode);
     }
   }
-}
-
-function resolveExplicitPaths(paths: string[] | undefined): ResolvedPaths {
-  if (!paths || paths.length === 0) {
-    throw new WorkspaceGitServiceError("At least one workspace-relative path is required");
-  }
-  const accepted: string[] = [];
-  for (const raw of paths) {
-    const safePath = indexableRelativePath(raw);
-    // Explicitly named paths are all-or-nothing: silently dropping one would let
-    // a client believe it staged or discarded something it did not.
-    if (!safePath) {
-      throw new WorkspaceGitServiceError(
-        "Path is outside the workspace, secret-named, or in a generated directory",
-        415
-      );
-    }
-    accepted.push(safePath);
-  }
-  return { accepted: [...new Set(accepted)], skipped: [] };
 }

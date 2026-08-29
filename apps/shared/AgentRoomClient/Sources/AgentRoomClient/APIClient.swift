@@ -267,6 +267,126 @@ public struct APIClient {
         )
     }
 
+    /// Deletes one regular workspace file only when `baseModifiedAt` still
+    /// matches the version the client rendered. Directories and blind deletes
+    /// are refused by the backend.
+    public func deleteWorkspaceFile(
+        workspaceId: String,
+        path: String,
+        baseModifiedAt: String
+    ) async throws -> WorkspaceFileDeleteResponse {
+        let payload = WorkspaceFileDeleteRequest(path: path, baseModifiedAt: baseModifiedAt)
+        return try await request(
+            ["api", "workspaces", workspaceId, "file"],
+            method: "DELETE",
+            body: try JSONEncoder().encode(payload)
+        )
+    }
+
+    /// Creates one directory whose parent already exists. Deliberately not
+    /// recursive — the backend creates a single leaf, the same rule
+    /// `writeWorkspaceFile` follows — and create-only, so an occupied name comes
+    /// back as a conflict instead of quietly resolving to the existing folder.
+    public func createWorkspaceDirectory(
+        workspaceId: String,
+        path: String
+    ) async throws -> WorkspaceDirectoryCreateResponse {
+        let payload = WorkspaceDirectoryCreateRequest(path: path)
+        return try await request(
+            ["api", "workspaces", workspaceId, "directory"],
+            method: "POST",
+            body: try JSONEncoder().encode(payload)
+        )
+    }
+
+    /// Recursively deletes one directory only when `baseModifiedAt` still
+    /// matches the version the client rendered. The backend preflights the
+    /// complete subtree and refuses protected, linked, or oversized content.
+    public func deleteWorkspaceDirectory(
+        workspaceId: String,
+        path: String,
+        baseModifiedAt: String
+    ) async throws -> WorkspaceDirectoryDeleteResponse {
+        let payload = WorkspaceDirectoryDeleteRequest(path: path, baseModifiedAt: baseModifiedAt)
+        return try await request(
+            ["api", "workspaces", workspaceId, "directory"],
+            method: "DELETE",
+            body: try JSONEncoder().encode(payload)
+        )
+    }
+
+    /// Renames a regular file or directory within its current parent. `newName`
+    /// is one leaf name rather than a path, so this endpoint cannot move entries.
+    public func renameWorkspaceEntry(
+        workspaceId: String,
+        path: String,
+        newName: String,
+        baseModifiedAt: String
+    ) async throws -> WorkspaceEntryRenameResponse {
+        let payload = WorkspaceEntryRenameRequest(
+            path: path,
+            newName: newName,
+            baseModifiedAt: baseModifiedAt
+        )
+        return try await request(
+            ["api", "workspaces", workspaceId, "entry", "rename"],
+            method: "POST",
+            body: try JSONEncoder().encode(payload)
+        )
+    }
+
+    /// Moves a regular file or directory to another folder in the same
+    /// workspace. It runs the same optimistic-locked, no-overwrite relocation
+    /// rename runs; what it adds is a destination parent, which the backend
+    /// bounds exactly as it bounds every other parent it writes into. Omitting
+    /// `newName` keeps the entry's own name.
+    public func moveWorkspaceEntry(
+        workspaceId: String,
+        path: String,
+        destinationParent: String,
+        newName: String? = nil,
+        baseModifiedAt: String
+    ) async throws -> WorkspaceEntryMoveResponse {
+        let payload = WorkspaceEntryMoveRequest(
+            path: path,
+            destinationParent: destinationParent,
+            newName: newName,
+            baseModifiedAt: baseModifiedAt
+        )
+        return try await request(
+            ["api", "workspaces", workspaceId, "entry", "move"],
+            method: "POST",
+            body: try JSONEncoder().encode(payload)
+        )
+    }
+
+    /// Copies a regular file or directory inside the same workspace. The bytes
+    /// never transit this API, so the backend's subtree caps bound it rather
+    /// than the 256 KB write cap, and it inventories the source before writing
+    /// anything. `onCollision: .keepBoth` takes the next name on the backend's
+    /// bounded ladder instead of refusing an occupied one.
+    public func copyWorkspaceEntry(
+        workspaceId: String,
+        path: String,
+        destinationParent: String,
+        newName: String? = nil,
+        baseModifiedAt: String,
+        onCollision: WorkspaceEntryCopyRequest.CollisionStrategy? = nil
+    ) async throws -> WorkspaceEntryCopyResponse {
+        let payload = WorkspaceEntryCopyRequest(
+            path: path,
+            destinationParent: destinationParent,
+            newName: newName,
+            baseModifiedAt: baseModifiedAt,
+            onCollision: onCollision
+        )
+        return try await request(
+            ["api", "workspaces", workspaceId, "entry", "copy"],
+            method: "POST",
+            body: try JSONEncoder().encode(payload)
+        )
+    }
+
     /// Converts Mermaid flowchart/graph source into canonical solution-diagram
     /// file content. Pure backend compute — nothing is written; the caller
     /// writes the returned `content` through `writeWorkspaceFile` itself, so

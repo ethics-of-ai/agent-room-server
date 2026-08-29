@@ -264,6 +264,236 @@ public struct WorkspaceFileWriteRequest: Codable, Hashable {
     }
 }
 
+public struct WorkspaceFileDeleteRequest: Codable, Hashable {
+    public var path: String
+    public var baseModifiedAt: String
+
+    public init(path: String, baseModifiedAt: String) {
+        self.path = path
+        self.baseModifiedAt = baseModifiedAt
+    }
+}
+
+public struct WorkspaceFileDeleteResponse: Codable, Hashable {
+    public var workspaceId: String
+    public var path: String
+    public var sizeBytes: Int
+    public var deleted: Bool
+
+    public init(workspaceId: String, path: String, sizeBytes: Int, deleted: Bool) {
+        self.workspaceId = workspaceId
+        self.path = path
+        self.sizeBytes = sizeBytes
+        self.deleted = deleted
+    }
+}
+
+/// Creating one directory under an existing parent. It is the only entry
+/// mutation with no `baseModifiedAt`: nothing is being replaced, so there is no
+/// prior version for the caller to prove it had seen. The backend refuses an
+/// occupied name rather than adopting the folder that is already there, which is
+/// what makes the token unnecessary rather than merely absent.
+public struct WorkspaceDirectoryCreateRequest: Codable, Hashable {
+    public var path: String
+
+    public init(path: String) {
+        self.path = path
+    }
+}
+
+public struct WorkspaceDirectoryCreateResponse: Codable, Hashable {
+    public var workspaceId: String
+    public var path: String
+    /// The new folder's mtime, so it is a rename, move, paste, or delete target
+    /// straight away without waiting for the tree to reload.
+    public var modifiedAt: String
+    public var created: Bool
+
+    public init(workspaceId: String, path: String, modifiedAt: String, created: Bool) {
+        self.workspaceId = workspaceId
+        self.path = path
+        self.modifiedAt = modifiedAt
+        self.created = created
+    }
+}
+
+public struct WorkspaceDirectoryDeleteRequest: Codable, Hashable {
+    public var path: String
+    public var baseModifiedAt: String
+
+    public init(path: String, baseModifiedAt: String) {
+        self.path = path
+        self.baseModifiedAt = baseModifiedAt
+    }
+}
+
+public struct WorkspaceDirectoryDeleteResponse: Codable, Hashable {
+    public var workspaceId: String
+    public var path: String
+    public var fileCount: Int
+    public var directoryCount: Int
+    public var sizeBytes: Int
+    public var deleted: Bool
+
+    public init(
+        workspaceId: String,
+        path: String,
+        fileCount: Int,
+        directoryCount: Int,
+        sizeBytes: Int,
+        deleted: Bool
+    ) {
+        self.workspaceId = workspaceId
+        self.path = path
+        self.fileCount = fileCount
+        self.directoryCount = directoryCount
+        self.sizeBytes = sizeBytes
+        self.deleted = deleted
+    }
+}
+
+/// Relocating one entry to another folder in the same workspace. `newName` is
+/// omitted for a plain paste, which keeps the entry's own name, and supplied
+/// when the paste also renames. `destinationParent` may be empty: "" is the
+/// workspace root, a real paste target.
+public struct WorkspaceEntryMoveRequest: Codable, Hashable {
+    public var path: String
+    public var destinationParent: String
+    public var newName: String?
+    public var baseModifiedAt: String
+
+    public init(path: String, destinationParent: String, newName: String? = nil, baseModifiedAt: String) {
+        self.path = path
+        self.destinationParent = destinationParent
+        self.newName = newName
+        self.baseModifiedAt = baseModifiedAt
+    }
+}
+
+public struct WorkspaceEntryMoveResponse: Codable, Hashable {
+    public var workspaceId: String
+    public var oldPath: String
+    public var path: String
+    public var entryType: String
+    public var sizeBytes: Int?
+    public var moved: Bool
+
+    public init(
+        workspaceId: String,
+        oldPath: String,
+        path: String,
+        entryType: String,
+        sizeBytes: Int? = nil,
+        moved: Bool
+    ) {
+        self.workspaceId = workspaceId
+        self.oldPath = oldPath
+        self.path = path
+        self.entryType = entryType
+        self.sizeBytes = sizeBytes
+        self.moved = moved
+    }
+}
+
+/// Duplicating one entry inside the same workspace. `onCollision` is the only
+/// field with no move counterpart: a copy may be asked to take the next name on
+/// the backend's bounded `-2`…`-5` ladder instead of refusing, and the response
+/// reports the name it actually took.
+public struct WorkspaceEntryCopyRequest: Codable, Hashable {
+    public enum CollisionStrategy: String, Codable, Hashable {
+        case fail
+        case keepBoth = "keep_both"
+    }
+
+    public var path: String
+    public var destinationParent: String
+    public var newName: String?
+    public var baseModifiedAt: String
+    public var onCollision: CollisionStrategy?
+
+    public init(
+        path: String,
+        destinationParent: String,
+        newName: String? = nil,
+        baseModifiedAt: String,
+        onCollision: CollisionStrategy? = nil
+    ) {
+        self.path = path
+        self.destinationParent = destinationParent
+        self.newName = newName
+        self.baseModifiedAt = baseModifiedAt
+        self.onCollision = onCollision
+    }
+}
+
+public struct WorkspaceEntryCopyResponse: Codable, Hashable {
+    public var workspaceId: String
+    public var sourcePath: String
+    public var path: String
+    public var entryType: String
+    public var fileCount: Int
+    public var directoryCount: Int
+    public var sizeBytes: Int
+    public var copied: Bool
+
+    public init(
+        workspaceId: String,
+        sourcePath: String,
+        path: String,
+        entryType: String,
+        fileCount: Int,
+        directoryCount: Int,
+        sizeBytes: Int,
+        copied: Bool
+    ) {
+        self.workspaceId = workspaceId
+        self.sourcePath = sourcePath
+        self.path = path
+        self.entryType = entryType
+        self.fileCount = fileCount
+        self.directoryCount = directoryCount
+        self.sizeBytes = sizeBytes
+        self.copied = copied
+    }
+}
+
+public struct WorkspaceEntryRenameRequest: Codable, Hashable {
+    public var path: String
+    public var newName: String
+    public var baseModifiedAt: String
+
+    public init(path: String, newName: String, baseModifiedAt: String) {
+        self.path = path
+        self.newName = newName
+        self.baseModifiedAt = baseModifiedAt
+    }
+}
+
+public struct WorkspaceEntryRenameResponse: Codable, Hashable {
+    public var workspaceId: String
+    public var oldPath: String
+    public var path: String
+    public var entryType: String
+    public var sizeBytes: Int?
+    public var renamed: Bool
+
+    public init(
+        workspaceId: String,
+        oldPath: String,
+        path: String,
+        entryType: String,
+        sizeBytes: Int? = nil,
+        renamed: Bool
+    ) {
+        self.workspaceId = workspaceId
+        self.oldPath = oldPath
+        self.path = path
+        self.entryType = entryType
+        self.sizeBytes = sizeBytes
+        self.renamed = renamed
+    }
+}
+
 public struct WorkspaceBranchSwitchResponse: Codable, Hashable {
     public var workspace: LocalWorkspace
     public var previousBranch: String?

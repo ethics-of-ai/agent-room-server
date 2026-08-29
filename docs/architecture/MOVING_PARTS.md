@@ -78,31 +78,81 @@
   registered workspace as cwd, so `.gitignore` is respected and a workspace
   inside a larger repository stays in its own subtree; raw, caller-filtered
   output), and fixed clean-branch switching for registered workspaces.
-- `src/workspace/WorkspaceExplorer.ts`: workspace tree, file preview, path
-  bounding, secret-name filtering, prompt context formatting, the bounded git
-  HEAD file-baseline read (`gitFileBaseline`, same lexical/secret/NUL/cap
-  contract as previews), the bounded workspace skills listing (`listSkills`:
-  fixed committed skill directories per runner kind, SKILL.md frontmatter
-  name/description only, backend-computed `/name`/`$name` invocation tokens for
-  the clients' composer slash picker), the cached workspace file index — one
-  enumeration (git `ls-files` where available, else a bounded walk) shared by the
-  ranked quick-open/`@`-mention list (`listFiles`) and the literal-substring
-  content search (`searchFiles`), held per workspace for a ~15s TTL with explicit
-  invalidation on a file-creating write and a branch switch (and released on
-  workspace unregistration), with every path
-  re-filtered through the tree read's lexical/secret/generated-dir rules and
-  re-checked for realpath containment at point of use — and the lone bounded write
-  (`writeTextFile`): an atomic, optimistic-locked, UTF-8 single-file write that
-  reuses the read path's bounding/symlink/secret guards.
+- `src/workspace/WorkspaceExplorer.ts`: the bounded workspace surface, assembled
+  from `src/workspace/explorer/`. The class owns what every operation shares —
+  resolving a registered workspace id to the realpath its bounds are asserted
+  against, and holding that workspace's file index between requests — and each
+  contract sits in its own module:
+  `explorer/bounds.ts` (the caps plus the secret-name and generated-directory
+  rules every surface applies), `explorer/paths.ts` (lexical bounding, realpath
+  containment, leaf names, and `indexableRelativePath` — the filter
+  `WorkspaceGitService` shares, which is what keeps a secret-named file out of an
+  index AgentRoom would then commit), `explorer/directoryRead.ts` (the tree
+  read), `explorer/filePreview.ts` (the bounded UTF-8 preview and the one head
+  read every bounded reader goes through), `explorer/gitBaseline.ts` (the git
+  HEAD blob behind the editor's diff decorations, on the preview's
+  lexical/secret/NUL/cap contract), `explorer/skills.ts` (the bounded skills
+  listing: the fixed committed skill directories and invocation token are
+  *descriptor* fields the caller supplies, SKILL.md frontmatter name/description
+  only), `explorer/fileIndex.ts` (the one enumeration — git `ls-files` where
+  available, else a bounded walk — shared by both discovery surfaces, cached per
+  workspace for a ~15s TTL with single-flight builds and explicit invalidation on
+  a file-creating write, entry rename, move, copy, file/directory deletion, and a
+  branch switch, released on unregistration), `explorer/fileListing.ts` (the
+  ranked quick-open/`@`-mention list), `explorer/contentSearch.ts` (the literal
+  substring search and its include glob, no caller input ever compiled into a
+  regex), and `explorer/promptContext.ts` (turn-prompt context for explicitly
+  selected paths).
+  The fixed mutations are grouped by what they do rather than by route:
+  `explorer/fileWrite.ts` (the atomic, optimistic-locked UTF-8 write),
+  `explorer/entryCreate.ts` (one empty directory under an existing parent — the
+  only mutation with no optimistic-lock token, because it replaces nothing, and
+  deliberately non-recursive so `mkdir`'s own exclusivity is what refuses an
+  occupied name),
+  `explorer/entryDelete.ts` (the regular-file unlink, and the recursive directory
+  removal that preflights its whole subtree),
+  `explorer/entryRelocate.ts` (the *one* implementation behind both rename and
+  move: rename calls it with the entry's own parent, so the no-overwrite dance is
+  not written twice, and move adds only the bounds a second directory needs), and
+  `explorer/entryCopy.ts` (inventory first, stage beside the destination, publish
+  under the chosen name only once whole, with an opt-in bounded `-2`…`-5` ladder
+  and no overwrite; the copy pass pins regular-file source handles with
+  `O_NOFOLLOW` and revalidates live directories). Two modules sit under all four:
+  `explorer/entryMutation.ts`
+  holds the path, parent, and destination bounding plus the exclusive-claim
+  rename helpers, and `explorer/subtree.ts` holds the capped inventory and copy
+  walk. All of them reuse the read path's bounding and protected-path guards;
+  recursive deletion and copy share one subtree inventory and additionally refuse
+  symlinks, unsupported types, more than 20,000 entries, or more than 1 GiB of
+  file data. Copy is bounded by those caps rather than by `maxWriteBytes`, which
+  is a request-body bound and says nothing about bytes that never cross the API.
+- `src/workspace/LocalWorkspaceGit.ts`: the fixed-argv Git seam — every
+  invocation the backend may run, assembled here and run without a shell. Beside
+  it, `src/workspace/git/` holds everything that is not "which command":
+  `git/execution.ts` (the two executors, the non-interactive command and network
+  environments, the `:(literal)` pathspec prefix, and `gitErrorMessage`, which
+  strips URL userinfo and labelled secrets before git's own text reaches a
+  response, an event, or durable audit), `git/statusParsing.ts` (porcelain and
+  numstat parsing, the client-facing changed-file projection, and the
+  status-letter predicates the mutating operations classify by, so the read
+  projection and the mutations cannot drift), `git/repositoryReads.ts` (the reads
+  that take several invocations to answer one question: the workspace snapshot
+  with each branch's tracking state, and the HEAD blob read pinned to one
+  resolved commit so its type, mode, size, and content checks cannot observe
+  different commits), and `git/snapshotCache.ts` (the short-TTL,
+  single-flight snapshot cache the registry reads through).
 - `src/workspace/WorkspaceGitService.ts`: the fixed mutating Git operations —
   stage, unstage, discard, commit, fetch, pull (fast-forward only), push, and
-  branch creation. Assembles no command of its own: it classifies paths and calls
-  the fixed argv in `LocalWorkspaceGit`, filters every caller-supplied path
-  through the tree read's `indexableRelativePath` rules (so a secret-named or
-  generated path can be neither staged nor discarded), and refreshes the
-  workspace snapshot past its cache so a client sees state after its own command.
-  Deliberately excludes history rewriting and forced push; see
-  `docs/safety/TRUST_AND_SAFETY.md`.
+  branch creation. Assembles no command of its own: it decides the order the
+  fixed argv in `LocalWorkspaceGit` runs in, maps a git failure to a refusal a
+  route can answer with, and refreshes the workspace snapshot past its cache so a
+  client sees state after its own command. *Which* paths an operation may touch is
+  `git/pathSelection.ts` — the all/explicit path resolution, the staged-index
+  guard `commit` runs immediately before committing, and the classification that
+  turns "discard" into restore/unstage/remove — where every caller-supplied path
+  goes through the tree read's `indexableRelativePath` rules, so a secret-named or
+  generated path can be neither staged nor discarded. Deliberately excludes
+  history rewriting and forced push; see `docs/safety/TRUST_AND_SAFETY.md`.
 - `src/agent/AgentSessionService.ts`: session lifecycle, turn execution, runner
   session metadata, message history, stop/cancellation, steering-safe metrics,
   and status snapshots. The record is in memory and mirrored write-through to
@@ -608,7 +658,11 @@
   records are persisted*).
 - `src/routes`: health, auth, status/logs/audit, the managed settings read and
   write (`configRoutes.ts`), the registered-runner projection
-  (`runnerRoutes.ts`), harness, workspaces,
+  (`runnerRoutes.ts`), harness, workspaces (`workspaceRoutes.ts` composes the
+  four groups in `routes/workspace/`, which differ by what they are allowed to
+  do rather than by URL shape: registration metadata, the bearer-gated bounded
+  reads, the seven fixed entry mutations, and the fixed Git operations, over one
+  request-validation module and one error mapping),
   coding-agent capabilities, agent sessions (including the one route that
   answers an outstanding permission request), editor language catalog
   (`editorCatalogRoutes.ts`: manifest/asset/status reads + operator reload), the
@@ -678,7 +732,34 @@
   and token single-owned; closing a split-off window returns its files to a
   sibling rather than dropping them, and the workspace's last panel keeps its
   tabs so reopening the editor lands back on them.
-  derives context paths from explicit `@` file mentions, offers a `/` skill
+  derives context paths from explicit `@` file mentions, creates empty files and
+  empty folders from the Files header's single add menu or a folder's context
+  menu, renames files
+  or folders in place, and deletes files or whole folders from the same context
+  menu (pinch-and-hold or right-click; rows carry no menu button) after a
+  destructive confirmation (including
+  open-tab and unsaved-draft warnings). Both creation surfaces offer the same
+  two entry kinds from one shared pair of menu items
+  (`WorkspaceEntryCreationMenuItems`) and one shared prompt
+  (`WorkspaceEntryCreationPrompt`), differing only in which folder they write
+  into, so the header and a folder row cannot drift into offering different
+  things; the header is one control rather than a growing row of icon buttons,
+  each of which would cost a 60-point target (WWDC23 10076 t=636) in a header
+  that is otherwise a title and a count. A create expands its destination folder
+  so the new row is visible, and only a new file is opened in an editor — a new
+  folder is empty, so the tree is the whole of its feedback. It also copies, cuts, and pastes entries
+  through an app-local `WorkspaceEntryClipboard` on `AppStore` — deliberately
+  not `UIPasteboard`, which deadlocks the visionOS 27.0 simulator runtime on
+  first focus and would invite payloads no bounded route can honor. A cut marks
+  intent only: nothing on disk changes until the paste, which is one backend
+  move, so an abandoned cut leaves the workspace as it was. Paste is offered on
+  folder rows and, only while the clipboard holds something, in the Files header
+  for the tree root. A pasted copy asks the backend for its bounded name ladder,
+  because duplicating next to itself is the ordinary copy; a pasted move never
+  does. Rename and move re-key open editor tabs and
+  preserve their drafts; recursive deletion closes every affected tab. These
+  actions call the backend's bounded workspace routes; mutation events re-key
+  window-local tree loads across connected clients. It also offers a `/` skill
   picker in the workspace window and scene composers (backed by the bounded
   workspace skills read; narrows while typing and inserts the runner's
   invocation token), can upload selected or
@@ -855,7 +936,9 @@
   toolbar menu lists the import without waiting for a turn.
   The Settings tab is also where the backend's own managed settings are edited.
   It is a split view (`SettingsView`): the sidebar lists the panes — Connection,
-  then one per managed section — and the detail column shows one at a time,
+  Appearance (device-local `@AppStorage` presentation choices such as the file
+  explorer row size; no backend read or patch), then one per managed section —
+  and the detail column shows one at a time,
   because the app's tab bar is top-level navigation and grouping settings is
   subnavigation inside this window (WWDC23 10076 t=1035). It is assembled from
   the workspace browser's own parts rather than resembling them: one sidebar row

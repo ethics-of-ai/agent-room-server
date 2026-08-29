@@ -644,8 +644,9 @@ one that came back from Git, must still pass the read routes' lexical bounding
 and the tree read's secret-name/generated-directory filters before it enters the
 index, and realpath containment is re-checked when an entry is returned, so a
 symlink pointing out of the workspace is skipped rather than followed. The cache
-is dropped when `PUT /api/workspaces/:id/file` creates a new path and when a
-branch switch changes the checkout, so both surfaces observe those immediately.
+is dropped when a workspace mutation creates, renames, or deletes a path, and
+when a branch switch changes the checkout, so both surfaces observe those
+immediately.
 
 Status codes: `400` for an invalid query (an over-long `query`, a `limit` outside
 1–200), `401` when `AUTH_TOKEN` is configured and the bearer token is missing
@@ -761,9 +762,15 @@ descriptions expose project structure.
 ```
 
 `PUT /api/workspaces/:workspaceId/file` writes a bounded UTF-8 text file to a
-registered workspace. This is the only client-initiated mutation of workspace
-file contents; the backend performs the write behind the same path bounding,
-symlink guard, and secret/generated-directory filtering as the read routes.
+registered workspace. The backend performs the write behind the same path
+bounding, symlink guard, and secret/generated-directory filtering as the read
+routes.
+
+For every workspace mutation in this section, a protected path also includes
+names hidden by workspace tree and index reads: `.DS_Store` and any name ending
+in the backend's internal `.agentroom-tmp` staging suffix. Such a name is
+refused with `415` rather than created successfully but omitted from subsequent
+reads.
 
 ```json
 {
@@ -779,7 +786,8 @@ rejected) and is capped at 256 KB. `baseModifiedAt` is an optimistic-lock token
 equal to the `modifiedAt` of the `WorkspaceFilePreview` the client last loaded;
 it is required to overwrite an existing file and a missing or stale token is
 rejected with `409` so a blind overwrite of a file changed since it was loaded
-cannot clobber newer content. On success the route returns the refreshed
+cannot clobber newer content. A token presented after rename or delete also
+returns `409` rather than recreating the old path. On success the route returns the refreshed
 `WorkspaceFilePreview` for the written file, with `201` on create and `200` on
 overwrite. The write is atomic (temp file plus rename) and emits a sanitized
 `workspace_file_written` event (`workspaceId`, `workspacePath`, `path`,
@@ -790,6 +798,276 @@ or the path's parent directory does not exist, `409` for a missing/stale
 `baseModifiedAt`, and `415` for a secret-named or generated-directory path, a
 symlink leaf, a directory target, or non-UTF-8 content. The write intentionally
 dirties the working tree, which can subsequently block a branch switch.
+
+`DELETE /api/workspaces/:workspaceId/file` removes one regular workspace file.
+It does not accept directories; recursive directory removal uses the separate,
+explicitly named route below.
+
+```json
+{
+  "path": "docs/notes.md",
+  "baseModifiedAt": "2026-06-14T00:00:00.000Z"
+}
+```
+
+`baseModifiedAt` is required and must equal the file's current on-disk mtime,
+normally taken from the rendered `WorkspaceTreeEntry` or
+`WorkspaceFilePreview`. A missing token is an invalid payload; a stale one is a
+`409`, and the file remains untouched. The route applies the PUT route's lexical
+path bounds, secret/generated filtering (including the resolved parent), parent
+realpath containment, and symlink-leaf refusal, then deletes with
+`node:fs.unlink` only. On success it returns `200`:
+
+```json
+{
+  "workspaceId": "workspace-abc123def456",
+  "path": "docs/notes.md",
+  "sizeBytes": 128,
+  "deleted": true
+}
+```
+
+It invalidates the workspace file index and emits a sanitized
+`workspace_file_deleted` event containing `workspaceId`, `workspacePath`,
+`path`, and `sizeBytes`, never content. Status codes: `400` for an invalid
+payload or out-of-bounds path, `401` when the configured bearer token is
+missing, `404` for an unknown workspace/file/parent, `409` for a stale token,
+and `415` for a directory, symlink leaf, or secret/generated path.
+
+`POST /api/workspaces/:workspaceId/directory` creates one empty directory. It
+shares its path with the recursive delete below and differs by method, the way
+the file PUT and DELETE do.
+
+```json
+{
+  "path": "docs/diagrams"
+}
+```
+
+`path` is workspace-relative and its parent directory must already exist: this
+route is **not recursive**, exactly like the file PUT, so one request creates one
+directory and a caller that wants a chain asks for each link. It is also the one
+mutation with **no `baseModifiedAt`** — nothing is being replaced, so there is no
+prior version a caller could be asked to prove it had seen. What stands in for
+the token is exclusivity: an occupied name is a `409` rather than a silent
+success on a folder someone else made. The path passes the same lexical
+bounding, secret-name and generated-directory refusal, and realpath containment
+as every other write, and the leaf goes through the same 255-byte name rule as
+rename.
+
+```json
+{
+  "workspaceId": "workspace-abc123def456",
+  "path": "docs/diagrams",
+  "modifiedAt": "2026-08-29T00:00:00.000Z",
+  "created": true
+}
+```
+
+Success returns `201` and the new directory's `modifiedAt`, so it is immediately
+a rename, move, paste, or delete target without a second read. It emits
+`workspace_directory_created` (`workspaceId`, `workspacePath`, `path`) and is
+deliberately the one mutation that does **not** invalidate the workspace file
+index: that index enumerates files, and an empty directory contributes none — the
+first write inside it is a create, which invalidates then. Status codes: `400`
+for an invalid payload, an out-of-bounds path, an over-long leaf name, or the
+workspace root; `401` when the configured bearer token is missing; `404` for an
+unknown workspace or a parent directory that does not exist; `409` when the name
+is already taken by a file or a directory; and `415` for a secret-named or
+generated-directory path.
+
+`POST /api/workspaces/:workspaceId/entry/rename` renames one regular file or
+directory within its current parent. It is not a move endpoint and never
+overwrites another entry.
+
+```json
+{
+  "path": "docs/notes.md",
+  "newName": "ideas.md",
+  "baseModifiedAt": "2026-06-14T00:00:00.000Z"
+}
+```
+
+`newName` is one trimmed leaf name, at most 255 UTF-8 bytes. `/`, `.`, `..`,
+secret/generated names, and names that would resolve to another existing
+sibling are refused. `baseModifiedAt` must match the selected entry's current
+mtime. A same-name request succeeds as an idempotent no-op; a same-inode
+case-only rename is allowed on case-insensitive Mac filesystems only when both
+spellings resolve to the same directory entry. A distinct hard link remains an
+occupied sibling and returns `409`. The response contains the old and new
+workspace-relative paths:
+
+```json
+{
+  "workspaceId": "workspace-abc123def456",
+  "oldPath": "docs/notes.md",
+  "path": "docs/ideas.md",
+  "entryType": "file",
+  "sizeBytes": 128,
+  "renamed": true
+}
+```
+
+`sizeBytes` is present for files and omitted for directories. A successful
+change invalidates the file index and emits `workspace_entry_renamed` with the
+same fields plus `workspacePath`; a no-op emits no event. Status codes: `400`
+for an invalid payload, path, or leaf name; `401` when the configured bearer
+token is missing; `404` for an unknown workspace/entry/parent; `409` for a stale
+token or occupied destination; and `415` for a symlink, unsupported entry type,
+or protected path.
+
+The no-overwrite rule also holds if another process creates the destination
+after validation: files claim the new name with an exclusive hard link before
+removing the old link, while directories reserve the new name before renaming.
+
+`POST /api/workspaces/:workspaceId/entry/move` relocates one regular file or
+directory to another folder in the same workspace. It is rename generalized to
+a second directory and runs the same implementation, so it inherits the whole
+no-overwrite contract above.
+
+```json
+{
+  "path": "docs/notes.md",
+  "destinationParent": "docs/archive",
+  "newName": "notes.md",
+  "baseModifiedAt": "2026-06-14T00:00:00.000Z"
+}
+```
+
+`destinationParent` is required and may be empty: `""` is the workspace root, a
+real destination rather than an omission. It is bounded exactly as every other
+written parent is (lexical normalization, realpath containment,
+secret/generated refusal on both the caller's text and the resolved path) and
+must already be a directory. `newName` is optional; omitting it keeps the
+entry's own name, which is what a plain paste into another folder does.
+`baseModifiedAt` must match the entry's current mtime.
+
+The response matches the rename route's, with `moved` in place of `renamed`:
+
+```json
+{
+  "workspaceId": "workspace-abc123def456",
+  "oldPath": "docs/notes.md",
+  "path": "docs/archive/notes.md",
+  "entryType": "file",
+  "sizeBytes": 128,
+  "moved": true
+}
+```
+
+A move to the entry's existing path is an idempotent no-op that emits no event,
+including when the destination parent uses an in-workspace symlink spelling
+that resolves back to that same path.
+A successful change invalidates the file index and emits `workspace_entry_moved`
+with the same fields as the rename event plus `workspacePath`, so a client
+re-keys the old path identically. There is deliberately no collision strategy:
+silently renaming an entry someone asked to move would apply a decision they did
+not make, so an occupied destination is a `409`. Status codes: `400` for an
+invalid payload, an out-of-bounds path, or a folder moving into itself or a
+descendant; `401` when the configured bearer token is missing; `404` for an
+unknown workspace, entry, or destination parent; `409` for a stale token or an
+occupied destination; and `415` for a symlink, an unsupported entry type, a
+protected path, a destination that is not a directory, or a destination on
+another filesystem.
+
+`POST /api/workspaces/:workspaceId/entry/copy` duplicates one regular file or
+directory inside the same workspace. The source is never touched.
+
+```json
+{
+  "path": "docs/notes.md",
+  "destinationParent": "docs/archive",
+  "baseModifiedAt": "2026-06-14T00:00:00.000Z",
+  "onCollision": "keep_both"
+}
+```
+
+`path`, `destinationParent`, `newName`, and `baseModifiedAt` mean exactly what
+they mean for a move. `baseModifiedAt` is required even though nothing is
+removed: it is what makes the result a copy of the entry the client actually
+rendered, and a stale token is a `409` telling it to re-read and copy again.
+
+`onCollision` is `fail` (the default, the same refusal rename gives) or
+`keep_both`, which takes the next name on a bounded `-2`…`-5` ladder that
+suffixes the stem rather than the extension (`notes.md` → `notes-2.md`,
+`.gitignore` → `.gitignore-2`) and then refuses. The response reports the name
+it actually took, so a client never guesses one.
+
+Unlike the file PUT, a copy's bytes never transit this API, so the 256 KB body
+cap does not apply to it. It is bounded by the recursive-delete caps instead —
+20,000 entries and 1 GiB — applied to a single file as much as to a tree, and
+it refuses symlinks, protected or generated names, and unsupported entry types
+the same way. The whole subtree is inventoried before a byte is written, and
+the result is staged beside the destination and published under the chosen name
+only once complete, so a failed copy leaves nothing partial behind. The copy
+pass does not trust that preflight: it rechecks directories around their
+listing, opens every regular file with `O_NOFOLLOW`, verifies that the opened
+device/inode, size, and mtime match the selected entry, reads through that
+pinned handle under the byte cap, and stats it again before publication. A
+source replaced with a symlink or another inode therefore fails with `409`, and
+the returned counts describe the completed copy pass.
+
+```json
+{
+  "workspaceId": "workspace-abc123def456",
+  "sourcePath": "docs/notes.md",
+  "path": "docs/archive/notes-2.md",
+  "entryType": "file",
+  "fileCount": 1,
+  "directoryCount": 0,
+  "sizeBytes": 128,
+  "copied": true
+}
+```
+
+A file reports `fileCount: 1` and `directoryCount: 0`; a directory reports its
+inventory, with `directoryCount` including the copied directory itself. Success
+returns `201`, invalidates the file index, and emits `workspace_entry_copied`
+with the same fields plus `workspacePath`. It carries `sourcePath` rather than
+`oldPath` because a copy vacates nothing. Status codes: `400` for an invalid
+payload, an out-of-bounds path, or a folder copied into itself or a descendant;
+`401` when the configured bearer token is missing; `404` for an unknown
+workspace, entry, or destination parent; `409` for a stale token, an occupied
+destination under `fail`, or an exhausted ladder under `keep_both`; `413` when
+the source exceeds an inventory cap; and `415` for a symlink, an unsupported
+entry type, a protected path, or a destination that is not a directory.
+
+`DELETE /api/workspaces/:workspaceId/directory` recursively removes one
+directory after a complete bounded preflight.
+
+```json
+{
+  "path": "docs/generated",
+  "baseModifiedAt": "2026-06-14T00:00:00.000Z"
+}
+```
+
+The path must name a directory below the workspace root, and `baseModifiedAt`
+must match its current mtime. Before removing anything, the backend inventories
+the whole subtree and refuses protected/generated names, symlinks,
+socket/device/other unsupported entries, more than 20,000 entries including the
+selected directory, or more than 1 GiB of regular-file data. It rechecks the
+selected directory's type and mtime after the inventory, then removes that one
+directory recursively. Any preflight failure leaves the subtree untouched.
+
+```json
+{
+  "workspaceId": "workspace-abc123def456",
+  "path": "docs/generated",
+  "fileCount": 18,
+  "directoryCount": 4,
+  "sizeBytes": 24576,
+  "deleted": true
+}
+```
+
+`directoryCount` includes the selected directory. Success invalidates the file
+index and emits `workspace_directory_deleted` with the same counts plus
+`workspacePath`, never content. Status codes: `400` for an invalid/root/out-of-
+bounds path; `401` when the configured bearer token is missing; `404` for an
+unknown workspace/directory/parent; `409` for a stale or concurrently changed
+selected directory; `413` when an inventory cap is exceeded; and `415` for a
+file target, symlink, protected subtree, or unsupported entry type.
 
 `GET /api/workspaces/:workspaceId/git/status` returns canonical file-level Git
 dirty status for a registered workspace. The route uses fixed read-only Git
@@ -1999,6 +2277,12 @@ takes more than 250 ms.
 - `workspace_removed`
 - `workspace_branch_changed`
 - `workspace_file_written`
+- `workspace_file_deleted`
+- `workspace_directory_created`
+- `workspace_directory_deleted`
+- `workspace_entry_renamed`
+- `workspace_entry_moved`
+- `workspace_entry_copied`
 - `workspace_git_operation`
 - `config_reloaded`
 - `editor_catalog_changed`

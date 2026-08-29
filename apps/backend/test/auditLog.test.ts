@@ -117,6 +117,65 @@ describe("FileAuditLogStore", () => {
     ]);
   });
 
+  it("persists file deletion as workspace metadata without file content", async () => {
+    const serviceConfig = await config();
+    const eventBus = new EventBus();
+    const store = new FileAuditLogStore(serviceConfig);
+    await store.initialize();
+    store.attach(eventBus);
+
+    eventBus.publish("workspace_file_deleted", {
+      workspaceId: "workspace-1",
+      workspacePath: "/tmp/agentroom/project",
+      path: "notes/private.md",
+      sizeBytes: 42
+    });
+    await store.flush();
+
+    const entries = store.getRecent(10);
+    expect(entries).toEqual([
+      expect.objectContaining({
+        type: "workspace_file_deleted",
+        workspaceId: "workspace-1",
+        workspacePath: "/tmp/agentroom/project"
+      })
+    ]);
+    expect(JSON.stringify(entries)).not.toContain("notes/private.md");
+  });
+
+  it("persists rename and directory deletion without their relative paths", async () => {
+    const serviceConfig = await config();
+    const eventBus = new EventBus();
+    const store = new FileAuditLogStore(serviceConfig);
+    await store.initialize();
+    store.attach(eventBus);
+
+    eventBus.publish("workspace_entry_renamed", {
+      workspaceId: "workspace-1",
+      workspacePath: "/tmp/agentroom/project",
+      oldPath: "private/old.md",
+      path: "private/new.md",
+      entryType: "file"
+    });
+    eventBus.publish("workspace_directory_deleted", {
+      workspaceId: "workspace-1",
+      workspacePath: "/tmp/agentroom/project",
+      path: "private/archive",
+      fileCount: 4,
+      directoryCount: 2,
+      sizeBytes: 128
+    });
+    await store.flush();
+
+    const entries = store.getRecent(10);
+    expect(entries.map((entry) => entry.type)).toEqual([
+      "workspace_entry_renamed",
+      "workspace_directory_deleted"
+    ]);
+    expect(entries.every((entry) => entry.workspaceId === "workspace-1")).toBe(true);
+    expect(JSON.stringify(entries)).not.toContain("private/");
+  });
+
   it("does not persist raw agent update messages", async () => {
     const serviceConfig = await config();
     const eventBus = new EventBus();
