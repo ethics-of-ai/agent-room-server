@@ -102,16 +102,17 @@ describe("Cursor message mapper", () => {
     expect(second[0]).toMatchObject({ type: "token_usage_updated", inputTokens: 15, outputTokens: 5, contextWindowUsedTokens: 8 });
   });
 
-  it("gives status, request, task, and user messages no canonical reading", () => {
+  it("gives status, request, and user messages no canonical reading", () => {
     for (const message of [
       { type: "status", status: "FINISHED" },
       { type: "request", request_id: "r1" },
-      { type: "task", text: "sub-agent" },
       { type: "user", message: { role: "user", content: [] } },
       { type: "system", subtype: "init", agent_id: "agent-1" }
     ]) {
       expect(mapCursorMessage(message, ctx())).toEqual([]);
     }
+    // `task` is the conversation summary rather than a sub-agent, and it is the
+    // one compaction state this SDK lets through — see contextCompaction.test.ts.
   });
 
   it("forwards only the shell-output delta as tool output", () => {

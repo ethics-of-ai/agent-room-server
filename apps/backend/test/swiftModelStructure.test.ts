@@ -212,7 +212,7 @@ describe("Swift model structure", () => {
       "WorkspaceInspectorMode",
       "WorkspaceInspectorView",
       "WorkspaceSceneConversationLayoutStyle",
-      "WorkspaceSceneMessageRole",
+      "ThreadMessageRole",
       "WorkspaceScenePromptDeck",
       "WorkspaceSceneTurnActions",
       "WorkspaceSceneTurnContainer",

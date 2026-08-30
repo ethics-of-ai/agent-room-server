@@ -630,6 +630,73 @@ describe("agent sessions", () => {
     ]));
   });
 
+  it("carries a runner's compaction threshold onto the session and both usage events", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
+    const registry = new LocalWorkspaceRegistry(serviceConfig);
+    const registered = await registry.register({ path: selectedDirectory });
+    const eventBus = new EventBus();
+    const service = newAgentSessionService(registry, { codex: compactionThresholdRunner() }, eventBus);
+    const session = await service.createSession({ workspaceId: registered.workspace.id });
+    await service.startTurn({ sessionId: session.id, message: "read the threshold" });
+
+    const settled = await waitForServiceSession(service, session.id, "idle");
+    expect(settled.contextCompactionThresholdTokens).toBe(160_000);
+
+    // Both events are built from the turn record, so they also prove the turn
+    // carried the value. Nothing here knows which runner reported it.
+    const usageEvents = eventBus.getRecentEvents().filter((event) =>
+      event.type === "agent_turn_token_usage_updated" || event.type === "coding_token_usage_updated"
+    );
+    expect(usageEvents).toHaveLength(2);
+    for (const event of usageEvents) {
+      expect(event.payload).toMatchObject({ contextCompactionThresholdTokens: 160_000 });
+    }
+  });
+
+  it("leaves the compaction threshold absent for a runner that reports none", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
+    const registry = new LocalWorkspaceRegistry(serviceConfig);
+    const registered = await registry.register({ path: selectedDirectory });
+    const eventBus = new EventBus();
+    const service = newAgentSessionService(registry, { codex: compactionThresholdRunner({ reportThreshold: false }) }, eventBus);
+    const session = await service.createSession({ workspaceId: registered.workspace.id });
+    await service.startTurn({ sessionId: session.id, message: "report occupancy only" });
+
+    const settled = await waitForServiceSession(service, session.id, "idle");
+    expect(settled.contextWindowUsedTokens).toBe(12_000);
+    // Absent, not zero and not a share of the window.
+    expect(settled.contextCompactionThresholdTokens).toBeUndefined();
+    expect(JSON.stringify(eventBus.getRecentEvents())).not.toContain("contextCompactionThresholdTokens");
+  });
+
+  it("clears a stale compaction threshold when the runner explicitly removes it", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
+    const registry = new LocalWorkspaceRegistry(serviceConfig);
+    const registered = await registry.register({ path: selectedDirectory });
+    const eventBus = new EventBus();
+    const service = newAgentSessionService(registry, { codex: changingCompactionThresholdRunner() }, eventBus);
+    const session = await service.createSession({ workspaceId: registered.workspace.id });
+
+    await service.startTurn({ sessionId: session.id, message: "read the threshold" });
+    expect((await waitForServiceSession(service, session.id, "idle")).contextCompactionThresholdTokens).toBe(160_000);
+
+    const secondTurn = await service.startTurn({ sessionId: session.id, message: "disable compaction" });
+    const settled = await waitForServiceSession(service, session.id, "idle");
+    expect(settled.contextCompactionThresholdTokens).toBeUndefined();
+
+    const clearEvents = eventBus.getRecentEvents().filter((event) =>
+      event.payload.turnId === secondTurn.id
+        && (event.type === "agent_turn_token_usage_updated" || event.type === "coding_token_usage_updated")
+    );
+    expect(clearEvents).toHaveLength(2);
+    for (const event of clearEvents) {
+      expect(event.payload).toHaveProperty("contextCompactionThresholdTokens", null);
+    }
+  });
+
   it("ignores late runner failures after a session is deleted mid-turn", async () => {
     const serviceConfig = await config();
     const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
@@ -1264,6 +1331,49 @@ function lateTokenUsageAfterCancelRunner(): AgentRunner & { completed: Promise<v
     async cancel() {
       releaseCancel();
     }
+  };
+}
+
+/**
+ * A runner reporting live occupancy, with or without the auto-compaction
+ * threshold beside it. Only the runner can supply that threshold, and nothing
+ * in the service reads which runner did.
+ */
+function compactionThresholdRunner({ reportThreshold = true }: { reportThreshold?: boolean } = {}): AgentRunner {
+  return {
+    async getCapabilities() {
+      return { runnerKind: "codex", settings: { models: [], defaultSettings: {} } };
+    },
+    validateInputParts() {},
+    async *run() {
+      yield {
+        type: "token_usage_updated",
+        contextWindowUsedTokens: 12_000,
+        ...(reportThreshold ? { contextCompactionThresholdTokens: 160_000 } : {})
+      };
+      yield { type: "run_succeeded", message: "done" };
+    },
+    async cancel() {}
+  };
+}
+
+function changingCompactionThresholdRunner(): AgentRunner {
+  let runCount = 0;
+  return {
+    async getCapabilities() {
+      return { runnerKind: "codex", settings: { models: [], defaultSettings: {} } };
+    },
+    validateInputParts() {},
+    async *run() {
+      runCount += 1;
+      yield {
+        type: "token_usage_updated",
+        contextWindowUsedTokens: 12_000,
+        contextCompactionThresholdTokens: runCount === 1 ? 160_000 : null
+      };
+      yield { type: "run_succeeded", message: "done" };
+    },
+    async cancel() {}
   };
 }
 

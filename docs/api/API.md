@@ -444,6 +444,19 @@ default. When a runner reports `contextWindowUsedTokens` without either
 capacity field, clients can still show the latest request footprint but must
 not present the missing capacity as still loading indefinitely.
 
+Beside those sits `contextCompactionThresholdTokens`, the occupancy at which
+the session's runner auto-compacts. Only a runner that publishes the number
+reports one. Claude Code reads it from the live CLI child at turn start; Codex
+keeps its limit internal, Cursor summarizes on a schedule it does not publish,
+and DeepSeek reports nothing. Absence therefore means unknown, never "this
+runner does not compact", and a client must render that absence as absence
+rather than drawing a line at some share of the capacity. A failed, timed-out,
+or unsupported threshold read supplies no new knowledge and preserves the last
+runner-reported value. A valid Claude Code response that says auto-compaction
+is disabled, or has no usable threshold, clears the cached value. The value is
+persisted with the session record, so a restored thread carries its pre-restart
+threshold until a later authoritative read replaces or clears it.
+
 ## Editor Language Catalog
 
 These routes let the visionOS editor source its syntax-highlighting assets
@@ -2020,9 +2033,16 @@ fields such as:
   "reasoningOutputTokens": 15,
   "totalTokens": 14920,
   "contextWindowUsedTokens": 14920,
-  "modelContextWindowTokens": 258400
+  "modelContextWindowTokens": 258400,
+  "contextCompactionThresholdTokens": 232560
 }
 ```
+
+`contextCompactionThresholdTokens` is a positive integer when a runner replaces
+its known threshold and JSON `null` when that runner explicitly clears a value
+it reported earlier. Omission carries no new threshold knowledge. These are the
+terms described under Coding Agent Capabilities above; the other fields are
+unchanged.
 
 `POST /api/agent-sessions/:sessionId/attachments` stores a session-scoped image
 attachment uploaded with `multipart/form-data` field `file`. The first supported
@@ -2270,6 +2290,8 @@ takes more than 250 ms.
 - `coding_permission_resolved`
 - `coding_question_requested`
 - `coding_question_resolved`
+- `coding_context_compaction_started`
+- `coding_context_compaction_completed`
 - `coding_turn_completed`
 - `coding_turn_failed`
 - `coding_turn_cancelled`
@@ -2325,7 +2347,8 @@ turn-scoped `turnId` where applicable.
 `canonical` object whose `kind` is one of `session_started`, `turn_started`,
 `plan_updated`, `diff_updated`, `reasoning`, `tool_started`, `tool_output`,
 `tool_completed`, `permission_requested`, `permission_resolved`,
-`question_requested`, or `question_resolved`. A client
+`question_requested`, `question_resolved`, `context_compaction_started`, or
+`context_compaction_completed`. A client
 decides what an activity *is* from that, never from the activity's native
 `kind` string, which stays beside it for display and diagnostics. For the three
 tool kinds it also carries `toolId` — the stable per-call id that is identical
@@ -2353,8 +2376,11 @@ either runner arrive as `coding_tool_activity_updated` with
 `activity.canonical.kind: "reasoning"`.
 `coding_token_usage_updated` includes cumulative token fields,
 `contextWindowUsedTokens` (live context-window occupancy from the latest model
-request — see the turns section), and `modelContextWindowTokens` when Codex
-reports the live thread's effective model window.
+request — see the turns section), `modelContextWindowTokens` when Codex
+reports the live thread's effective model window, and
+`contextCompactionThresholdTokens` as a positive integer when the runner
+publishes one, or JSON `null` when it explicitly clears its previous value.
+Omission carries no new threshold knowledge.
 `coding_diff_updated` includes a bounded per-file `files` summary. A renamed
 file's entry carries the destination as `path` and the source as an optional
 `oldPath` — populated from the Git-status rename entry on the settle-time
@@ -2463,6 +2489,34 @@ option ids — never the free text.
 Added under contract version 2: both event types and both canonical kinds are
 additive, their new fields optional or self-contained, and a client that
 predates them ignores them.
+
+`coding_context_compaction_started` and `coding_context_compaction_completed`
+report that the runner summarized its own conversation and now holds less of
+it. They exist because without them a long thread's occupancy falls between two
+turns with nothing on screen saying why, and the transcript above that point is
+a conversation the agent no longer holds in full. The started event carries the
+usual identifiers and nothing more. The completed event may add `trigger`
+(`auto` or `manual`), `preTokens` and `postTokens` for the occupancy either
+side of it, and `failed` when the compaction was attempted and did not succeed,
+which is the one case where occupancy did not fall. Each is optional because
+the runners report different amounts: Claude Code sends both events with the
+trigger and both counts, Codex sends both with no trigger and no counts, Cursor
+sends the completed event alone, and DeepSeek sends neither event at all. A
+compaction with no counts is
+still worth showing, so a client should render what arrived rather than waiting
+for a complete set.
+
+The compaction's own summary is never on this stream. It is the model's account
+of everything the thread has done, and it stops at the backend's adapter rather
+than reaching the payload, the activity `content` block, the transcript, the
+recent-event buffer, or durable audit. See `docs/safety/TRUST_AND_SAFETY.md`.
+
+Where a runner reports the occupancy left afterwards, its adapter also emits an
+ordinary `coding_token_usage_updated` carrying that number, so the drop and its
+cause land in the same tick on the path every other occupancy report already
+takes. Nothing above the runner boundary learns what a compaction is. Both
+event types and both canonical kinds are additive under contract version 2,
+which does not move.
 
 `workspace_git_operation` fires for each mutating Git operation (see the routes
 above). It is sanitized like the terminal payloads: `workspaceId`,

@@ -507,6 +507,21 @@ through the fixed session cancel endpoint. It does not create sessions, send
 turns, choose model settings, select file context, upload attachments, or run
 Codex directly.
 
+A thread's context-window bar also marks where its runner auto-compacts, when
+the session carries a `contextCompactionThresholdTokens`. The mark is a hairline
+at the threshold's share of the window, and because VoiceOver reads a hairline
+as nothing at all, the headroom sentence under the bar is what actually carries
+the number ("475,000 tokens before compaction at 600,000", or "At the 600,000
+token compaction threshold" once a turn has reached the line). A threshold that
+arrives before any capacity still names itself in that sentence with no mark
+drawn. Only a runner that publishes the number gets either: Codex keeps its
+limit internal and Cursor summarizes on a schedule it does not publish, so a
+line drawn at some fraction of capacity for those would be one this app made up.
+When the reporting runner explicitly clears its threshold, the persisted session
+field disappears and the Mac removes both the mark and its headroom sentence.
+The recent-events list also names both compaction events, with the completed row
+reporting the counts when the runner supplied them.
+
 Development builds locate `apps/backend/dist/index.js`, so build the backend
 before launching the app from Xcode:
 

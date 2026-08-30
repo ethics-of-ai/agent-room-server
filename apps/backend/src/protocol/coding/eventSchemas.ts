@@ -35,6 +35,8 @@ export const codingAgentEventTypeSchema = z.enum([
   "coding_permission_resolved",
   "coding_question_requested",
   "coding_question_resolved",
+  "coding_context_compaction_started",
+  "coding_context_compaction_completed",
   "coding_turn_completed",
   "coding_turn_failed",
   "coding_turn_cancelled"
@@ -231,6 +233,21 @@ export const codingQuestionAnswerSchema = z.object({
 export const codingQuestionAnswersSchema = z.array(codingQuestionAnswerSchema).min(1).max(MAX_QUESTION_SETS);
 
 /**
+ * What a completed context compaction reports, shared by the canonical
+ * activity and the wire payload so the two cannot drift.
+ *
+ * The compaction's summary is not here and never will be: it is the model's
+ * own account of the whole conversation, and it stops at the adapter. What
+ * crosses is a trigger word and two integers.
+ */
+const codingContextCompactionFields = {
+  trigger: z.enum(["auto", "manual"]).optional(),
+  preTokens: z.number().int().nonnegative().optional(),
+  postTokens: z.number().int().nonnegative().optional(),
+  failed: z.boolean().optional()
+};
+
+/**
  * The runner-agnostic reading of one activity, produced by the adapter. A
  * client decides what an activity *is* from `kind` here — never from the
  * activity's native `kind` string, which stays beside it as display and
@@ -278,6 +295,14 @@ export const codingCanonicalActivitySchema = z.discriminatedUnion("kind", [
     status: z.string().optional(),
     decidedBy: z.string().optional(),
     questionAnswers: codingQuestionAnswersSchema.optional()
+  }),
+  z.object({ kind: z.literal("context_compaction_started") }),
+  // Every field is optional because the runners report different amounts, and
+  // a compaction with no counts is still worth showing. `trigger` is closed
+  // here because only one runner reports it and it reports exactly these two.
+  z.object({
+    kind: z.literal("context_compaction_completed"),
+    ...codingContextCompactionFields
   })
 ]);
 
@@ -318,7 +343,10 @@ export const codingAgentEventPayloadSchema = z.discriminatedUnion("type", [
     reasoningOutputTokens: z.number().int().nonnegative().optional(),
     totalTokens: z.number().int().nonnegative().optional(),
     contextWindowUsedTokens: z.number().int().nonnegative().optional(),
-    modelContextWindowTokens: z.number().int().positive().optional()
+    modelContextWindowTokens: z.number().int().positive().optional(),
+    // A positive value replaces the runner-owned threshold; null explicitly
+    // clears one it reported earlier. Omission carries no new knowledge.
+    contextCompactionThresholdTokens: z.number().int().positive().nullable().optional()
   }),
   baseCodingPayloadSchema.extend({
     type: z.literal("coding_assistant_message_delta"),
@@ -417,6 +445,18 @@ export const codingAgentEventPayloadSchema = z.discriminatedUnion("type", [
     decidedBy: z.string().optional(),
     /** What was chosen per answered set. A sensitive set's text is never here. */
     questionAnswers: codingQuestionAnswersSchema.optional()
+  }),
+  // Additive under contract version 2: the event `type` and the canonical
+  // `kind` are open vocabularies a client ignores when it does not recognize
+  // them, so an older client skips both of these rather than failing a decode.
+  baseCodingPayloadSchema.extend({
+    type: z.literal("coding_context_compaction_started"),
+    turnId: z.string().min(1)
+  }),
+  baseCodingPayloadSchema.extend({
+    type: z.literal("coding_context_compaction_completed"),
+    turnId: z.string().min(1),
+    ...codingContextCompactionFields
   }),
   baseCodingPayloadSchema.extend({
     type: z.literal("coding_turn_completed"),

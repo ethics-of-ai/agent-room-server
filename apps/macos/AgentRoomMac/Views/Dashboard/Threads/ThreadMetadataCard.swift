@@ -52,7 +52,9 @@ struct ThreadMetadataCard: View {
 
             ThreadContextWindowView(
                 fraction: session.threadContextUsageFraction,
-                label: session.threadContextUsageLabel
+                compactionFraction: session.threadContextCompactionFraction,
+                label: session.threadContextUsageLabel,
+                compactionLabel: session.threadContextCompactionLabel
             )
 
             // The pretty-printed encode of the whole session runs only while the

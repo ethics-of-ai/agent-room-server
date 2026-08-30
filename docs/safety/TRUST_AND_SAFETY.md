@@ -583,6 +583,61 @@ Current posture:
     ordinary assistant prose. Codex's per-thread enable flags are explicitly
     pinned false so a user-global Codex config cannot bypass the switch, and a
     defensive request handler returns an empty answer if a process asks anyway.
+- **Context compaction is reported, and reporting it adds no surface.** A runner
+  that summarizes its own conversation to free context announces it, and three
+  of the four bundled runners already did while the adapters discarded it: a
+  long thread's occupancy fell between two turns with nothing saying why, and
+  the transcript above that point was a conversation the agent no longer held in
+  full. Two canonical activity kinds now carry it
+  (`context_compaction_started` and `context_compaction_completed`, on the
+  matching `coding_context_compaction_*` event types) and one optional field
+  reports where a runner's auto-compaction fires. There
+  is no route, managed setting, gate, bound, descriptor field, or write path,
+  and no way to *trigger* a compaction: this channel only observes one. Posture:
+  - **The compaction summary never leaves the adapter.** Cursor's `task` message
+    is the model's own summary of the conversation, and a Codex compaction item
+    may carry content. That is model-authored text of unbounded length
+    describing everything the thread has done. It reaches neither the canonical
+    payload, the activity `content` block, the transcript, the recent-event
+    buffer that `/api/logs` and `/api/status` serve ungated, nor durable audit.
+    What crosses the `AgentRunner` boundary is a trigger word and two integers,
+    and for Cursor only the kind. Claude Code's `compact_error` is dropped on the
+    same rule: it is the child's own text, and the `failed` flag is what a reader
+    actually needs.
+  - **The threshold is read, never invented.** `contextCompactionThresholdTokens`
+    is owned only by a runner that supplies the number. Claude Code does;
+    Codex keeps its limit internal, Cursor summarizes on a schedule it does not
+    publish, and DeepSeek reports nothing. Drawing the line at a share of the
+    context window for the others would be a behavioral decision keyed to runner
+    identity, living outside `runner/` where
+    `apps/backend/test/runnerRegistry.test.ts` fails the build on it, and it
+    would also just be wrong. Absence is reported as absence, the same rule
+    `runner/runtimeReadiness.ts` applies to an unprobed runner's `ready`: not
+    known is not zero, and a default would be the same lie inverted. A failed,
+    timed-out, unsupported, or malformed control read preserves the last known
+    runner value; a valid response that disables auto-compaction or supplies no
+    usable threshold explicitly clears it. Clients render the resulting absence
+    rather than substituting a fraction of their own.
+  - **The read initiates nothing.** The Claude Code adapter calls the SDK's
+    `get_context_usage` control request at turn start, against the child the
+    turn's prompt is about to go to, bounded at five seconds and never awaited.
+    It is a control round trip rather than a model call, so it costs no tokens,
+    and it spawns nothing, resumes nothing, and is never performed to answer a
+    request. Answering a display question by starting a child is what the
+    readiness surface already refuses to do. A failed, timed out, unsupported,
+    or malformed read is silent and preserves the last known value; a valid
+    switched-off response clears it. Neither path surfaces a control-read error.
+  - **The occupancy correction is an ordinary token-usage report.** When a
+    compaction reports the occupancy left afterwards, the adapter emits a
+    `token_usage_updated` beside the activity, on the path that already carries
+    every other occupancy report. The threshold takes that same path. Both are
+    persisted with the session record like the context window beside them, so a
+    restored thread shows what its last turn read until an authoritative response
+    replaces or clears it; an event with no threshold knowledge leaves the value
+    alone.
+  - **Nothing reads a runner's name.** The kinds come from adapters, and the
+    threshold event carries a number, an explicit clear, or no new knowledge.
+    No code above the `AgentRunner` boundary branches on which runner compacted.
 - The API does not expose arbitrary shell execution.
 - Bounded harness actions use fixed command templates, require registered
   workspace paths, and reject resolved project paths outside that workspace.

@@ -1120,6 +1120,12 @@ public struct AgentSession: Codable, Hashable, Identifiable {
     public var settings: CodingAgentTurnSettings?
     public var modelContextWindowTokens: Int?
     public var contextWindowUsedTokens: Int?
+    /// Where this session's runner auto-compacts, when it reports a threshold.
+    /// Absent means unknown, never "this runner does not compact": only Claude
+    /// Code publishes a number, so a reader shows absence rather than a line
+    /// the client picked. The backend persists it, so a restored thread carries
+    /// the value its last turn read until a new turn refreshes it.
+    public var contextCompactionThresholdTokens: Int?
     public var title: String?
     public var status: String
     public var activeTurnId: String?
@@ -1138,6 +1144,7 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         settings: CodingAgentTurnSettings? = nil,
         modelContextWindowTokens: Int? = nil,
         contextWindowUsedTokens: Int? = nil,
+        contextCompactionThresholdTokens: Int? = nil,
         title: String?,
         status: String,
         activeTurnId: String?,
@@ -1155,6 +1162,7 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         self.settings = settings
         self.modelContextWindowTokens = modelContextWindowTokens
         self.contextWindowUsedTokens = contextWindowUsedTokens
+        self.contextCompactionThresholdTokens = contextCompactionThresholdTokens
         self.title = title
         self.status = status
         self.activeTurnId = activeTurnId
@@ -1178,6 +1186,8 @@ public struct AgentSessionTurn: Codable, Hashable, Identifiable {
     public var outputTokens: Int
     public var totalTokens: Int
     public var modelContextWindowTokens: Int?
+    /// The threshold this turn read, on the same terms as the session's copy.
+    public var contextCompactionThresholdTokens: Int?
 
     public init(
         id: String,
@@ -1190,7 +1200,8 @@ public struct AgentSessionTurn: Codable, Hashable, Identifiable {
         inputTokens: Int,
         outputTokens: Int,
         totalTokens: Int,
-        modelContextWindowTokens: Int? = nil
+        modelContextWindowTokens: Int? = nil,
+        contextCompactionThresholdTokens: Int? = nil
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -1203,6 +1214,7 @@ public struct AgentSessionTurn: Codable, Hashable, Identifiable {
         self.outputTokens = outputTokens
         self.totalTokens = totalTokens
         self.modelContextWindowTokens = modelContextWindowTokens
+        self.contextCompactionThresholdTokens = contextCompactionThresholdTokens
     }
 }
 
@@ -1652,6 +1664,12 @@ public extension AgentRoomEvent {
         payload.objectValue?[key]?.intValue
     }
 
+    func hasExplicitNullValue(for key: String) -> Bool {
+        guard let value = payload.objectValue?[key] else { return false }
+        if case .null = value { return true }
+        return false
+    }
+
     func nestedIntValue(_ keys: String...) -> Int? {
         var current: JSONValue? = payload
         for key in keys {
@@ -1722,6 +1740,8 @@ public struct CodingAgentEventType: RawRepresentable, Codable, Hashable, Sendabl
     public static let permissionResolved = CodingAgentEventType(rawValue: "coding_permission_resolved")
     public static let questionRequested = CodingAgentEventType(rawValue: "coding_question_requested")
     public static let questionResolved = CodingAgentEventType(rawValue: "coding_question_resolved")
+    public static let contextCompactionStarted = CodingAgentEventType(rawValue: "coding_context_compaction_started")
+    public static let contextCompactionCompleted = CodingAgentEventType(rawValue: "coding_context_compaction_completed")
     public static let turnCompleted = CodingAgentEventType(rawValue: "coding_turn_completed")
     public static let turnFailed = CodingAgentEventType(rawValue: "coding_turn_failed")
     public static let turnCancelled = CodingAgentEventType(rawValue: "coding_turn_cancelled")
@@ -1752,6 +1772,8 @@ public struct CodingCanonicalActivityKind: RawRepresentable, Codable, Hashable, 
     public static let permissionResolved = CodingCanonicalActivityKind(rawValue: "permission_resolved")
     public static let questionRequested = CodingCanonicalActivityKind(rawValue: "question_requested")
     public static let questionResolved = CodingCanonicalActivityKind(rawValue: "question_resolved")
+    public static let contextCompactionStarted = CodingCanonicalActivityKind(rawValue: "context_compaction_started")
+    public static let contextCompactionCompleted = CodingCanonicalActivityKind(rawValue: "context_compaction_completed")
 }
 
 /// Only the fields that can reach an activity block. Plan and diff payloads
@@ -2117,6 +2139,24 @@ public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
     /// remains the cumulative billed total for the turn.
     public var contextWindowUsedTokens: Int?
     public var modelContextWindowTokens: Int?
+    /// On `coding_token_usage_updated`, where the runner auto-compacts. A JSON
+    /// number replaces the cached value, explicit null clears it, and omission
+    /// carries no new knowledge. Swift's optional collapses null and omission;
+    /// use `AgentRoomEvent.hasExplicitNullValue(for:)` when applying the event.
+    public var contextCompactionThresholdTokens: Int?
+    /// On `coding_context_compaction_completed`: what asked for the compaction
+    /// (`auto` or `manual`), and the occupancy either side of it. Every one of
+    /// these is optional because the runners report different amounts, and a
+    /// compaction with no counts is still worth showing.
+    ///
+    /// The compaction's own summary is never here. It is the model's account of
+    /// the whole conversation and it stops at the backend's adapter.
+    public var trigger: String?
+    public var preTokens: Int?
+    public var postTokens: Int?
+    /// The compaction was attempted and did not succeed, so occupancy did not
+    /// fall. Reads very differently from a compaction that worked.
+    public var failed: Bool?
     public var delta: String?
     public var explanation: String?
     public var plan: [CodingPlanStep]?
@@ -2172,6 +2212,11 @@ public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
         totalTokens: Int? = nil,
         contextWindowUsedTokens: Int? = nil,
         modelContextWindowTokens: Int? = nil,
+        contextCompactionThresholdTokens: Int? = nil,
+        trigger: String? = nil,
+        preTokens: Int? = nil,
+        postTokens: Int? = nil,
+        failed: Bool? = nil,
         delta: String? = nil,
         explanation: String? = nil,
         plan: [CodingPlanStep]? = nil,
@@ -2208,6 +2253,11 @@ public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
         self.totalTokens = totalTokens
         self.contextWindowUsedTokens = contextWindowUsedTokens
         self.modelContextWindowTokens = modelContextWindowTokens
+        self.contextCompactionThresholdTokens = contextCompactionThresholdTokens
+        self.trigger = trigger
+        self.preTokens = preTokens
+        self.postTokens = postTokens
+        self.failed = failed
         self.delta = delta
         self.explanation = explanation
         self.plan = plan

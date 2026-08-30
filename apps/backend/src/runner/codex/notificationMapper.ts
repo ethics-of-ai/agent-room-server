@@ -146,6 +146,34 @@ function activityFromNotification(notification: JsonRpcNotification): AgentRunne
     };
   }
 
+  // Ahead of the generic item branches below, and deliberately not by adding
+  // the type to RENDERABLE_ITEM_TYPES: that set is what makes an item a tool
+  // call, and a compaction is not one. Its own content is dropped rather than
+  // passed through, because a compaction item may carry the summary.
+  if (notification.method === "item/started" && isContextCompactionItem(params)) {
+    return {
+      kind: "codex_context_compaction_started",
+      title: "Compacting context",
+      content: {},
+      canonical: { kind: "context_compaction_started" },
+      runner
+    };
+  }
+
+  if (notification.method === "item/completed" && isContextCompactionItem(params)) {
+    return {
+      kind: "codex_context_compaction_completed",
+      title: "Context compacted",
+      content: {},
+      // Codex reports no counts and no trigger with the item, and this adapter
+      // does not invent either. `thread/compacted` is deliberately unmapped:
+      // whether it arrives, the item does, or both is unconfirmed, and mapping
+      // both would complete one compaction twice.
+      canonical: { kind: "context_compaction_completed" },
+      runner
+    };
+  }
+
   if (notification.method === "item/started") {
     const itemDisplay = itemDisplayInfo(params, "Item started");
     return {
@@ -228,6 +256,11 @@ function activityFromNotification(notification: JsonRpcNotification): AgentRunne
   }
 
   return undefined;
+}
+
+/** The `ThreadItem` variant Codex reports a context compaction as. */
+function isContextCompactionItem(params: Record<string, unknown> | undefined): boolean {
+  return stringValue(objectValue(params?.item)?.type) === "contextCompaction";
 }
 
 function isRenderableItem(params: Record<string, unknown> | undefined): boolean {

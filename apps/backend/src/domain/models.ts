@@ -575,6 +575,12 @@ export interface AgentSession {
   claudeCode?: ClaudeCodeSessionMetadata;
   modelContextWindowTokens?: number;
   contextWindowUsedTokens?: number;
+  /**
+   * Where the session's runner auto-compacts, when it reports a threshold.
+   * Absent means unknown. It is persisted with the record, so a restored
+   * thread shows the value its last turn read until a new turn refreshes it.
+   */
+  contextCompactionThresholdTokens?: number;
   title?: string;
   status: AgentSessionStatus;
   activeTurnId?: string;
@@ -597,6 +603,7 @@ export interface AgentSessionTurn {
   outputTokens: number;
   totalTokens: number;
   modelContextWindowTokens?: number;
+  contextCompactionThresholdTokens?: number;
 }
 
 export interface AgentSessionMessage {

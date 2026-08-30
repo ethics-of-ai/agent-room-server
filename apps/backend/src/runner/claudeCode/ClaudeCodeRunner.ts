@@ -13,6 +13,7 @@ import {
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { delay, withTimeout } from "../shared/asyncUtils";
 import { capabilitiesFromSupportedModels, fallbackClaudeCodeCapabilities } from "./capabilities";
+import { compactionThresholdFromContextUsage } from "./contextUsage";
 import {
   runnerMetadataFromMessage,
   completionFromClaudeCodeMessage,
@@ -80,6 +81,10 @@ const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000;
 // N resident claude processes; the recorded SDK session id lets the next turn
 // resume the conversation. Matches the terminal service's idle window.
 const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+
+// The same ceiling capability discovery puts on `supportedModels()`: both are
+// control round trips to a child that is expected to answer at once.
+const CONTEXT_USAGE_TIMEOUT_MS = 5_000;
 
 export class ClaudeCodeRunner implements AgentRunner {
   private readonly activeTurns = new Map<string, { session: ClaudeCodeRunnerSession; turn: ClaudeCodeActiveTurn }>();
@@ -233,6 +238,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
 
       await this.applyTurnSettings(session, settings);
+      this.readCompactionThreshold(session, activeTurn);
       activeTurn.queue.push({
         type: "agent_activity",
         activity: {
@@ -557,6 +563,41 @@ export class ClaudeCodeRunner implements AgentRunner {
       turn.finalEvent = { type: "run_failed", error };
       turn.queue.close();
     }
+  }
+
+  /**
+   * Report where this child's auto-compaction fires, on the turn it describes.
+   *
+   * Started at turn start rather than at settlement because
+   * `handleSessionMessage` closes the turn's queue synchronously on the
+   * `result` message: anything the runner learns after that has no open turn
+   * to ride, and holding the queue open would cost every settlement a control
+   * round trip. Turn start is also the stronger proof that the child is alive,
+   * since the prompt is about to go to it, and `applyTurnSettings` has already
+   * run, so the model this turn will use is final.
+   *
+   * Nothing is spawned, resumed, or awaited for it. The prompt never waits on
+   * a display value, and a failed, timed-out, or unsupported read is silent:
+   * no threshold, no surfaced error, and the badge renders exactly as it does
+   * today.
+   */
+  private readCompactionThreshold(session: ClaudeCodeRunnerSession, turn: ClaudeCodeActiveTurn): void {
+    const getContextUsage = session.query.getContextUsage;
+    if (!getContextUsage) return;
+    void withTimeout(
+      Promise.resolve(getContextUsage.call(session.query)),
+      CONTEXT_USAGE_TIMEOUT_MS,
+      "Timed out reading the Claude Code context usage"
+    ).then((usage) => {
+      const contextCompactionThresholdTokens = compactionThresholdFromContextUsage(usage);
+      // A settled turn has closed its queue; the next turn takes its own read.
+      if (contextCompactionThresholdTokens === undefined || turn.finalEvent) return;
+      turn.queue.push({
+        type: "token_usage_updated",
+        ...(session.sdkSessionId ? { runner: { nativeSessionId: session.sdkSessionId } } : {}),
+        contextCompactionThresholdTokens
+      });
+    }).catch(() => undefined);
   }
 
   private async applyTurnSettings(session: ClaudeCodeRunnerSession, settings: ClaudeCodeEffectiveSettings): Promise<void> {

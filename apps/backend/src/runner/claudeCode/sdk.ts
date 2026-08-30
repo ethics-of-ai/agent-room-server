@@ -7,6 +7,13 @@ export interface ClaudeCodeQuery extends AsyncIterable<unknown> {
   setModel?(model?: string): Promise<void>;
   applyFlagSettings?(settings: Record<string, unknown>): Promise<void>;
   supportedModels?(): Promise<unknown[]>;
+  /**
+   * The SDK's `get_context_usage` control request: a round trip to the live
+   * child rather than a model call, so reading it costs no tokens. Optional
+   * for the same reason `supportedModels` is: an SDK version without it must
+   * leave the runner working, with no threshold reported.
+   */
+  getContextUsage?(): Promise<unknown>;
   return?(value?: unknown): Promise<IteratorResult<unknown>>;
 }
 

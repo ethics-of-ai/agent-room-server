@@ -81,11 +81,12 @@ export function mapCursorMessage(
       const usage = objectValue(object.usage);
       return usage ? [usageEvent(usage, ctx.state, runner)] : [];
     }
+    case "task":
+      return compactionFromTask(object, runner);
     default:
       // `status` (settled by run/result), `request` (undocumented, fact 3),
-      // `task` (a sub-agent, no canonical home), `user` (AgentRoom holds the
-      // transcript), and `system` (session_started is the adapter's): no
-      // canonical reading, so no coding_* event.
+      // `user` (AgentRoom holds the transcript), and `system` (session_started
+      // is the adapter's): no canonical reading, so no coding_* event.
       return [];
   }
 }
@@ -174,6 +175,33 @@ function toolCallActivities(object: Record<string, unknown>, runner: RunnerMetad
   }
 
   return [];
+}
+
+/**
+ * The conversation summary, which is the one thing a local `task` message is.
+ * The SDK's `InteractionUpdate` → `SDKMessage` converter produces `type:
+ * "task"` for its `summary` case alone; a sub-agent rides a `tool_call` whose
+ * decoded arguments carry `type: "task"` instead. Summarization is server-side
+ * and its two state updates never reach a public path, so this is the only
+ * compaction state Cursor can report.
+ *
+ * The text is read for its presence and copied nowhere. It is the model's own
+ * summary of the whole conversation, and it dies here.
+ */
+function compactionFromTask(object: Record<string, unknown>, runner: RunnerMetadata): AgentRunnerEvent[] {
+  // The declared shape carries a status, but no producer for one has been
+  // observed on this path. A `task` that has one is left unread rather than
+  // reported as a compaction it may not be.
+  if (object.status !== undefined) return [];
+  if (!stringValue(object.text)) return [];
+  return [activity({
+    kind: "cursor_context_compaction_completed",
+    title: "Context compacted",
+    content: {},
+    // No counts and no trigger: nothing on this wire reports either.
+    canonical: { kind: "context_compaction_completed" },
+    runner
+  })];
 }
 
 function planStepsFrom(name: string, args: unknown): CanonicalPlanStep[] | undefined {

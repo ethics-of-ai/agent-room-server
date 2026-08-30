@@ -49,6 +49,38 @@ extension AgentSession {
         return "\(used.formatted()) / \(window.formatted()) tokens (\(percent.formatted(.percent.precision(.fractionLength(1)))))"
     }
 
+    /// Where the runner auto-compacts, as a share of the context window, so the
+    /// bar can mark it. Only a runner that publishes a threshold has one, and
+    /// the mark is simply absent for the rest: a line drawn at some fraction of
+    /// capacity for a runner that keeps its limit internal would be ours, not
+    /// the runner's.
+    var threadContextCompactionFraction: Double? {
+        guard let threshold = contextCompactionThresholdTokens,
+              threshold > 0,
+              let window = modelContextWindowTokens,
+              window > 0 else {
+            return nil
+        }
+        return min(Double(threshold) / Double(window), 1)
+    }
+
+    /// The headroom sentence under the bar, which is what the mark means. It
+    /// carries the number for VoiceOver, since a hairline on a progress bar
+    /// reads as nothing at all.
+    var threadContextCompactionLabel: String? {
+        guard let threshold = contextCompactionThresholdTokens, threshold > 0 else {
+            return nil
+        }
+        guard let used = contextWindowUsedTokens else {
+            return "Compacts at \(threshold.formatted()) tokens"
+        }
+        let headroom = max(0, threshold - used)
+        if headroom == 0 {
+            return "At the \(threshold.formatted()) token compaction threshold"
+        }
+        return "\(headroom.formatted()) tokens before compaction at \(threshold.formatted())"
+    }
+
     var threadIsRunning: Bool {
         status.lowercased() == "running" || activeTurnId != nil
     }
@@ -151,6 +183,16 @@ private extension CodingAgentEventPayload {
             return "Permission requested"
         case .permissionResolved:
             return status.map { "Permission \($0)" } ?? "Permission resolved"
+        case .contextCompactionStarted:
+            return "Compacting context"
+        case .contextCompactionCompleted:
+            if failed == true {
+                return "Context compaction failed"
+            }
+            guard let preTokens, let postTokens else {
+                return "Context compacted"
+            }
+            return "Context compacted, \(preTokens.formatted()) to \(postTokens.formatted()) tokens"
         default:
             // A newer backend's coding event type. The mirror shows the raw id
             // rather than dropping the row, since the event still happened.

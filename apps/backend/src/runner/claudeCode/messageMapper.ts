@@ -30,6 +30,14 @@ export function mapClaudeCodeMessage(
     }];
   }
 
+  if (type === "system" && stringValue(object.subtype) === "status") {
+    return compactionStatusEvents(object, claudeCode);
+  }
+
+  if (type === "system" && stringValue(object.subtype) === "compact_boundary") {
+    return compactBoundaryEvents(object, claudeCode);
+  }
+
   if (type === "stream_event") {
     return streamEventUpdates(object, claudeCode);
   }
@@ -231,6 +239,104 @@ function toolResultActivities(
       }
     } satisfies AgentRunnerEvent];
   });
+}
+
+/**
+ * The `system`/`status` message, which reports both that a compaction is under
+ * way and that one has ended.
+ *
+ * Only `compacting` means a compaction is taking place: `requesting` is an
+ * ordinary model call and `null` is the return to idle. And only a *failed*
+ * outcome completes here — a success is already announced by the
+ * `compact_boundary` message below, and reporting both would complete one
+ * compaction twice. `compact_error` is the child's own text and is dropped
+ * rather than relayed.
+ */
+function compactionStatusEvents(
+  object: Record<string, unknown>,
+  claudeCode: RunnerMetadata
+): AgentRunnerEvent[] {
+  // A subagent compacting its own window is not this thread compacting, the
+  // same rule `contextOccupancyFromAssistant` applies to occupancy. Neither
+  // compaction message declares `parent_tool_use_id` today (SDK 0.3.172), so
+  // this is a guard against the SDK growing one rather than a filter that
+  // currently fires — and if it never does, a subagent's compaction is
+  // indistinguishable from the thread's on this wire.
+  if (parentToolUseId(claudeCode)) return [];
+
+  if (stringValue(object.compact_result) === "failed") {
+    return [{
+      type: "agent_activity",
+      activity: {
+        kind: "claude_code_context_compaction_completed",
+        title: "Compaction failed",
+        content: { failed: true },
+        canonical: { kind: "context_compaction_completed", failed: true },
+        runner: claudeCode
+      }
+    }];
+  }
+
+  if (stringValue(object.status) !== "compacting") return [];
+  return [{
+    type: "agent_activity",
+    activity: {
+      kind: "claude_code_context_compaction_started",
+      title: "Compacting context",
+      content: {},
+      canonical: { kind: "context_compaction_started" },
+      runner: claudeCode
+    }
+  }];
+}
+
+/**
+ * The `system`/`compact_boundary` message: one compaction, completed, with the
+ * before and after counts already computed.
+ *
+ * It also carries the badge correction. The occupancy the thread has been
+ * reporting was measured before the compaction, so the number would sit stale
+ * until the next assistant response; emitting `post_tokens` as an ordinary
+ * `token_usage_updated` beside the activity lands the drop and its cause in
+ * the same tick, on the path every other occupancy report already takes.
+ */
+function compactBoundaryEvents(
+  object: Record<string, unknown>,
+  claudeCode: RunnerMetadata
+): AgentRunnerEvent[] {
+  // The same forward-looking guard as the status message above.
+  if (parentToolUseId(claudeCode)) return [];
+  const metadata = objectValue(object.compact_metadata);
+  const trigger = compactionTrigger(metadata?.trigger);
+  const preTokens = nonnegativeIntegerValue(metadata?.pre_tokens);
+  const postTokens = nonnegativeIntegerValue(metadata?.post_tokens);
+  const reported = {
+    ...(trigger ? { trigger } : {}),
+    ...(preTokens !== undefined ? { preTokens } : {}),
+    ...(postTokens !== undefined ? { postTokens } : {})
+  };
+
+  return [
+    {
+      type: "agent_activity",
+      activity: {
+        kind: "claude_code_context_compaction_completed",
+        title: "Context compacted",
+        content: reported,
+        canonical: { kind: "context_compaction_completed", ...reported },
+        runner: claudeCode
+      }
+    },
+    ...(postTokens !== undefined
+      ? [{ type: "token_usage_updated", runner: claudeCode, contextWindowUsedTokens: postTokens } satisfies AgentRunnerEvent]
+      : [])
+  ];
+}
+
+/** The two triggers the SDK declares. An unfamiliar one reports none. */
+function compactionTrigger(value: unknown): "auto" | "manual" | undefined {
+  const trigger = stringValue(value);
+  return trigger === "auto" || trigger === "manual" ? trigger : undefined;
 }
 
 /**

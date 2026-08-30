@@ -146,6 +146,25 @@ export type CanonicalActivity =
       decidedBy?: QuestionDecisionAuthority;
       /** What was chosen, per answered set. A sensitive set's text is never here. */
       questionAnswers?: CanonicalQuestionAnswer[];
+    }
+  | { kind: "context_compaction_started" }
+  | {
+      /**
+       * The runner has summarized its own conversation and is now holding less
+       * of it. Every field is optional because the runners report different
+       * amounts: Claude Code gives the trigger and both counts, Codex may give
+       * none, and Cursor gives only that it happened.
+       *
+       * What is deliberately absent is the summary itself. It is the model's
+       * own account of everything the thread has done, and it stops at the
+       * adapter — see `docs/safety/TRUST_AND_SAFETY.md`.
+       */
+      kind: "context_compaction_completed";
+      trigger?: "auto" | "manual";
+      preTokens?: number;
+      postTokens?: number;
+      /** The compaction was attempted and did not succeed. */
+      failed?: boolean;
     };
 
 export type CanonicalActivityKind = CanonicalActivity["kind"];
@@ -229,6 +248,14 @@ export type AgentRunnerEvent =
        */
       contextWindowUsedTokens?: number;
       modelContextWindowTokens?: number;
+      /**
+       * Where this runner's own auto-compaction fires. Absent means the runner
+       * supplied no new knowledge; null explicitly clears a value it reported
+       * earlier. Codex keeps its limit internal and Cursor summarizes on a
+       * schedule it does not publish, so a reader shows absence rather than a
+       * line AgentRoom picked. Only the reporting runner can supply it.
+       */
+      contextCompactionThresholdTokens?: number | null;
     }
   | {
       type: "run_succeeded";

@@ -400,6 +400,7 @@ export const agentSessionSchema = z.object({
   claudeCode: claudeCodeSessionMetadataSchema.optional(),
   modelContextWindowTokens: z.number().int().positive().optional(),
   contextWindowUsedTokens: z.number().int().nonnegative().optional(),
+  contextCompactionThresholdTokens: z.number().int().positive().optional(),
   title: z.string().optional(),
   status: agentSessionStatusSchema,
   activeTurnId: z.string().optional(),
@@ -421,7 +422,8 @@ export const agentSessionTurnSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
   totalTokens: z.number().int().nonnegative(),
-  modelContextWindowTokens: z.number().int().positive().optional()
+  modelContextWindowTokens: z.number().int().positive().optional(),
+  contextCompactionThresholdTokens: z.number().int().positive().optional()
 });
 
 export const agentSessionMessageSchema = z.object({

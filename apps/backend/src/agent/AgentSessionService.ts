@@ -741,6 +741,7 @@ export class AgentSessionService {
       totalTokens?: number;
       contextWindowUsedTokens?: number;
       modelContextWindowTokens?: number;
+      contextCompactionThresholdTokens?: number | null;
     }
   ): void {
     const previousInputTokens = turn.inputTokens;
@@ -760,6 +761,15 @@ export class AgentSessionService {
     if (typeof event.modelContextWindowTokens === "number") {
       turn.modelContextWindowTokens = event.modelContextWindowTokens;
       session.modelContextWindowTokens = event.modelContextWindowTokens;
+    }
+    // Undefined carries no new knowledge and preserves the cache. Null is an
+    // authoritative clear from a runner that previously supplied a value.
+    if (event.contextCompactionThresholdTokens === null) {
+      delete turn.contextCompactionThresholdTokens;
+      delete session.contextCompactionThresholdTokens;
+    } else if (typeof event.contextCompactionThresholdTokens === "number") {
+      turn.contextCompactionThresholdTokens = event.contextCompactionThresholdTokens;
+      session.contextCompactionThresholdTokens = event.contextCompactionThresholdTokens;
     }
     session.updatedAt = new Date().toISOString();
     this.persist(session.id);

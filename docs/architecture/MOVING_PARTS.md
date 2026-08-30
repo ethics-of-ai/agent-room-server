@@ -512,6 +512,63 @@
   and both are deletable whole once the advertised contract floor
   (`CODING_EVENT_CONTRACT_VERSION`, reported by `GET /api/config` as
   `codingEventContractVersion`) moves past 2.
+  Context compaction rides that same dispatch as two more kinds
+  (`context_compaction_started`, `context_compaction_completed`), declared at
+  the `AgentRunner` boundary and matched by two additive event types under
+  contract version 2, which does not move. One shared field object
+  (`codingContextCompactionFields` in `eventSchemas.ts`) backs both the
+  canonical activity and the wire payload so the two cannot drift, and those
+  fields are a two-value enum plus integers, which is why
+  `boundedCanonicalActivity` needs no clamping case for either kind and its
+  `default` branch is the right answer for both.
+- `src/runner/claudeCode/messageMapper.ts`,
+  `src/runner/codex/notificationMapper.ts`, and
+  `src/runner/cursor/messageMapper.ts`: the three adapters that read a
+  compaction off their own wire, each reporting a different amount of it, which
+  is what the optional fields exist to carry.
+  `claudeCode/messageMapper.ts` reads
+  `system`/`status` with `status: "compacting"` as the started kind
+  (`requesting` is an ordinary model call and `null` is the return to idle) and
+  `system`/`compact_boundary` as the completed one with its trigger and both
+  counts. A compaction completes once, so a `compact_result: "success"` status
+  emits nothing (the boundary already did) and only a `"failed"` one completes
+  from there, dropping the child's own `compact_error` text.
+  `codex/notificationMapper.ts` intercepts the `contextCompaction` item on
+  `item/started` and `item/completed` ahead of the generic item branch rather
+  than adding it to `RENDERABLE_ITEM_TYPES`, which is the set that makes an item
+  a tool call, and drops the item's own content because a compaction item may
+  carry the summary; `thread/compacted` stays deliberately unmapped until a real
+  thread settles whether it or the item arrives, since mapping both would
+  complete one compaction twice. `cursor/messageMapper.ts` gets the completed
+  kind alone, from the `task` message: summarization is server-side and the
+  SDK's accumulator drops the two state updates before they reach `onDelta`, so
+  the started state has no source at all, while the summary text does reach
+  `run.stream()` as the only `task` message the local path produces, and it is
+  read for its presence and copied nowhere. DeepSeek maps neither kind. The
+  occupancy correction needs no service branch: when a boundary reports what is
+  left afterwards, the adapter emits an ordinary `token_usage_updated` beside
+  the activity, so the drop and its cause land in the same tick and nothing
+  above the runner boundary learns what a compaction is. Codex and Cursor need
+  no equivalent, since their next ordinary usage report already reflects the
+  smaller window.
+- `src/runner/claudeCode/contextUsage.ts`: the auto-compaction threshold out of
+  the SDK's `get_context_usage` control response, and never a share backfilled
+  from the reported capacity. Its result is deliberately three-state: a number
+  replaces the cached runner value, null clears it after a valid response says
+  compaction is disabled or supplies no usable threshold, and undefined leaves
+  it untouched when the response is unavailable or malformed. It is the one
+  runner that can answer where its own line is, so the field is absent everywhere
+  else and absence is served as absence.
+  `ClaudeCodeRunner.readCompactionThreshold` starts that read at turn start
+  rather than at settlement, because `handleSessionMessage` closes the
+  turn's queue synchronously on the `result` message, so anything learned after
+  it has no open turn to ride and holding the queue open would cost every
+  settlement a control round trip; turn start is also the stronger proof the
+  child is alive, and `applyTurnSettings` has already made the turn's model
+  final. The read is bounded at five seconds, never awaited, and silent when it
+  fails, times out, or the SDK has no such method, and the value then travels
+  the exact path `modelContextWindowTokens` takes through `recordTokenUsage`,
+  the session and turn records, and both usage events.
 - `src/editor`: the backend-served editor language catalog (Phase C/C.5).
   `EditorCatalogStore`/`EditorCatalogManager` resolve the served directory
   (`EDITOR_CATALOG_DIR` operator override when it holds a manifest, else the

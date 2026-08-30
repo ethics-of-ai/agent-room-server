@@ -68,6 +68,7 @@ export class AgentTurnEventApplier {
           totalTokens?: number;
           contextWindowUsedTokens?: number;
           modelContextWindowTokens?: number;
+          contextCompactionThresholdTokens?: number | null;
         }
       ): void;
       succeedTurn(session: AgentSession, turn: AgentSessionTurn, event: AgentRunnerEvent & { type: "run_succeeded" }): void;
@@ -119,6 +120,9 @@ export class AgentTurnEventApplier {
     if (event.type === "token_usage_updated") {
       this.deps.telemetry.recordRunnerEvent(turn, event);
       this.deps.recordTokenUsage(session, turn, event);
+      const contextCompactionThresholdTokens = event.contextCompactionThresholdTokens === null
+        ? null
+        : turn.contextCompactionThresholdTokens;
       this.deps.eventBus.publish("agent_turn_token_usage_updated", {
         sessionId: session.id,
         turnId: turn.id,
@@ -131,7 +135,10 @@ export class AgentTurnEventApplier {
         ...(event.cachedInputTokens !== undefined ? { cachedInputTokens: event.cachedInputTokens } : {}),
         ...(event.reasoningOutputTokens !== undefined ? { reasoningOutputTokens: event.reasoningOutputTokens } : {}),
         ...(session.contextWindowUsedTokens !== undefined ? { contextWindowUsedTokens: session.contextWindowUsedTokens } : {}),
-        ...(turn.modelContextWindowTokens !== undefined ? { modelContextWindowTokens: turn.modelContextWindowTokens } : {})
+        ...(turn.modelContextWindowTokens !== undefined ? { modelContextWindowTokens: turn.modelContextWindowTokens } : {}),
+        ...(contextCompactionThresholdTokens !== undefined
+          ? { contextCompactionThresholdTokens }
+          : {})
       });
       this.publishCodingEvent(codingTokenUsageUpdatedEvent({
         sessionId: session.id,
@@ -144,7 +151,8 @@ export class AgentTurnEventApplier {
         cachedInputTokens: event.cachedInputTokens,
         reasoningOutputTokens: event.reasoningOutputTokens,
         contextWindowUsedTokens: session.contextWindowUsedTokens,
-        modelContextWindowTokens: turn.modelContextWindowTokens
+        modelContextWindowTokens: turn.modelContextWindowTokens,
+        contextCompactionThresholdTokens
       }));
       return;
     }

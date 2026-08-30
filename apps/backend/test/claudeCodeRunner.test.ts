@@ -66,6 +66,11 @@ class FakeClaudeQuery implements ClaudeCodeQuery {
     return [];
   }
 
+  // Left undefined unless a test assigns it, so every other suite exercises an
+  // SDK that cannot answer the control request at all.
+  getContextUsage?: () => Promise<unknown>;
+  contextUsageCalls = 0;
+
   async return(): Promise<IteratorResult<unknown>> {
     this.returned = true;
     this.output.close();
@@ -73,13 +78,17 @@ class FakeClaudeQuery implements ClaudeCodeQuery {
   }
 }
 
-function fakeQueryHarness(onUserMessage?: (message: Record<string, unknown>, query: FakeClaudeQuery) => void): {
+function fakeQueryHarness(
+  onUserMessage?: (message: Record<string, unknown>, query: FakeClaudeQuery) => void,
+  configure?: (query: FakeClaudeQuery) => void
+): {
   loadQuery: () => Promise<ClaudeCodeQueryFunction>;
   queries: FakeClaudeQuery[];
 } {
   const queries: FakeClaudeQuery[] = [];
   const queryFunction: ClaudeCodeQueryFunction = ({ prompt, options }) => {
     const query = new FakeClaudeQuery(prompt, options, onUserMessage);
+    configure?.(query);
     queries.push(query);
     return query;
   };
@@ -720,6 +729,112 @@ describe("ClaudeCodeRunner", () => {
       type: "image",
       source: { type: "base64", media_type: "image/png", data: imageBytes.toString("base64") }
     });
+
+    await runner.dispose();
+  });
+
+  // The threshold read is started at turn start and deliberately never
+  // awaited, so these turns stay open until it has settled: the fake completes
+  // the turn only after the control round trip has been accounted for.
+  const thresholdTurn = async (runId: string, respond: () => Promise<unknown>): Promise<AgentRunnerEvent[]> => {
+    const serviceConfig = await config();
+    const harness = fakeQueryHarness(undefined, (query) => {
+      query.getContextUsage = () => {
+        query.contextUsageCalls += 1;
+        return respond();
+      };
+    });
+    const runner = new ClaudeCodeRunner(serviceConfig, { loadQuery: harness.loadQuery });
+    const events: AgentRunnerEvent[] = [];
+
+    const run = (async () => {
+      for await (const event of runner.run({
+        runId,
+        sessionId: `agentroom-session-${runId}`,
+        workspacePath: serviceConfig.workspaceRoot,
+        prompt: "long turn"
+      })) {
+        events.push(event);
+      }
+    })();
+
+    await waitFor(() => (harness.queries[0]?.contextUsageCalls ?? 0) > 0);
+    // The read settles on a microtask chain; one macrotask hop guarantees it
+    // has either pushed its event or decided not to.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    harness.queries[0].output.push({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      session_id: "claude-session-threshold",
+      result: "Done."
+    });
+    await run;
+    await runner.dispose();
+    return events;
+  };
+
+  it("reports the auto-compaction threshold on the turn that read it", async () => {
+    const events = await thresholdTurn("turn-threshold", async () => ({
+      totalTokens: 12_000,
+      maxTokens: 200_000,
+      percentage: 6,
+      model: "claude-fable-5",
+      isAutoCompactEnabled: true,
+      autoCompactThreshold: 160_000
+    }));
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "token_usage_updated", contextCompactionThresholdTokens: 160_000 })
+    );
+    // The read never blocks the prompt, so the turn still settles normally.
+    expect(events.at(-1)).toEqual({ type: "run_succeeded", message: "Done." });
+  });
+
+  it("reports an explicit clear when the child has no current threshold", async () => {
+    // A valid response is authoritative even when auto-compaction is off or
+    // its enabled response carries no usable threshold.
+    const responses: Array<() => Promise<unknown>> = [
+      async () => ({ maxTokens: 200_000, isAutoCompactEnabled: false, autoCompactThreshold: 160_000 }),
+      async () => ({ maxTokens: 200_000, isAutoCompactEnabled: true })
+    ];
+
+    for (const [index, respond] of responses.entries()) {
+      const events = await thresholdTurn(`turn-no-threshold-${index}`, respond);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: "token_usage_updated", contextCompactionThresholdTokens: null })
+      );
+      expect(events.at(-1)).toEqual({ type: "run_succeeded", message: "Done." });
+    }
+  });
+
+  it("preserves the cached threshold when the control request fails", async () => {
+    const events = await thresholdTurn("turn-threshold-read-failed", async () => {
+      throw new Error("control request failed");
+    });
+
+    expect(JSON.stringify(events)).not.toContain("contextCompactionThresholdTokens");
+    expect(events.at(-1)).toEqual({ type: "run_succeeded", message: "Done." });
+  });
+
+  it("asks nothing of an SDK that does not offer the control request", async () => {
+    const serviceConfig = await config();
+    const harness = fakeQueryHarness(scriptedTurn);
+    const runner = new ClaudeCodeRunner(serviceConfig, { loadQuery: harness.loadQuery });
+    const events: AgentRunnerEvent[] = [];
+
+    for await (const event of runner.run({
+      runId: "turn-no-context-usage",
+      sessionId: "agentroom-session-no-context-usage",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "List the workspace"
+    })) {
+      events.push(event);
+    }
+
+    expect(harness.queries[0].getContextUsage).toBeUndefined();
+    expect(JSON.stringify(events)).not.toContain("contextCompactionThresholdTokens");
+    expect(events.at(-1)?.type).toBe("run_succeeded");
 
     await runner.dispose();
   });

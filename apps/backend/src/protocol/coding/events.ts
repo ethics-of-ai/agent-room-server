@@ -15,7 +15,7 @@ import {
   MAX_QUESTION_PROMPT_LENGTH,
   MAX_QUESTION_SETS
 } from "../../runner/shared/PendingQuestionRequests";
-import type { CanonicalQuestionAnswer, CanonicalQuestionSet } from "../../runner/AgentRunner";
+import type { CanonicalActivity, CanonicalQuestionAnswer, CanonicalQuestionSet } from "../../runner/AgentRunner";
 import {
   codingActivitySchema,
   codingAgentEventPayloadSchema,
@@ -150,6 +150,7 @@ export function codingTokenUsageUpdatedEvent(input: CodingEventBaseInput & {
   totalTokens?: number;
   contextWindowUsedTokens?: number;
   modelContextWindowTokens?: number;
+  contextCompactionThresholdTokens?: number | null;
 }): CodingAgentEventCandidate | undefined {
   if (!input.turnId) return undefined;
   const payload = parsePayload({
@@ -162,7 +163,10 @@ export function codingTokenUsageUpdatedEvent(input: CodingEventBaseInput & {
     ...(input.reasoningOutputTokens !== undefined ? { reasoningOutputTokens: input.reasoningOutputTokens } : {}),
     ...(input.totalTokens !== undefined ? { totalTokens: input.totalTokens } : {}),
     ...(input.contextWindowUsedTokens !== undefined ? { contextWindowUsedTokens: input.contextWindowUsedTokens } : {}),
-    ...(input.modelContextWindowTokens !== undefined ? { modelContextWindowTokens: input.modelContextWindowTokens } : {})
+    ...(input.modelContextWindowTokens !== undefined ? { modelContextWindowTokens: input.modelContextWindowTokens } : {}),
+    ...(input.contextCompactionThresholdTokens !== undefined
+      ? { contextCompactionThresholdTokens: input.contextCompactionThresholdTokens }
+      : {})
   });
   return payload ? { type: payload.type, payload } : undefined;
 }
@@ -333,6 +337,15 @@ export function codingEventFromRunnerActivity(
         ...(canonical.status ? { status: clampText(canonical.status) } : {}),
         ...(canonical.decidedBy ? { decidedBy: clampText(canonical.decidedBy) } : {}),
         ...boundedQuestionAnswers(canonical.questionAnswers)
+      }));
+    case "context_compaction_started":
+      return candidate(parsePayload({ ...base, type: "coding_context_compaction_started", turnId }));
+    case "context_compaction_completed":
+      return candidate(parsePayload({
+        ...base,
+        type: "coding_context_compaction_completed",
+        turnId,
+        ...contextCompactionFields(canonical)
       }));
   }
 }
@@ -522,6 +535,23 @@ function boundedQuestionSets(sets: readonly CanonicalQuestionSet[]): CanonicalQu
   }));
   const parsed = codingQuestionSetsSchema.safeParse(clamped);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * What a completed compaction reported, with the fields the runner left out
+ * left out. Nothing here needs clamping — a two-value enum and two integers —
+ * which is why `boundedCanonicalActivity` needs no case for either compaction
+ * kind and its `default` branch is the right answer for both.
+ */
+function contextCompactionFields(
+  canonical: Extract<CanonicalActivity, { kind: "context_compaction_completed" }>
+): Record<string, unknown> {
+  return {
+    ...(canonical.trigger ? { trigger: canonical.trigger } : {}),
+    ...(canonical.preTokens !== undefined ? { preTokens: canonical.preTokens } : {}),
+    ...(canonical.postTokens !== undefined ? { postTokens: canonical.postTokens } : {}),
+    ...(canonical.failed ? { failed: true } : {})
+  };
 }
 
 /** The answer-route id, kept exact: a bound may refuse it, never reshape it. */
