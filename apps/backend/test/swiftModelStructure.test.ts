@@ -63,10 +63,22 @@ async function declaredTypes(root: string): Promise<Map<string, string[]>> {
   return declarations;
 }
 
+/**
+ * Every Swift source in the shared package, joined. The assertions below are
+ * about a contract living in *this package* rather than being redeclared per
+ * app, so they read the package. Pinning them to one file inside it would be a
+ * stricter rule than the one they state, and it is the rule that grew the
+ * retired `AgentRoomContracts.swift` to 2,542 lines.
+ */
+async function sharedContractSources(): Promise<string> {
+  const paths = await swiftSources(resolve(sharedClientRoot, "Sources/AgentRoomClient"));
+  return (await Promise.all(paths.map((path) => readFile(path, "utf8")))).join("\n");
+}
+
 describe("Swift model structure", () => {
   test("centralizes shared Apple API contracts in AgentRoomClient", async () => {
     const packageManifest = await readOptional(resolve(sharedClientRoot, "Package.swift"));
-    const contracts = await readOptional(resolve(sharedClientRoot, "Sources/AgentRoomClient/AgentRoomContracts.swift"));
+    const contracts = await sharedContractSources();
     const apiClient = await readOptional(resolve(sharedClientRoot, "Sources/AgentRoomClient/APIClient.swift"));
     const macOSProject = await readFile(resolve(repoRoot, "apps/macos/project.yml"), "utf8");
     const visionOSProject = visionOSTreePresent

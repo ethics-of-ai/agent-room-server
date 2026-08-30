@@ -14,6 +14,12 @@ the source of truth.
   `Models/` directory as a general destination.
 - Keep one primary Swift type per file. Small private helper types are allowed
   only when they are inseparable from the parent type and unlikely to be reused.
+  This holds in `apps/shared/AgentRoomClient` exactly as it does in the two apps:
+  the rule stopping one directory short is what let the retired
+  `AgentRoomContracts.swift` reach 2,542 lines and 102 public types. A file over
+  600 lines (900 for a test) has to be split or recorded in
+  `apps/backend/test/sourceFileBudget.test.ts`, which holds each recorded file at
+  the length it had. The budget covers the whole repository, not only Swift.
 - Extract large `body` implementations and `some View` helper properties into
   named `View` structs.
 - Keep button actions and async work in methods or state objects. View bodies

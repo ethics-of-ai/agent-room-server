@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, test } from "vitest";
 
@@ -10,6 +10,22 @@ async function readOptional(path: string): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * Every Swift source in the shared package, joined. The contract assertions
+ * below read this rather than a single file, and the three `not.toContain`
+ * checks are why: `trackerKind`, `retryQueue`, and `issueId` are the retired
+ * Linear tracker vocabulary `AGENTS.md` still forbids, and against one file out
+ * of ten they would pass while checking nothing.
+ */
+async function sharedContractSources(root: string): Promise<string> {
+  const sources: string[] = [];
+  for (const entry of await readdir(root, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".swift")) continue;
+    sources.push(await readFile(join(entry.parentPath, entry.name), "utf8"));
+  }
+  return sources.join("\n");
 }
 
 // The public mirror (docs/operations/OPEN_SOURCE_MIRROR.md) ships without
@@ -203,7 +219,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
   });
 
   test("shared contracts cover workspaces, sessions, status, and events", async () => {
-    const contracts = await readOptional(resolve(sharedClientRoot, "Sources/AgentRoomClient/AgentRoomContracts.swift"));
+    const contracts = await sharedContractSources(resolve(sharedClientRoot, "Sources/AgentRoomClient"));
 
     expect(contracts).toContain("public struct AgentSession");
     expect(contracts).toContain("public struct AgentSessionTurn");

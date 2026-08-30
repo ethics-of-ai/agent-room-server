@@ -101,8 +101,8 @@ not another Swift source change.
 | 11 | Session metadata extracted by native activity identity | `protocol/coding/events.ts:397-419`, `agent/AgentTurnEventApplier.ts:126-133` | 2 |
 | 12 | Harness coding events stamped as Codex regardless of session | `harness/visionosHarness.ts:223`, `routes/harnessRoutes.ts` | 2 |
 | 13 | Tier-3 secrets, env stripping/injection, and Codex bootstrap policy hard-coded in Swift | `BackendSecretValues.swift:3-30`, `BackendRuntime.swift:8-76`, `RunnerSettingsPane.swift:141-156`, runner locator/status types | 6 |
-| 14 | visionOS transcript and activity identity depend on native kind/metadata | `ThreadMessageStreamingState.swift:423-443`, `CodingAgentRendererState.swift:242-250,489-530`, `AgentRoomContracts.swift:1466-1476` | 2 |
-| 15 | Swift coding-event type is a closed enum | `AgentRoomContracts.swift:1357-1376` | 2 |
+| 14 | visionOS transcript and activity identity depend on native kind/metadata | `ThreadMessageStreamingState.swift`, `CodingAgentRendererState.swift`, `Contracts/CodingEvents/CodingAgentActivity.swift` | 2 |
+| 15 | Swift coding-event type is a closed enum | `Contracts/CodingEvents/CodingAgentEventType.swift` | 2 |
 
 Leaks 6, 7, and 9 were missed in the first draft; 11–15 were found in the
 second review. 6 and 7 matter because they are **capabilities, not metadata**:
