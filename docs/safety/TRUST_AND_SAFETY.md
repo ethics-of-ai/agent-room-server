@@ -1946,14 +1946,14 @@ Current posture:
   arms that check before asynchronous startup and compares once immediately, so
   an app that dies before Node reaches the watchdog is still detected.
 - Published macOS updates have one signing authority and a closed compile-time
-  channel: `disabled`, `rc`, or `stable`. The project default and signed stable
-  workflow currently select `disabled`; those builds contain neither a Sparkle
-  public key nor a feed URL, never construct the updater, publish no appcast,
-  and make no update request. Exact `vX.Y.Z-rc.N` builds select `rc` and query a
-  moving prerelease that contains only the current RC appcast. GitHub excludes
-  that `rc` alias from latest-stable resolution. A later reviewed source change
-  may select `stable`, which uses the fixed latest-stable feed and the same
-  packaging checks. No Actions variable can change the channel. The private
+  channel: `disabled`, `rc`, or `stable`. The project default stays `disabled`,
+  so source and unsigned smoke builds contain neither a Sparkle public key nor a
+  feed URL, never construct the updater, publish no appcast, and make no update
+  request. The signed stable workflow selects `stable` and uses the fixed
+  latest-stable feed. Exact `vX.Y.Z-rc.N` builds override it with `rc` and query
+  a moving prerelease that contains only the current RC appcast. GitHub excludes
+  that `rc` alias from latest-stable resolution. This stable choice is reviewed
+  source policy; no Actions variable can change the channel. The private
   manual RC publisher accepts only a version and positive RC number. It finds
   the fixed open Release Please PR, requires its synthetic merge to contain
   current `main` and the current PR head, and admits only the six generated
@@ -1974,10 +1974,15 @@ Current posture:
   release job publishes the versioned RC before moving the alias, serializes
   release jobs, and refuses to replace an existing versioned RC release. The
   same DMG is
-  Developer ID signed, notarized, and stapled. Source, unsigned smoke, and
-  current stable builds stay disabled. Packaging refuses a disabled bundle
-  carrying a key or feed, refuses any enabled channel without a signing
+  Developer ID signed, notarized, and stapled. After publishing a new stable
+  release, the job fetches the fixed latest-stable feed and requires an exact
+  byte match with the appcast it uploaded. A manual rebuild of an older stable
+  tag does not move or verify the latest release. Packaging refuses a disabled
+  bundle carrying a key or feed, refuses any enabled channel without a signing
   identity, and refuses an enabled bundle missing its key or fixed channel feed.
+  Existing updater-disabled stable installations cannot discover the first
+  enabled stable release and require one manual install; later stable releases
+  update through the normal prompt.
   Sparkle compares increasing `CFBundleVersion` values and refuses a downgrade.
   The check itself is one HTTPS GET to github.com on Sparkle's default
   `SUScheduledCheckInterval` of a day. What rides on it is Sparkle's own user

@@ -85,8 +85,9 @@ as the Mac user), Cursor (run the sign-in command in
 Pro plan or better is required), or DeepSeek Harness (see the
 [DeepSeek runner guide](docs/engineering/DEEPSEEK_HARNESS_RUNNER.md)).
 
-Stable release builds currently have the updater disabled. They contain no
-Sparkle key or feed and make no update request.
+Signed stable release builds embed the Sparkle release key and check the fixed
+latest-stable appcast once a day. Sparkle still asks before installation. Source
+and unsigned builds contain no key or feed and make no update request.
 
 Release candidates are isolated from that stable feed. A signed
 `vX.Y.Z-rc.N` build checks the rolling prerelease-only `rc` appcast, whose
@@ -94,6 +95,11 @@ download still points to the exact versioned RC release. To test updating,
 manually install RC.1, have a maintainer publish RC.2 through the private
 release workflow, then use **Check for Updates…** in RC.1. Stable installations
 never query the RC appcast.
+
+Existing stable installations from before this policy change cannot discover
+the first updater-enabled stable release because they contain no Sparkle key.
+Install that release manually once; later stable releases update through the
+stable feed.
 
 ## Build from source
 

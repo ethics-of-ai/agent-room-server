@@ -24,7 +24,7 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate {
         self.shouldRestartBackendAfterUpdate = shouldRestartBackendAfterUpdate
         super.init()
 
-        // Source, unsigned, and updater-disabled stable builds have no key.
+        // Source, unsigned, and explicitly updater-disabled builds have no key.
         // Starting Sparkle with SUVerifyUpdateBeforeExtraction but no key would
         // report a configuration error on every launch, so updates stay off in
         // those builds. An enabled release channel injects the public key.

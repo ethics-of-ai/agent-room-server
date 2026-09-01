@@ -71,7 +71,7 @@ describe("macOS distribution packaging", () => {
     expect(workflow).toContain("sparkle:edSignature=");
     expect(workflow).toContain('SUMMED_FILES+=(appcast.xml)');
     expect(workflow).toContain('gh release create "$TAG"');
-    expect(workflow).toContain("STABLE_SPARKLE_UPDATE_CHANNEL: disabled");
+    expect(workflow).toContain("STABLE_SPARKLE_UPDATE_CHANNEL: stable");
     expect(workflow).toContain('UPDATE_CHANNEL="$STABLE_SPARKLE_UPDATE_CHANNEL"');
     expect(workflow).toContain('echo "update_channel=$UPDATE_CHANNEL" >> "$GITHUB_OUTPUT"');
     expect(workflow).toContain("prerelease tag must look like vX.Y.Z-rc.N");
@@ -86,6 +86,14 @@ describe("macOS distribution packaging", () => {
     expect(workflow).toContain('gh release upload "$TAG" --clobber "$DMG" "$MANIFEST" "$SUMS"');
     expect(workflow).toContain('gh release upload rc --clobber "$APPCAST"');
     expect(workflow).toContain('gh release create rc --target "$GITHUB_SHA"');
+    expect(workflow).toContain(
+      'https://github.com/ethics-of-ai/agent-room-server/releases/download/$TAG/$DMG'
+    );
+    expect(workflow).toContain(
+      "https://github.com/ethics-of-ai/agent-room-server/releases/latest/download/appcast.xml"
+    );
+    expect(workflow).toContain('cmp -s "$APPCAST" "$RUNNER_TEMP/latest-stable-appcast.xml"');
+    expect(workflow).toContain('if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then');
     expect(workflow).toContain("refusing to replace immutable assets");
     expect(workflow).toMatch(
       /if gh release view "\$TAG"[^]*if \[ "\$PRERELEASE" = "true" \]; then[^]*exit 1[^]*gh release upload "\$TAG" --clobber/
@@ -103,10 +111,10 @@ describe("macOS distribution packaging", () => {
     const resolveScript = runnableSteps.find((step) => step.name === "Resolve the version from the tag")?.run;
     expect(resolveScript).toBeDefined();
     for (const testCase of [
-      { tag: "v0.4.0", stableChannel: "disabled", status: 0, output: "update_channel=disabled" },
-      { tag: "v0.4.0-rc.1", stableChannel: "disabled", status: 0, output: "update_channel=rc" },
       { tag: "v0.4.0", stableChannel: "stable", status: 0, output: "update_channel=stable" },
-      { tag: "v0.4.0-beta.1", stableChannel: "disabled", status: 1, output: "prerelease tag must look like" }
+      { tag: "v0.4.0-rc.1", stableChannel: "stable", status: 0, output: "update_channel=rc" },
+      { tag: "v0.4.0", stableChannel: "disabled", status: 0, output: "update_channel=disabled" },
+      { tag: "v0.4.0-beta.1", stableChannel: "stable", status: 1, output: "prerelease tag must look like" }
     ]) {
       const result = spawnSync("bash", ["-c", resolveScript!], {
         encoding: "utf8",

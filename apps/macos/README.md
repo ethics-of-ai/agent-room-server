@@ -107,19 +107,22 @@ build/distribution/macos/AgentRoom.dmg
 The app bundle contains the Node.js runtime, compiled backend, public assets,
 and production dependencies under `AgentRoom.app/Contents/Resources`.
 
-Local, unsigned, and signed stable builds currently omit the Sparkle key and
-feed. The updater does not start in those builds. Release-candidate tags must
-use `vX.Y.Z-rc.N`; those signed builds receive the public key and the mirror's
-rolling prerelease-only `rc` appcast. Install the first RC from its versioned
-release, then publish the next RC through the private manual
-`release-candidate.yml` workflow and choose **Check for Updates…** to test the
-signed replacement and relaunch path. The action is available from the Overview
-dashboard and application menu. The dashboard always shows the installed
-version; in a source, unsigned, or updater-disabled build it disables the button
-and explains that no feed or signing key is present. Keep the Release Please PR
-open until that test passes.
+Local and unsigned builds omit the Sparkle key and feed. The updater does not
+start in those builds. Signed stable `vX.Y.Z` releases receive the public key
+and the fixed latest-stable appcast. Release-candidate tags must use
+`vX.Y.Z-rc.N`; those signed builds stay on the mirror's rolling
+prerelease-only `rc` appcast.
 
-The workflow's source-controlled stable channel remains `disabled` until that
-test passes. Changing it to `stable` later uses the already-tested latest-stable
-feed path. Existing stable users must manually install the first enabled stable
-release because their current app has no updater authority.
+Install the first RC from its versioned release, then publish the next RC
+through the private manual `release-candidate.yml` workflow and choose
+**Check for Updates…** to test the signed replacement and relaunch path. The
+action is available from the Overview dashboard and application menu. The
+dashboard always shows the installed version; in a source, unsigned, or
+updater-disabled build it disables the button and explains that no feed or
+signing key is present.
+
+The workflow's source-controlled stable channel is `stable`. The release job
+also downloads the fixed latest-stable feed after publication and checks that
+it matches the appcast attached to the new stable release. Existing stable users
+must manually install the first updater-enabled stable release because their
+current app has no updater authority. Later stable releases update normally.

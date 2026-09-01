@@ -46,9 +46,9 @@ jobs:
     runs-on: macos-26
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      # Promotion to production updates is a reviewed source change. Keep this
-      # disabled until the RC update runbook has passed end to end.
-      STABLE_SPARKLE_UPDATE_CHANNEL: disabled
+      # Production updates are a reviewed source policy, not an Actions
+      # setting. Exact RC tags override this with their isolated RC channel.
+      STABLE_SPARKLE_UPDATE_CHANNEL: stable
     steps:
       - uses: actions/checkout@v7
         with:
@@ -251,8 +251,8 @@ jobs:
             cp "$UPDATES/appcast.xml" "$OUT/appcast.xml"
             grep -q 'sparkle:edSignature=' "$OUT/appcast.xml" \
               || { echo "Sparkle left the update unsigned; check SPARKLE_PRIVATE_ED_KEY" >&2; exit 1; }
-            grep -q "$DMG" "$OUT/appcast.xml" \
-              || { echo "Sparkle appcast does not name $DMG" >&2; exit 1; }
+            grep -Fq "https://github.com/ethics-of-ai/agent-room-server/releases/download/$TAG/$DMG" "$OUT/appcast.xml" \
+              || { echo "Sparkle appcast does not point at the immutable $TAG DMG" >&2; exit 1; }
             SUMMED_FILES+=(appcast.xml)
           fi
           (cd "$OUT" && shasum -a 256 "${SUMMED_FILES[@]}" > SHA256SUMS.txt && cat SHA256SUMS.txt)
@@ -335,6 +335,39 @@ jobs:
               fi
             else
               echo "Not moving the RC channel: newest published RC is $LATEST_RC"
+            fi
+          fi
+
+          # A stable install reads this fixed URL. For a newly published stable
+          # tag, prove GitHub resolves it to the exact appcast uploaded above.
+          # A manual rebuild of an older stable tag must not move the latest
+          # release, so it is intentionally skipped.
+          if [ "$UPDATE_CHANNEL" = "stable" ]; then
+            VERIFY_STABLE_FEED=true
+            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+              LATEST_STABLE="$(gh release view --json tagName --jq .tagName)"
+              if [ "$LATEST_STABLE" != "$TAG" ]; then
+                VERIFY_STABLE_FEED=false
+                echo "Not checking the stable feed: latest stable is $LATEST_STABLE, rebuilt tag is $TAG"
+              fi
+            fi
+
+            if [ "$VERIFY_STABLE_FEED" = "true" ]; then
+              VERIFIED=false
+              for attempt in 1 2 3 4 5 6; do
+                if curl -fsSL \
+                    "https://github.com/ethics-of-ai/agent-room-server/releases/latest/download/appcast.xml" \
+                    -o "$RUNNER_TEMP/latest-stable-appcast.xml" \
+                  && cmp -s "$APPCAST" "$RUNNER_TEMP/latest-stable-appcast.xml"; then
+                  VERIFIED=true
+                  break
+                fi
+                echo "Stable feed has not converged yet (attempt $attempt of 6)"
+                sleep 5
+              done
+              [ "$VERIFIED" = "true" ] \
+                || { echo "latest stable feed does not match the appcast published for $TAG" >&2; exit 1; }
+              echo "Verified the latest stable update feed for $TAG"
             fi
           fi
 

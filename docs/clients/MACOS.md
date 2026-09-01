@@ -119,22 +119,22 @@ Start only when one is not.
 ## App Updates
 
 The build selects one Sparkle update channel: `disabled`, `rc`, or `stable`.
-The project default and the signed stable-release workflow currently select
-`disabled`. Those builds embed neither `SUPublicEDKey` nor `SUFeedURL`, and
-`AppUpdateController` does not start Sparkle. They make no scheduled update
-request. The Overview dashboard still shows the installed version and the
-**Check for Updates…** button, but keeps the button disabled and explains that
-the build has no update feed or signing key. The application-menu command is
-disabled for the same reason.
+The project default remains `disabled`, so source and unsigned builds embed
+neither `SUPublicEDKey` nor `SUFeedURL`, and `AppUpdateController` does not start
+Sparkle. They make no scheduled update request. The Overview dashboard still
+shows the installed version and the **Check for Updates…** button, but keeps the
+button disabled and explains that the build has no update feed or signing key.
+The application-menu command is disabled for the same reason.
 
-Signed builds made from an exact `vX.Y.Z-rc.N` tag select `rc`. They embed the
-release public key and the rolling prerelease-only `rc` feed URL. Automatic
-checks run once a day, but automatic installation remains off. When the
-appcast's `CFBundleVersion` is newer than the installed build, Sparkle presents
-its standard prompt and waits for the operator to choose Install and Relaunch.
-The Overview dashboard's **Check for Updates…** button and the matching
-application-menu command run the same check immediately. Sparkle refuses
-downgrades.
+The signed stable-release workflow selects `stable`. It embeds the release
+public key and the fixed `releases/latest/download/appcast.xml` feed. Signed
+builds made from an exact `vX.Y.Z-rc.N` tag override that choice with `rc` and
+the rolling prerelease-only feed. Both enabled channels check once a day, but
+automatic installation remains off. When the appcast's `CFBundleVersion` is
+newer than the installed build, Sparkle presents its standard prompt and waits
+for the operator to choose Install and Relaunch. The Overview dashboard's
+**Check for Updates…** button and the matching application-menu command run the
+same check immediately. Sparkle refuses downgrades.
 
 The RC feed is the sole attached asset on a moving GitHub prerelease tagged
 `rc`; its enclosure points back to the exact versioned RC release rather than
@@ -167,11 +167,15 @@ workflow builds the candidate from current `main` plus Release Please's version
 changes and pushes only the public RC tag. It does not move public `main` or
 create a stable release.
 
-Stable updates remain off after this test. Promotion changes the workflow's
-source-controlled `STABLE_SPARKLE_UPDATE_CHANNEL` from `disabled` to `stable`.
-The same package path then embeds the public key and fixed latest-stable feed,
-generates the signed stable appcast, and attaches it to the stable release.
-Users on an earlier stable build must install this first updater-enabled stable
+Stable updates are selected by the workflow's source-controlled
+`STABLE_SPARKLE_UPDATE_CHANNEL: stable`. The same package path embeds the public
+key and fixed latest-stable feed, generates the signed stable appcast, and
+attaches it to the stable release. After publication, the job downloads that
+fixed feed and requires its bytes to match the appcast it just uploaded. A
+manual rebuild of an older stable tag skips this check because it must not move
+the latest release.
+
+Users on an earlier stable build must install the first updater-enabled stable
 release manually. Their installed app has no key and therefore cannot discover
 it. Later stable releases update normally.
 

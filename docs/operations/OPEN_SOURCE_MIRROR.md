@@ -360,9 +360,9 @@ publishes RC tags. Both tags point at an allowlisted, scanned public snapshot.
    DMG name, and writes `AgentRoom-<version>-release.json` with schema version
    1. A prerelease tag keeps its full suffix in the tag, DMG, and manifest file
    names, while its `X.Y.Z` marketing base must match the backend compatibility
-   version. A disabled stable release writes checksums over the DMG and manifest
-   and publishes those files with `SHA256SUMS.txt`; it has no appcast. An
-   update-enabled release runs Sparkle's `generate_appcast` with the private key
+   version. A disabled build writes checksums over the DMG and manifest and has
+   no appcast. An update-enabled release runs Sparkle's `generate_appcast` with
+   the private key
    over the notarized DMG, fails if its enclosure has no Ed25519 signature, and
    writes an `appcast.xml` whose download URL names this exact release tag. Its
    checksums and GitHub release include all four files. An RC build receives
@@ -370,17 +370,17 @@ publishes RC tags. Both tags point at an allowlisted, scanned public snapshot.
    versioned RC, the serialized workflow creates or advances that moving `rc`
    prerelease with only the signed appcast; its enclosure still downloads the
    immutable versioned RC DMG. A signed rerun of any published RC is refused;
-   only the moving `rc` release's appcast may be replaced. The implemented but
-   currently unselected `stable` channel uses
+   only the moving `rc` release's appcast may be replaced. The selected
+   `stable` channel uses
    `releases/latest/download/appcast.xml`, which follows stable releases and
    ignores prereleases.
 
-### RC update validation and stable promotion
+### RC validation and stable release updates
 
-The release workflow pins `STABLE_SPARKLE_UPDATE_CHANNEL: disabled` in source.
-A GitHub setting cannot turn it on. Stable releases remain signed and notarized,
-but their app bundles contain no Sparkle key or feed and their releases contain
-no appcast.
+The release workflow pins `STABLE_SPARKLE_UPDATE_CHANNEL: stable` in source. A
+GitHub setting cannot change it. Signed stable releases embed the public key and
+fixed latest-stable feed, and their releases include the signed appcast. Source
+and unsigned smoke builds remain updater-disabled.
 
 Before the first RC, the public repository must have the
 `SPARKLE_PRIVATE_ED_KEY` Actions secret and matching `SPARKLE_PUBLIC_ED_KEY`
@@ -406,20 +406,22 @@ backend relaunch. Confirm that registered workspaces, Keychain-backed values,
 managed settings, and durable sessions are unchanged. Public `main` and the
 stable tag remain untouched throughout.
 
-After the RC path passes, promote stable updates in a separate reviewed change:
+The stable channel has now been promoted through that reviewed source change.
+For the first updater-enabled stable release:
 
-1. Change `STABLE_SPARKLE_UPDATE_CHANNEL` in `release.yml` from `disabled` to
-   `stable`.
-2. Update the distribution test, this runbook, `docs/clients/MACOS.md`, the
-   trust entry, `AGENTS.md`, and `CLAUDE.md` in the same change.
-3. Merge that promotion into `main`, run the full release verification, then
-   merge the Release Please PR. Release Please publishes the stable `vX.Y.Z`
-   tag through the existing stable path. Its release must include the signed
-   appcast and its app must embed the public key plus
-   `releases/latest/download/appcast.xml`.
-4. Tell existing stable users to install that release manually once. Their
-   current updater-disabled build cannot discover it. Releases after that use
-   the normal Sparkle prompt.
+1. Run the full release verification, then merge the Release Please PR.
+   Release Please publishes the stable `vX.Y.Z` tag through the existing stable
+   path.
+2. Require the release to contain the signed appcast and require its app to
+   embed the public key plus
+   `releases/latest/download/appcast.xml`. The release job also fetches that
+   URL after publication and compares it byte-for-byte with the uploaded
+   appcast.
+3. Tell existing stable users to install that release manually once. Their
+   current updater-disabled build cannot discover it.
+4. On the following stable release, use **Check for Updates…** from the first
+   enabled stable build and confirm the normal Sparkle prompt, replacement, and
+   backend relaunch path.
 
 Apple Silicon only at first. The Xcode build is universal but the bundled Node
 and the `node-pty` binary are single-architecture, so an Intel DMG is a second
