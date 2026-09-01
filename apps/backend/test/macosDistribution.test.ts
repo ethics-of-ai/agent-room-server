@@ -1,4 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -7,6 +8,11 @@ import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 
 const repoRoot = resolve(__dirname, "../../..");
+// These publication-policy inputs intentionally exist only in the private
+// repository. Keep their checks active there without making the public mirror
+// depend on private workflows, credentials tooling, or mirror configuration.
+const privateReleasePolicyPresent = existsSync(resolve(repoRoot, "mirror/manifest.json"));
+const privateReleasePolicyTest = it.skipIf(!privateReleasePolicyPresent);
 
 describe("macOS distribution packaging", () => {
   it("builds the macOS product as AgentRoom.app", async () => {
@@ -46,7 +52,7 @@ describe("macOS distribution packaging", () => {
     expect(plist).toMatch(/<key>SUSendProfileInfo<\/key>\s*<false\/>/);
   });
 
-  it("publishes a checksum-pinned, EdDSA-signed appcast only for enabled update channels", async () => {
+  privateReleasePolicyTest("publishes a checksum-pinned, EdDSA-signed appcast only for enabled update channels", async () => {
     const workflow = await readFile(resolve(repoRoot, "mirror/overlay/.github/workflows/release.yml"), "utf8");
     const credentialWizard = await readFile(resolve(repoRoot, "scripts/setup-release-credentials.sh"), "utf8");
     const parsedWorkflow = parseYaml(workflow) as {
@@ -116,7 +122,7 @@ describe("macOS distribution packaging", () => {
     }
   });
 
-  it("publishes RC tags only from the open Release Please candidate and leaves public main alone", async () => {
+  privateReleasePolicyTest("publishes RC tags only from the open Release Please candidate and leaves public main alone", async () => {
     const workflow = await readFile(resolve(repoRoot, ".github/workflows/release-candidate.yml"), "utf8");
     const parsedWorkflow = parseYaml(workflow) as {
       on?: { workflow_dispatch?: { inputs?: Record<string, { required?: boolean; type?: string }> } };
@@ -187,7 +193,7 @@ describe("macOS distribution packaging", () => {
     }
   });
 
-  it("keeps the ordinary mirror main-only and leaves release tags to the release workflows", async () => {
+  privateReleasePolicyTest("keeps the ordinary mirror main-only and leaves release tags to the release workflows", async () => {
     const workflow = await readFile(resolve(repoRoot, ".github/workflows/mirror.yml"), "utf8");
     const parsedWorkflow = parseYaml(workflow) as {
       on?: { push?: { branches?: string[]; tags?: string[] }; workflow_dispatch?: unknown };
@@ -206,7 +212,7 @@ describe("macOS distribution packaging", () => {
     expect(push).toBe('git -C "$RUNNER_TEMP/public" push origin HEAD:refs/heads/main');
   });
 
-  it("loads the public mirror deploy key through one private composite action", async () => {
+  privateReleasePolicyTest("loads the public mirror deploy key through one private composite action", async () => {
     const actionPath = ".github/actions/load-mirror-deploy-key";
     const action = await readFile(resolve(repoRoot, actionPath, "action.yml"), "utf8");
     const parsedAction = parseYaml(action) as {
