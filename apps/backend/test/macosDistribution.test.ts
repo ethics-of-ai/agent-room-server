@@ -377,6 +377,27 @@ describe("macOS distribution packaging", () => {
     expect(() => distribution.sparklePublicKeyFromPrivateSecret("not-a-key")).toThrow(/private key/);
   });
 
+  it("verifies a Sparkle key pair through the release CLI's stdin contract", () => {
+    // RFC 8032, section 7.1, test vector 1.
+    const privateSeed = Buffer.from(
+      "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "hex"
+    ).toString("base64");
+    const publicKey = Buffer.from(
+      "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "hex"
+    ).toString("base64");
+    const result = spawnSync(
+      process.execPath,
+      [resolve(repoRoot, "scripts/verify-sparkle-key-pair.mjs"), publicKey],
+      { encoding: "utf8", input: `${privateSeed}\n` }
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("Sparkle private and public keys match.\n");
+  });
+
   it("validates the embedded Sparkle configuration against the selected update channel", async () => {
     const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
     const root = await mkdtemp(join(tmpdir(), "agentroom-sparkle-key-"));
