@@ -1,7 +1,9 @@
 # Builds, signs, notarizes, and publishes the macOS DMG for a tag. This file is
 # maintained in the private repository under mirror/overlay/.github/workflows/
-# and arrives here by sync. The tag is created by the sync job when the same
-# tag is pushed upstream; workflow_dispatch rebuilds an existing tag.
+# and arrives here by sync. Release Please publishes stable tags; the private
+# RC workflow publishes prerelease tags without moving public main.
+# workflow_dispatch can rebuild an existing stable tag or make an unsigned smoke
+# artifact. Published versioned RC assets remain immutable.
 #
 # Secrets (repository settings):
 #   APPLE_DEVELOPER_ID_P12_BASE64   Developer ID Application certificate, .p12, base64
@@ -9,6 +11,9 @@
 #   APPLE_API_KEY_ID                App Store Connect API key id
 #   APPLE_API_ISSUER_ID             App Store Connect API issuer id
 #   APPLE_API_KEY_P8_BASE64         The API key .p8, base64
+#   SPARKLE_PRIVATE_ED_KEY           Sparkle Ed25519 private seed exported by generate_keys
+# Variables (repository settings):
+#   SPARKLE_PUBLIC_ED_KEY            Matching Sparkle Ed25519 public key, base64
 name: Release
 
 on:
@@ -17,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to build and publish (vX.Y.Z)
+        description: Tag to build (signed RC rebuilds are refused)
         required: true
         type: string
       unsigned:
@@ -30,7 +35,9 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  # The rolling RC appcast is shared by every RC tag, so all release jobs are
+  # serialized to keep two valid builds from racing to update it.
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -39,6 +46,9 @@ jobs:
     runs-on: macos-26
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # Promotion to production updates is a reviewed source change. Keep this
+      # disabled until the RC update runbook has passed end to end.
+      STABLE_SPARKLE_UPDATE_CHANNEL: disabled
     steps:
       - uses: actions/checkout@v7
         with:
@@ -55,10 +65,17 @@ jobs:
           VERSION="${TAG#v}"
           MARKETING="${VERSION%%-*}"
           PRERELEASE=false
-          [[ "$VERSION" == *-* ]] && PRERELEASE=true
+          UPDATE_CHANNEL="$STABLE_SPARKLE_UPDATE_CHANNEL"
+          if [[ "$VERSION" == *-* ]]; then
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]] \
+              || { echo "prerelease tag must look like vX.Y.Z-rc.N, got $TAG" >&2; exit 1; }
+            PRERELEASE=true
+            UPDATE_CHANNEL=rc
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "marketing=$MARKETING" >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "update_channel=$UPDATE_CHANNEL" >> "$GITHUB_OUTPUT"
 
       - name: Check the tag against the versions in the tree
         env:
@@ -89,6 +106,24 @@ jobs:
           sudo xcode-select -s "$XCODE/Contents/Developer"
           xcodebuild -version
       - run: brew install xcodegen
+
+      - name: Download the pinned Sparkle release tools
+        if: ${{ !inputs.unsigned && steps.version.outputs.update_channel != 'disabled' }}
+        id: sparkle_tools
+        run: |
+          set -euo pipefail
+          SPARKLE_VERSION="2.9.6"
+          SPARKLE_SHA256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+          ARCHIVE="$RUNNER_TEMP/Sparkle-$SPARKLE_VERSION.tar.xz"
+          curl -fsSL \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" \
+            -o "$ARCHIVE"
+          echo "$SPARKLE_SHA256  $ARCHIVE" \
+            | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/sparkle-tools"
+          tar -xf "$ARCHIVE" -C "$RUNNER_TEMP/sparkle-tools"
+          test -x "$RUNNER_TEMP/sparkle-tools/bin/generate_appcast"
+          echo "dir=$RUNNER_TEMP/sparkle-tools" >> "$GITHUB_OUTPUT"
 
       - name: Download the Node.js 24 LTS runtime to bundle
         id: node_runtime
@@ -121,7 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in P12_BASE64 P12_PASSWORD API_KEY_ID API_ISSUER_ID API_KEY_P8_BASE64; do
-            [ -n "${!name}" ] || { echo "secret for $name is missing; add it to the repository or run with unsigned=true" >&2; exit 1; }
+            [ -n "${!name}" ] || { echo "release credential $name is missing; add it to the repository or run with unsigned=true" >&2; exit 1; }
           done
           KEYCHAIN="$RUNNER_TEMP/agentroom-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
@@ -146,11 +181,26 @@ jobs:
           echo "AGENTROOM_NOTARY_PROFILE=agentroom-ci" >> "$GITHUB_ENV"
           echo "SIGNING_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
 
+      - name: Configure Sparkle update signing
+        if: ${{ !inputs.unsigned && steps.version.outputs.update_channel != 'disabled' }}
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          set -euo pipefail
+          for name in SPARKLE_PRIVATE_ED_KEY SPARKLE_PUBLIC_ED_KEY; do
+            [ -n "${!name}" ] || { echo "release credential $name is missing" >&2; exit 1; }
+          done
+          printf '%s\n' "$SPARKLE_PRIVATE_ED_KEY" \
+            | node scripts/verify-sparkle-key-pair.mjs "$SPARKLE_PUBLIC_ED_KEY"
+          echo "AGENTROOM_SPARKLE_PUBLIC_ED_KEY=$SPARKLE_PUBLIC_ED_KEY" >> "$GITHUB_ENV"
+
       - name: Build, sign, notarize, and package
         env:
           AGENTROOM_NODE_RUNTIME_DIR: ${{ steps.node_runtime.outputs.dir }}
           AGENTROOM_MARKETING_VERSION: ${{ steps.version.outputs.marketing }}
           AGENTROOM_BUILD_NUMBER: ${{ github.run_number }}
+          AGENTROOM_SPARKLE_UPDATE_CHANNEL: ${{ inputs.unsigned && 'disabled' || steps.version.outputs.update_channel }}
           CI: "1"
         run: node scripts/package-macos.mjs
 
@@ -171,6 +221,10 @@ jobs:
         id: artifacts
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          UNSIGNED: ${{ inputs.unsigned || false }}
+          UPDATE_CHANNEL: ${{ steps.version.outputs.update_channel }}
+          SPARKLE_TOOLS_DIR: ${{ steps.sparkle_tools.outputs.dir }}
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: |
           set -euo pipefail
           OUT=build/distribution/macos
@@ -182,9 +236,29 @@ jobs:
             --release-tag "$TAG" \
             --dmg-name "$DMG" \
             --architecture arm64
-          (cd "$OUT" && shasum -a 256 "$DMG" "$MANIFEST" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          SUMMED_FILES=("$DMG" "$MANIFEST")
+          if [ "$UNSIGNED" != "true" ] && [ "$UPDATE_CHANNEL" != "disabled" ]; then
+            UPDATES="$RUNNER_TEMP/sparkle-updates"
+            mkdir -p "$UPDATES"
+            cp "$OUT/$DMG" "$UPDATES/$DMG"
+            printf '%s\n' "$SPARKLE_PRIVATE_ED_KEY" \
+              | "$SPARKLE_TOOLS_DIR/bin/generate_appcast" \
+                  --ed-key-file - \
+                  --download-url-prefix "https://github.com/ethics-of-ai/agent-room-server/releases/download/$TAG/" \
+                  --link "https://github.com/ethics-of-ai/agent-room-server/releases/tag/$TAG" \
+                  --maximum-deltas 0 \
+                  "$UPDATES"
+            cp "$UPDATES/appcast.xml" "$OUT/appcast.xml"
+            grep -q 'sparkle:edSignature=' "$OUT/appcast.xml" \
+              || { echo "Sparkle left the update unsigned; check SPARKLE_PRIVATE_ED_KEY" >&2; exit 1; }
+            grep -q "$DMG" "$OUT/appcast.xml" \
+              || { echo "Sparkle appcast does not name $DMG" >&2; exit 1; }
+            SUMMED_FILES+=(appcast.xml)
+          fi
+          (cd "$OUT" && shasum -a 256 "${SUMMED_FILES[@]}" > SHA256SUMS.txt && cat SHA256SUMS.txt)
           echo "dmg=$OUT/$DMG" >> "$GITHUB_OUTPUT"
           echo "manifest=$OUT/$MANIFEST" >> "$GITHUB_OUTPUT"
+          echo "appcast=$OUT/appcast.xml" >> "$GITHUB_OUTPUT"
           echo "sums=$OUT/SHA256SUMS.txt" >> "$GITHUB_OUTPUT"
 
       - name: Gatekeeper assessment of the packaged app
@@ -203,6 +277,7 @@ jobs:
           path: |
             build/distribution/macos/AgentRoom-*.dmg
             build/distribution/macos/AgentRoom-*-release.json
+            build/distribution/macos/appcast.xml
             build/distribution/macos/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -212,21 +287,55 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DMG: ${{ steps.artifacts.outputs.dmg }}
           MANIFEST: ${{ steps.artifacts.outputs.manifest }}
+          APPCAST: ${{ steps.artifacts.outputs.appcast }}
           SUMS: ${{ steps.artifacts.outputs.sums }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          UPDATE_CHANNEL: ${{ steps.version.outputs.update_channel }}
           NODE_VERSION: ${{ steps.node_runtime.outputs.version }}
         run: |
           set -euo pipefail
-          NOTES="Apple Silicon build, signed with Developer ID and notarized. Bundles Node.js $NODE_VERSION (darwin-arm64). Compatibility is recorded in the release manifest. Verify both files against SHA256SUMS.txt."
+          NOTES="Apple Silicon build, signed with Developer ID and notarized. Bundles Node.js $NODE_VERSION (darwin-arm64). Compatibility is recorded in the release manifest. Verify the release artifacts against SHA256SUMS.txt."
           # Spelled out rather than assembled into an array: this runs on a
           # macOS runner, whose bash is 3.2, where expanding an empty array
           # under `set -u` is an unbound-variable error.
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" --clobber "$DMG" "$MANIFEST" "$SUMS"
+            if [ "$PRERELEASE" = "true" ]; then
+              echo "Versioned RC release $TAG already exists; refusing to replace immutable assets." >&2
+              exit 1
+            fi
+            if [ "$UPDATE_CHANNEL" = "disabled" ]; then
+              gh release delete-asset "$TAG" appcast.xml --yes > /dev/null 2>&1 || true
+              gh release upload "$TAG" --clobber "$DMG" "$MANIFEST" "$SUMS"
+            else
+              gh release upload "$TAG" --clobber "$DMG" "$MANIFEST" "$APPCAST" "$SUMS"
+            fi
           elif [ "$PRERELEASE" = "true" ]; then
-            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" --prerelease "$DMG" "$MANIFEST" "$SUMS"
-          else
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" --prerelease "$DMG" "$MANIFEST" "$APPCAST" "$SUMS"
+          elif [ "$UPDATE_CHANNEL" = "disabled" ]; then
             gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "$DMG" "$MANIFEST" "$SUMS"
+          else
+            gh release create "$TAG" --verify-tag --generate-notes --notes "$NOTES" "$DMG" "$MANIFEST" "$APPCAST" "$SUMS"
+          fi
+
+          # RC builds read this moving appcast; its enclosure still names the
+          # immutable, versioned RC release above. Only the newest published RC
+          # advances the alias.
+          if [ "$UPDATE_CHANNEL" = "rc" ]; then
+            LATEST_RC="$(gh release list --exclude-drafts --limit 1000 \
+              --json tagName,isPrerelease,publishedAt \
+              --jq '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-rc\\.[0-9]+$")))] | sort_by(.publishedAt) | reverse | .[0].tagName')"
+            if [ "$LATEST_RC" = "$TAG" ]; then
+              if gh release view rc > /dev/null 2>&1; then
+                gh release upload rc --clobber "$APPCAST"
+              else
+                gh release create rc --target "$GITHUB_SHA" \
+                  --title "AgentRoom release candidate update channel" \
+                  --notes "Rolling signed appcast for AgentRoom release-candidate testers. Install a versioned RC release first." \
+                  --prerelease "$APPCAST"
+              fi
+            else
+              echo "Not moving the RC channel: newest published RC is $LATEST_RC"
+            fi
           fi
 
       - name: Remove the signing keychain

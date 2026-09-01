@@ -61,13 +61,14 @@ layers.
 
 ## Download
 
-Each release on the [Releases page](https://github.com/ethics-of-ai/agent-room-server/releases)
+Each versioned release on the [Releases page](https://github.com/ethics-of-ai/agent-room-server/releases)
 carries `AgentRoom-<version>-arm64.dmg`,
-`AgentRoom-<version>-release.json`, and `SHA256SUMS.txt`. The manifest records
-the backend/API compatibility policy used by AgentRoom clients. Both the DMG
-and manifest are covered by the checksums. The app is signed with a Developer
-ID certificate and notarized by Apple, so it opens like any other downloaded
-Mac app. Apple Silicon only.
+`AgentRoom-<version>-release.json`, and `SHA256SUMS.txt`. Update-enabled releases
+also carry `appcast.xml`. The
+manifest records the backend/API compatibility policy used by AgentRoom
+clients. Every attached artifact is covered by the checksums. The app
+is signed with a Developer ID certificate and notarized by Apple, so it opens
+like any other downloaded Mac app. Apple Silicon only.
 
 Verify the download before opening it:
 
@@ -83,6 +84,16 @@ as the Mac user), Cursor (run the sign-in command in
 [Signing in to Cursor](docs/clients/MACOS.md#signing-in-to-cursor); a Cursor
 Pro plan or better is required), or DeepSeek Harness (see the
 [DeepSeek runner guide](docs/engineering/DEEPSEEK_HARNESS_RUNNER.md)).
+
+Stable release builds currently have the updater disabled. They contain no
+Sparkle key or feed and make no update request.
+
+Release candidates are isolated from that stable feed. A signed
+`vX.Y.Z-rc.N` build checks the rolling prerelease-only `rc` appcast, whose
+download still points to the exact versioned RC release. To test updating,
+manually install RC.1, have a maintainer publish RC.2 through the private
+release workflow, then use **Check for Updates…** in RC.1. Stable installations
+never query the RC appcast.
 
 ## Build from source
 

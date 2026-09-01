@@ -116,6 +116,83 @@ with the observed `hasSupervisedProcess`, so a button is offered exactly when
 pressing it would do something: Stop whenever a supervised process is there,
 Start only when one is not.
 
+## App Updates
+
+The build selects one Sparkle update channel: `disabled`, `rc`, or `stable`.
+The project default and the signed stable-release workflow currently select
+`disabled`. Those builds embed neither `SUPublicEDKey` nor `SUFeedURL`, and
+`AppUpdateController` does not start Sparkle. They make no scheduled update
+request, and **Check for Updates…** remains unavailable.
+
+Signed builds made from an exact `vX.Y.Z-rc.N` tag select `rc`. They embed the
+release public key and the rolling prerelease-only `rc` feed URL. Automatic
+checks run once a day, but automatic installation remains off. When the
+appcast's `CFBundleVersion` is newer than the installed build, Sparkle presents
+its standard prompt and waits for the operator to choose Install and Relaunch.
+**Check for Updates…** runs the same check immediately. Sparkle refuses
+downgrades.
+
+The RC feed is the sole attached asset on a moving GitHub prerelease tagged
+`rc`; its enclosure points back to the exact versioned RC release rather than
+to the moving alias. The release workflow publishes that versioned release
+before advancing the alias, serializes release jobs, and refuses prerelease tag
+shapes other than `vX.Y.Z-rc.N`. It refuses to replace an existing versioned RC
+release; only the moving `rc` appcast is mutable. The appcast carries an Ed25519
+signature over the notarized DMG. Before building, the release job derives the
+public key from the private seed and requires it to match the key embedded in
+the app. Sparkle requires the same match before signing the appcast and verifies
+the archive before extraction.
+
+`macos-sparkle.mjs` owns the closed channel mapping. `package-macos.mjs` refuses
+an enabled channel without a signing identity, then checks every assembled app
+before the optional signing branch. A disabled build fails if it contains a key
+or feed. An `rc` or `stable` build fails if the key is absent or its feed differs
+from the fixed URL for that channel. Callers cannot supply an arbitrary feed
+URL.
+
+To exercise the real update path without involving stable users, publish and
+manually install `vX.Y.Z-rc.1`, then publish `vX.Y.Z-rc.2`. The second workflow
+run gives the app a larger `CFBundleVersion` and advances the `rc` appcast. Use
+**Check for Updates…** in RC.1 to prompt for RC.2, accept the update, and verify
+that the app-owned backend stops before replacement and restarts after relaunch.
+Maintainers publish each RC with the private repository's manual
+`release-candidate.yml` workflow while the Release Please PR stays open. That
+workflow builds the candidate from current `main` plus Release Please's version
+changes and pushes only the public RC tag. It does not move public `main` or
+create a stable release.
+
+Stable updates remain off after this test. Promotion changes the workflow's
+source-controlled `STABLE_SPARKLE_UPDATE_CHANNEL` from `disabled` to `stable`.
+The same package path then embeds the public key and fixed latest-stable feed,
+generates the signed stable appcast, and attaches it to the stable release.
+Users on an earlier stable build must install this first updater-enabled stable
+release manually. Their installed app has no key and therefore cannot discover
+it. Later stable releases update normally.
+
+An enabled channel's scheduled check is one HTTPS GET to github.com a day. It
+carries Sparkle's user agent, which names the app and its version, and nothing
+else:
+`SUSendProfileInfo` is off, so no system profile is appended, and no bearer
+token, backend address, or workspace path exists on that path. The app ships no
+in-app switch for the schedule. An operator who wants it off can write the same
+key Sparkle reads:
+
+```bash
+defaults write dev.agentroom.AgentRoomMac SUEnableAutomaticChecks -bool false
+```
+
+Installing follows the existing sidecar ownership contract. Immediately before
+Sparkle relaunches, the app records a one-shot restart marker only when an
+app-owned backend is running. AppKit holds its termination reply while the app
+sends SIGINT, waits up to three seconds, then sends SIGTERM and waits up to two
+more seconds. Sparkle can replace and relaunch the app only after the backend
+has exited. If it remains alive, the app cancels termination and clears the
+restart marker. The newly installed app consumes a successful marker and starts
+the bundled backend again. An update leaves an intentionally stopped backend
+stopped. Normal quits do not set a marker, and the updater does not alter
+`$AGENTROOM_HOME`, registered workspaces, Keychain values, managed settings, or
+durable sessions.
+
 ## Managed Backend Settings
 
 Runtime preferences and trust posture — the default runner, the Codex sandbox

@@ -1,6 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
@@ -10,10 +11,224 @@ const repoRoot = resolve(__dirname, "../../..");
 describe("macOS distribution packaging", () => {
   it("builds the macOS product as AgentRoom.app", async () => {
     const project = parseYaml(await readFile(resolve(repoRoot, "apps/macos/project.yml"), "utf8")) as {
-      targets?: Record<string, { settings?: Record<string, string> }>;
+      packages?: Record<string, { url?: string; exactVersion?: string }>;
+      targets?: Record<string, {
+        settings?: Record<string, string>;
+        dependencies?: Array<{ package?: string }>;
+      }>;
     };
 
     expect(project.targets?.AgentRoomMac?.settings?.PRODUCT_NAME).toBe("AgentRoom");
+    expect(project.packages?.Sparkle).toEqual({
+      url: "https://github.com/sparkle-project/Sparkle",
+      exactVersion: "2.9.6"
+    });
+    expect(project.targets?.AgentRoomMac?.dependencies).toContainEqual({ package: "Sparkle" });
+  });
+
+  it("defaults Sparkle to an updater-disabled build", async () => {
+    const project = parseYaml(await readFile(resolve(repoRoot, "apps/macos/project.yml"), "utf8")) as {
+      targets?: Record<string, { settings?: Record<string, string> }>;
+    };
+    const plist = await readFile(resolve(repoRoot, "apps/macos/AgentRoomMac/Info.plist"), "utf8");
+
+    expect(project.targets?.AgentRoomMac?.settings?.AGENTROOM_SPARKLE_FEED_URL).toBe("");
+    expect(plist).toMatch(
+      /<key>SUFeedURL<\/key>\s*<string>\$\(AGENTROOM_SPARKLE_FEED_URL\)<\/string>/
+    );
+    expect(plist).toMatch(/<key>SUEnableAutomaticChecks<\/key>\s*<true\/>/);
+    expect(plist).toMatch(/<key>SUAllowsAutomaticUpdates<\/key>\s*<false\/>/);
+    expect(plist).toMatch(/<key>SUVerifyUpdateBeforeExtraction<\/key>\s*<true\/>/);
+    expect(plist).toMatch(/<key>SUPublicEDKey<\/key>\s*<string>\$\(AGENTROOM_SPARKLE_PUBLIC_ED_KEY\)<\/string>/);
+    // Sparkle's default is already off, but the scheduled check is an outbound
+    // request from every installed app, so the posture is pinned rather than
+    // inherited.
+    expect(plist).toMatch(/<key>SUSendProfileInfo<\/key>\s*<false\/>/);
+  });
+
+  it("publishes a checksum-pinned, EdDSA-signed appcast only for enabled update channels", async () => {
+    const workflow = await readFile(resolve(repoRoot, "mirror/overlay/.github/workflows/release.yml"), "utf8");
+    const credentialWizard = await readFile(resolve(repoRoot, "scripts/setup-release-credentials.sh"), "utf8");
+    const parsedWorkflow = parseYaml(workflow) as {
+      jobs?: { dmg?: { steps?: Array<{ name?: string; run?: string }> } };
+    };
+
+    expect(parsedWorkflow.jobs?.dmg?.steps).toBeDefined();
+    for (const source of [workflow, credentialWizard]) {
+      expect(source).toContain('SPARKLE_VERSION="2.9.6"');
+      expect(source).toContain("52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192");
+    }
+    expect(workflow).toContain("SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}");
+    expect(workflow).toContain("SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}");
+    expect(workflow).toContain("verify-sparkle-key-pair.mjs");
+    expect(workflow).toContain("generate_appcast");
+    expect(workflow).toContain("sparkle:edSignature=");
+    expect(workflow).toContain('SUMMED_FILES+=(appcast.xml)');
+    expect(workflow).toContain('gh release create "$TAG"');
+    expect(workflow).toContain("STABLE_SPARKLE_UPDATE_CHANNEL: disabled");
+    expect(workflow).toContain('UPDATE_CHANNEL="$STABLE_SPARKLE_UPDATE_CHANNEL"');
+    expect(workflow).toContain('echo "update_channel=$UPDATE_CHANNEL" >> "$GITHUB_OUTPUT"');
+    expect(workflow).toContain("prerelease tag must look like vX.Y.Z-rc.N");
+    expect(workflow).toContain(
+      "AGENTROOM_SPARKLE_UPDATE_CHANNEL: ${{ inputs.unsigned && 'disabled' || steps.version.outputs.update_channel }}"
+    );
+    expect(workflow).toContain(
+      'if [ "$UNSIGNED" != "true" ] && [ "$UPDATE_CHANNEL" != "disabled" ]; then'
+    );
+    expect(workflow).toMatch(/concurrency:\s+[^]*group: release\s/);
+    expect(workflow).toContain('gh release delete-asset "$TAG" appcast.xml --yes');
+    expect(workflow).toContain('gh release upload "$TAG" --clobber "$DMG" "$MANIFEST" "$SUMS"');
+    expect(workflow).toContain('gh release upload rc --clobber "$APPCAST"');
+    expect(workflow).toContain('gh release create rc --target "$GITHUB_SHA"');
+    expect(workflow).toContain("refusing to replace immutable assets");
+    expect(workflow).toMatch(
+      /if gh release view "\$TAG"[^]*if \[ "\$PRERELEASE" = "true" \]; then[^]*exit 1[^]*gh release upload "\$TAG" --clobber/
+    );
+    expect(credentialWizard).toContain("gh workflow run release-candidate.yml");
+    expect(credentialWizard).not.toContain("push a RC tag");
+
+    const runnableSteps = parsedWorkflow.jobs?.dmg?.steps?.filter((step) => step.run) ?? [];
+    for (const step of runnableSteps) {
+      const syntaxCheck = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
+      expect(syntaxCheck.stderr, step.name).toBe("");
+      expect(syntaxCheck.status, step.name).toBe(0);
+    }
+
+    const resolveScript = runnableSteps.find((step) => step.name === "Resolve the version from the tag")?.run;
+    expect(resolveScript).toBeDefined();
+    for (const testCase of [
+      { tag: "v0.4.0", stableChannel: "disabled", status: 0, output: "update_channel=disabled" },
+      { tag: "v0.4.0-rc.1", stableChannel: "disabled", status: 0, output: "update_channel=rc" },
+      { tag: "v0.4.0", stableChannel: "stable", status: 0, output: "update_channel=stable" },
+      { tag: "v0.4.0-beta.1", stableChannel: "disabled", status: 1, output: "prerelease tag must look like" }
+    ]) {
+      const result = spawnSync("bash", ["-c", resolveScript!], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: "/dev/stdout",
+          STABLE_SPARKLE_UPDATE_CHANNEL: testCase.stableChannel,
+          TAG: testCase.tag
+        }
+      });
+      expect(result.status, testCase.tag).toBe(testCase.status);
+      expect(`${result.stdout}${result.stderr}`, testCase.tag).toContain(testCase.output);
+    }
+  });
+
+  it("publishes RC tags only from the open Release Please candidate and leaves public main alone", async () => {
+    const workflow = await readFile(resolve(repoRoot, ".github/workflows/release-candidate.yml"), "utf8");
+    const parsedWorkflow = parseYaml(workflow) as {
+      on?: { workflow_dispatch?: { inputs?: Record<string, { required?: boolean; type?: string }> } };
+      permissions?: Record<string, string>;
+      concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+      jobs?: {
+        publish?: {
+          if?: string;
+          steps?: Array<{ name?: string; run?: string; with?: Record<string, unknown> }>;
+        };
+      };
+    };
+
+    expect(Object.keys(parsedWorkflow.on ?? {})).toEqual(["workflow_dispatch"]);
+    expect(parsedWorkflow.on?.workflow_dispatch?.inputs).toMatchObject({
+      version: { required: true, type: "string" },
+      rc_number: { required: true, type: "string" }
+    });
+    expect(parsedWorkflow.permissions).toEqual({ contents: "read", "pull-requests": "read" });
+    expect(parsedWorkflow.concurrency).toEqual({ group: "mirror", "cancel-in-progress": false });
+    expect(parsedWorkflow.jobs?.publish?.if).toBe(
+      "github.ref == 'refs/heads/main' && vars.MIRROR_ENABLED == 'true'"
+    );
+
+    const steps = parsedWorkflow.jobs?.publish?.steps ?? [];
+    const checkout = steps.find((step) => step.with?.ref === "main");
+    expect(checkout?.with).toMatchObject({ ref: "main", "fetch-depth": 0 });
+    expect(workflow).toContain("release-please--branches--main--components--agentroom");
+    expect(workflow).toContain('pull/$PR_NUMBER/merge:refs/remotes/origin/release-candidate');
+    expect(workflow).toContain('expected one open Release Please PR to main');
+    expect(workflow).toContain('Release Please PR changed files outside its generated release set');
+    expect(workflow).toContain("jq -S 'del(.version)'");
+    expect(workflow).toContain("sed -E '/x-release-please-version/s/");
+    expect(workflow).toContain('candidate does not contain the RC release channel');
+    expect(workflow).toContain('deploy-key: ${{ secrets.MIRROR_DEPLOY_KEY }}');
+    expect(workflow).toContain("ghcr.io/gitleaks/gitleaks:latest");
+    expect(workflow).toContain('git -C "$RUNNER_TEMP/public" push origin "refs/tags/$TAG"');
+    expect(workflow).not.toContain("push origin HEAD:refs/heads/main");
+
+    const runnableSteps = steps.filter((step) => step.run);
+    for (const step of runnableSteps) {
+      const syntaxCheck = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
+      expect(syntaxCheck.stderr, step.name).toBe("");
+      expect(syntaxCheck.status, step.name).toBe(0);
+    }
+
+    const requestedScript = runnableSteps.find((step) => step.name === "Validate the requested RC")?.run;
+    expect(requestedScript).toBeDefined();
+    for (const testCase of [
+      { version: "0.5.0", rcNumber: "1", status: 0, output: "tag=v0.5.0-rc.1" },
+      { version: "v0.5.0", rcNumber: "1", status: 1, output: "version must look like" },
+      { version: "0.5.0", rcNumber: "0", status: 1, output: "rc_number must be a positive integer" }
+    ]) {
+      const result = spawnSync("bash", ["-c", requestedScript!], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: "/dev/stdout",
+          GITHUB_REF: "refs/heads/main",
+          RC_NUMBER: testCase.rcNumber,
+          VERSION: testCase.version
+        }
+      });
+      expect(result.status, `${testCase.version}-rc.${testCase.rcNumber}`).toBe(testCase.status);
+      expect(`${result.stdout}${result.stderr}`, `${testCase.version}-rc.${testCase.rcNumber}`).toContain(
+        testCase.output
+      );
+    }
+  });
+
+  it("keeps the ordinary mirror main-only and leaves release tags to the release workflows", async () => {
+    const workflow = await readFile(resolve(repoRoot, ".github/workflows/mirror.yml"), "utf8");
+    const parsedWorkflow = parseYaml(workflow) as {
+      on?: { push?: { branches?: string[]; tags?: string[] }; workflow_dispatch?: unknown };
+      jobs?: { sync?: { if?: string; steps?: Array<{ name?: string; run?: string }> } };
+    };
+
+    expect(Object.keys(parsedWorkflow.on ?? {})).toEqual(["push", "workflow_dispatch"]);
+    expect(parsedWorkflow.on?.push).toEqual({ branches: ["main"] });
+    expect(parsedWorkflow.jobs?.sync?.if).toBe(
+      "github.ref == 'refs/heads/main' && vars.MIRROR_ENABLED == 'true'"
+    );
+    expect(workflow).not.toContain("refs/tags/");
+    expect(workflow).not.toContain("--tag");
+
+    const push = parsedWorkflow.jobs?.sync?.steps?.find((step) => step.name === "Push")?.run;
+    expect(push).toBe('git -C "$RUNNER_TEMP/public" push origin HEAD:refs/heads/main');
+  });
+
+  it("loads the public mirror deploy key through one private composite action", async () => {
+    const actionPath = ".github/actions/load-mirror-deploy-key";
+    const action = await readFile(resolve(repoRoot, actionPath, "action.yml"), "utf8");
+    const parsedAction = parseYaml(action) as {
+      runs?: { using?: string; steps?: Array<{ run?: string }> };
+    };
+
+    expect(parsedAction.runs?.using).toBe("composite");
+    expect(action).toContain('[ -n "$MIRROR_DEPLOY_KEY" ]');
+    expect(action).toContain("chmod 600 ~/.ssh/mirror_deploy_key");
+    expect(action).toContain("ssh-keyscan -t ed25519 github.com");
+    const syntaxCheck = spawnSync("bash", ["-n"], {
+      input: parsedAction.runs?.steps?.[0]?.run,
+      encoding: "utf8"
+    });
+    expect(syntaxCheck.stderr).toBe("");
+    expect(syntaxCheck.status).toBe(0);
+    for (const workflowPath of ["mirror.yml", "release-candidate.yml", "release-please.yml"]) {
+      const workflow = await readFile(resolve(repoRoot, ".github/workflows", workflowPath), "utf8");
+      expect(() => parseYaml(workflow), workflowPath).not.toThrow();
+      expect(workflow, workflowPath).toContain(`uses: ./${actionPath}`);
+      expect(workflow, workflowPath).not.toContain("ssh-keyscan -t ed25519 github.com");
+    }
   });
 
   it("configures the macOS app icon asset catalog", async () => {
@@ -69,6 +284,160 @@ describe("macOS distribution packaging", () => {
     expect(() => distribution.xcodebuildVersionOverrides({ AGENTROOM_BUILD_NUMBER: "7a" })).toThrow(/integer/);
   });
 
+  it("maps explicit Sparkle update channels to fail-closed build overrides", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    const publicKey = Buffer.alloc(32, 7).toString("base64");
+    const rcFeed = "https://github.com/ethics-of-ai/agent-room-server/releases/download/rc/appcast.xml";
+    const stableFeed = "https://github.com/ethics-of-ai/agent-room-server/releases/latest/download/appcast.xml";
+
+    expect(distribution.xcodebuildSparkleOverrides({})).toEqual([]);
+    expect(distribution.xcodebuildSparkleOverrides({ AGENTROOM_SPARKLE_UPDATE_CHANNEL: "disabled" })).toEqual([]);
+    expect(
+      distribution.xcodebuildSparkleOverrides({
+        AGENTROOM_SPARKLE_PUBLIC_ED_KEY: publicKey,
+        AGENTROOM_SPARKLE_UPDATE_CHANNEL: "rc"
+      })
+    ).toEqual([`AGENTROOM_SPARKLE_PUBLIC_ED_KEY=${publicKey}`, `AGENTROOM_SPARKLE_FEED_URL=${rcFeed}`]);
+    expect(
+      distribution.xcodebuildSparkleOverrides({
+        AGENTROOM_SPARKLE_PUBLIC_ED_KEY: publicKey,
+        AGENTROOM_SPARKLE_UPDATE_CHANNEL: "stable"
+      })
+    ).toEqual([`AGENTROOM_SPARKLE_PUBLIC_ED_KEY=${publicKey}`, `AGENTROOM_SPARKLE_FEED_URL=${stableFeed}`]);
+    expect(() =>
+      distribution.xcodebuildSparkleOverrides({
+        AGENTROOM_SPARKLE_PUBLIC_ED_KEY: publicKey,
+        AGENTROOM_SPARKLE_UPDATE_CHANNEL: "disabled"
+      })
+    ).toThrow(/disabled channel must not receive/);
+    expect(() =>
+      distribution.xcodebuildSparkleOverrides({ AGENTROOM_SPARKLE_UPDATE_CHANNEL: "rc" })
+    ).toThrow(/rc channel requires/);
+    expect(() =>
+      distribution.xcodebuildSparkleOverrides({
+        AGENTROOM_SPARKLE_PUBLIC_ED_KEY: "not-a-key",
+        AGENTROOM_SPARKLE_UPDATE_CHANNEL: "rc"
+      })
+    ).toThrow(
+      /32-byte Ed25519/
+    );
+    expect(() =>
+      distribution.xcodebuildSparkleOverrides({ AGENTROOM_SPARKLE_UPDATE_CHANNEL: "nightly" })
+    ).toThrow(/disabled, rc, or stable/);
+    expect(() =>
+      distribution.xcodebuildSparkleOverrides({
+        AGENTROOM_SPARKLE_FEED_URL: rcFeed,
+        AGENTROOM_SPARKLE_PUBLIC_ED_KEY: publicKey,
+        AGENTROOM_SPARKLE_UPDATE_CHANNEL: "rc"
+      })
+    ).toThrow(/derived from AGENTROOM_SPARKLE_UPDATE_CHANNEL/);
+    expect(() => distribution.assertSparklePackagingMode("disabled", undefined)).not.toThrow();
+    expect(() => distribution.assertSparklePackagingMode("rc", undefined)).toThrow(
+      /requires AGENTROOM_CODESIGN_IDENTITY/
+    );
+    expect(() =>
+      distribution.assertSparklePackagingMode("stable", "Developer ID Application: AgentRoom")
+    ).not.toThrow();
+  });
+
+  it("validates the assembled app before the optional signing branch", async () => {
+    const source = await readFile(resolve(repoRoot, "scripts/package-macos.mjs"), "utf8");
+    const validation = source.indexOf("await assertEmbeddedSparkleConfiguration(appPath, sparkleChannel);");
+    const signingBranch = source.indexOf("if (signingIdentity) {");
+
+    expect(validation).toBeGreaterThan(-1);
+    expect(signingBranch).toBeGreaterThan(validation);
+    expect(source.match(/assertEmbeddedSparkleConfiguration\(appPath, sparkleChannel\)/g)).toHaveLength(1);
+    expect(source).toContain("assertSparklePackagingMode(sparkleChannel, signingIdentity);");
+  });
+
+  it("proves the Sparkle public key belongs to the configured private seed", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    // RFC 8032, section 7.1, test vector 1.
+    const privateSeed = Buffer.from(
+      "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "hex"
+    ).toString("base64");
+    const publicKey = Buffer.from(
+      "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "hex"
+    ).toString("base64");
+
+    expect(distribution.sparklePublicKeyFromPrivateSecret(privateSeed)).toBe(publicKey);
+    expect(() => distribution.assertSparkleKeyPair(privateSeed, publicKey)).not.toThrow();
+    expect(() => distribution.assertSparkleKeyPair(privateSeed, Buffer.alloc(32, 9).toString("base64"))).toThrow(
+      /do not match/
+    );
+    expect(() => distribution.sparklePublicKeyFromPrivateSecret("not-a-key")).toThrow(/private key/);
+  });
+
+  it("validates the embedded Sparkle configuration against the selected update channel", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    const root = await mkdtemp(join(tmpdir(), "agentroom-sparkle-key-"));
+    const publicKey = "NsAF3JGCeJ2gRr4bo0oBiwqLpUgnj1sQoBQnLVSlgHU=";
+    const rcFeed = "https://github.com/ethics-of-ai/agent-room-server/releases/download/rc/appcast.xml";
+    const stableFeed = "https://github.com/ethics-of-ai/agent-room-server/releases/latest/download/appcast.xml";
+
+    const writeBundle = async (name: string, publicKeyElement: string, feedURL: string) => {
+      const appPath = resolve(root, `${name}.app`);
+      await mkdir(resolve(appPath, "Contents"), { recursive: true });
+      await writeFile(
+        resolve(appPath, "Contents/Info.plist"),
+        `<plist version="1.0"><dict>\n\t<key>SUPublicEDKey</key>\n\t${publicKeyElement}\n\t<key>SUFeedURL</key>\n\t<string>${feedURL}</string>\n</dict></plist>`
+      );
+      return appPath;
+    };
+
+    try {
+      const disabled = await writeBundle("disabled", "<string></string>", "");
+      await expect(distribution.assertEmbeddedSparkleConfiguration(disabled, "disabled")).resolves.toEqual({
+        channel: "disabled",
+        feedURL: "",
+        publicKey: ""
+      });
+
+      const rc = await writeBundle("rc", `<string>${publicKey}</string>`, rcFeed);
+      await expect(distribution.assertEmbeddedSparkleConfiguration(rc, "rc")).resolves.toEqual({
+        channel: "rc",
+        feedURL: rcFeed,
+        publicKey
+      });
+
+      const stable = await writeBundle("stable", `<string>${publicKey}</string>`, stableFeed);
+      await expect(distribution.assertEmbeddedSparkleConfiguration(stable, "stable")).resolves.toEqual({
+        channel: "stable",
+        feedURL: stableFeed,
+        publicKey
+      });
+
+      const disabledWithKey = await writeBundle("disabled-with-key", `<string>${publicKey}</string>`, rcFeed);
+      await expect(
+        distribution.assertEmbeddedSparkleConfiguration(disabledWithKey, "disabled")
+      ).rejects.toThrow(/disabled build must not embed/);
+
+      const rcWithoutKey = await writeBundle("rc-without-key", "<string></string>", rcFeed);
+      await expect(distribution.assertEmbeddedSparkleConfiguration(rcWithoutKey, "rc")).rejects.toThrow(
+        /rc build must embed/
+      );
+
+      const rcWithStableFeed = await writeBundle("rc-stable-feed", `<string>${publicKey}</string>`, stableFeed);
+      await expect(distribution.assertEmbeddedSparkleConfiguration(rcWithStableFeed, "rc")).rejects.toThrow(
+        /must embed the rc Sparkle feed/
+      );
+
+      const absent = resolve(root, "absent.app");
+      await mkdir(resolve(absent, "Contents"), { recursive: true });
+      await writeFile(resolve(absent, "Contents/Info.plist"), "<plist version=\"1.0\"><dict></dict></plist>");
+      await expect(distribution.assertEmbeddedSparkleConfiguration(absent, "rc")).rejects.toThrow(/must embed/);
+
+      await expect(
+        distribution.assertEmbeddedSparkleConfiguration(resolve(root, "missing.app"), "disabled")
+      ).rejects.toThrow(/Missing/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("recognises the binaries the signing pass must sign and the one it must leave alone", async () => {
     const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
 
@@ -95,6 +464,37 @@ describe("macOS distribution packaging", () => {
       )
     ).toBe(true);
     expect(distribution.nodeRuntimeEntitlementsPath).toBe(resolve(repoRoot, "scripts/codesign/node-runtime.entitlements"));
+    expect(distribution.sparkleBundlePaths("/Applications/AgentRoom.app")).toEqual({
+      framework: "/Applications/AgentRoom.app/Contents/Frameworks/Sparkle.framework",
+      installer: "/Applications/AgentRoom.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc",
+      downloader: "/Applications/AgentRoom.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc",
+      autoupdate: "/Applications/AgentRoom.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate",
+      updater: "/Applications/AgentRoom.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+    });
+  });
+
+  it("preserves relative framework symlinks when copying Xcode's app product", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    const root = await mkdtemp(join(tmpdir(), "agentroom-app-copy-"));
+    const source = resolve(root, "Build/Products/Release/AgentRoom.app");
+    const destination = resolve(root, "dist/AgentRoom.app");
+    const framework = resolve(source, "Contents/Frameworks/Sparkle.framework");
+
+    try {
+      await mkdir(resolve(framework, "Versions/B"), { recursive: true });
+      await writeFile(resolve(framework, "Versions/B/Sparkle"), "binary");
+      await symlink("B", resolve(framework, "Versions/Current"));
+      await symlink("Versions/Current/Sparkle", resolve(framework, "Sparkle"));
+
+      await distribution.copyBuiltAppBundle(source, destination);
+
+      expect(await readlink(resolve(destination, "Contents/Frameworks/Sparkle.framework/Versions/Current"))).toBe("B");
+      expect(await readlink(resolve(destination, "Contents/Frameworks/Sparkle.framework/Sparkle"))).toBe(
+        "Versions/Current/Sparkle"
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("holds the bundled Node runtime to the floor the Cursor SDK's node:sqlite needs", async () => {

@@ -87,6 +87,9 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       "apps/macos/project.yml",
       "apps/shared/AgentRoomClient/Package.swift",
       "scripts/package-macos.mjs",
+      "scripts/macos-sparkle.mjs",
+      "scripts/macos-distribution-security.mjs",
+      "scripts/verify-sparkle-key-pair.mjs",
       "scripts/install-macos.mjs",
       "scripts/generate-release-manifest.mjs",
       "scripts/codesign/node-runtime.entitlements",
@@ -122,6 +125,8 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       ".agentroom/state/audit.jsonl",
       "mirror/manifest.json",
       ".github/workflows/mirror.yml",
+      ".github/workflows/release-candidate.yml",
+      ".github/workflows/release-please.yml",
       // Versioning automation runs against the private repository alone. The
       // changelog stays with it too: its entries link to private pull
       // requests, which would be dead links for a public reader.

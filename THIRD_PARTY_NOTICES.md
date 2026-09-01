@@ -15,6 +15,14 @@ license together with the licenses of the components it bundles (V8, OpenSSL,
 ICU, npm, and others). The distribution's own `LICENSE` file, which lists all
 of them, is retained at `Contents/Resources/node/LICENSE`.
 
+## Sparkle
+
+`AgentRoom.app/Contents/Frameworks/Sparkle.framework` is Sparkle 2.9.6, used to
+check, verify, install, and relaunch macOS app updates. Sparkle is distributed
+under the MIT license. Its source package includes the license, and this notice
+records Sparkle in the distributed app. Source and notices are available from
+<https://github.com/sparkle-project/Sparkle>.
+
 ## npm dependencies
 
 `AgentRoom.app/Contents/Resources/node_modules` holds the backend's dependency
@@ -109,5 +117,5 @@ and the `*.LICENSE.*` files beside it; see also
 
 ## Everything else
 
-The macOS app has no third-party Swift dependencies. The backend's `public/`
-debug page is part of this repository and is covered by its MIT license.
+The backend's `public/` debug page is part of this repository and is covered by
+its MIT license.

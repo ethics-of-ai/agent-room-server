@@ -1,10 +1,41 @@
 #!/usr/bin/env node
 import { constants } from "node:fs";
-import { access, chmod, cp, lstat, mkdir, open, readdir, readlink, realpath, rm, stat, symlink, unlink } from "node:fs/promises";
+import { access, chmod, cp, lstat, mkdir, readdir, readlink, realpath, rm, stat, symlink, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { cleanupLaunchServices } from "./install-macos.mjs";
+import {
+  assertEmbeddedSparkleConfiguration,
+  assertSparklePackagingMode,
+  sparkleUpdateChannel,
+  xcodebuildSparkleOverrides
+} from "./macos-sparkle.mjs";
+import {
+  notaryLogCommand,
+  notarySubmitCommand,
+  shellQuote,
+  signAppBundle
+} from "./macos-distribution-security.mjs";
+
+export {
+  SPARKLE_FEED_URLS,
+  assertEmbeddedSparkleConfiguration,
+  assertSparkleKeyPair,
+  assertSparklePackagingMode,
+  sparkleBundlePaths,
+  sparklePublicKeyFromPrivateSecret,
+  sparkleUpdateChannel,
+  xcodebuildSparkleOverrides
+} from "./macos-sparkle.mjs";
+export {
+  findMachOFiles,
+  isMachOHeader,
+  isPublisherSignedBinary,
+  nodeRuntimeEntitlementsPath,
+  notaryLogCommand,
+  notarySubmitCommand
+} from "./macos-distribution-security.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = resolve(dirname(scriptPath), "..");
@@ -18,8 +49,6 @@ export function bundledResourcePaths(appPath) {
     backendCatalogAssets: resolve(resources, "backend/catalog-assets")
   };
 }
-
-export const nodeRuntimeEntitlementsPath = resolve(dirname(scriptPath), "codesign/node-runtime.entitlements");
 
 /**
  * `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` overrides for xcodebuild,
@@ -121,99 +150,6 @@ export function meetsNodeFloor(version, floor = CURSOR_SDK_NODE_FLOOR) {
   return vPatch >= fPatch;
 }
 
-const MACH_O_MAGICS = new Set([0xfeedface, 0xcefaedfe, 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca]);
-
-/** True when the first four bytes are a thin or fat Mach-O magic number. */
-export function isMachOHeader(bytes) {
-  if (!bytes || bytes.length < 4) return false;
-  return MACH_O_MAGICS.has(bytes.readUInt32BE(0));
-}
-
-/**
- * Regular files under `root` that start with a Mach-O magic. Symlinks are
- * skipped: the pnpm layout reaches every real file through the virtual store,
- * so each binary is visited and signed once.
- */
-export async function findMachOFiles(root) {
-  const found = [];
-  const header = Buffer.alloc(4);
-  const walk = async (dir) => {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const path = resolve(dir, entry.name);
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) {
-        await walk(path);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const handle = await open(path, "r");
-      try {
-        const { bytesRead } = await handle.read(header, 0, 4, 0);
-        if (bytesRead === 4 && isMachOHeader(header)) found.push(path);
-      } finally {
-        await handle.close();
-      }
-    }
-  };
-  await walk(root);
-  return found.sort();
-}
-
-/**
- * The credential flags for one `notarytool` invocation, or null when neither a
- * keychain profile nor an Apple ID triple is configured. Split out of the
- * command builders below so `submit` and `log` can never authenticate
- * differently.
- */
-function notaryCredentialArgs(env = process.env) {
-  if (env.AGENTROOM_NOTARY_PROFILE) {
-    return { args: ["--keychain-profile", env.AGENTROOM_NOTARY_PROFILE], redacted: new Set() };
-  }
-
-  const appleId = env.AGENTROOM_NOTARY_APPLE_ID;
-  const teamId = env.AGENTROOM_NOTARY_TEAM_ID;
-  const password = env.AGENTROOM_NOTARY_PASSWORD;
-  if (!appleId || !teamId || !password) {
-    return null;
-  }
-
-  return {
-    args: ["--apple-id", appleId, "--team-id", teamId, "--password", password],
-    redacted: new Set([password])
-  };
-}
-
-export function notarySubmitCommand(artifactPath, env = process.env) {
-  const credentials = notaryCredentialArgs(env);
-  if (!credentials) return null;
-
-  // `--output-format json` so the caller can read the verdict. `submit --wait`
-  // exits 0 for a submission that completed with `status: Invalid`, so the exit
-  // code alone would let a rejected build go on to be stapled.
-  return commandWithDisplay([
-    "notarytool",
-    "submit",
-    artifactPath,
-    ...credentials.args,
-    "--wait",
-    "--output-format",
-    "json"
-  ], credentials.redacted);
-}
-
-/** Apple's per-issue rejection report for a finished submission. */
-export function notaryLogCommand(submissionId, env = process.env) {
-  const credentials = notaryCredentialArgs(env);
-  if (!credentials) return null;
-
-  return commandWithDisplay([
-    "notarytool",
-    "log",
-    submissionId,
-    ...credentials.args
-  ], credentials.redacted);
-}
-
 export function relocatedPnpmSymlinkTarget({ linkPath, originalTarget, sourceVirtualStore, bundledVirtualStore }) {
   const sourceStore = resolve(sourceVirtualStore);
   const originalTargetPath = isAbsolute(originalTarget)
@@ -242,18 +178,6 @@ export function relocatedWorkspaceSymlinkTarget({ linkPath, originalTarget, sour
   return relative(dirname(linkPath), resolve(bundledWorkspace, workspacePath)) || ".";
 }
 
-function commandWithDisplay(args, redactedValues = new Set()) {
-  return {
-    args,
-    display: args.map((arg) => redactedValues.has(arg) ? "<redacted>" : shellQuote(arg)).join(" ")
-  };
-}
-
-function shellQuote(value) {
-  if (/^[A-Za-z0-9_./:@=-]+$/.test(value)) return value;
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
 async function main() {
   const repoRoot = resolve(process.env.AGENTROOM_REPO_ROOT ?? defaultRepoRoot);
   const outputRoot = resolve(repoRoot, process.env.AGENTROOM_MACOS_DIST_DIR ?? "build/distribution/macos");
@@ -262,6 +186,8 @@ async function main() {
   const dmgStagingPath = resolve(outputRoot, "dmg-staging");
   const dmgPath = resolve(outputRoot, "AgentRoom.dmg");
   const signingIdentity = process.env.AGENTROOM_CODESIGN_IDENTITY;
+  const sparkleChannel = sparkleUpdateChannel(process.env);
+  assertSparklePackagingMode(sparkleChannel, signingIdentity);
 
   assertMacOS();
   await requireExecutable("npx");
@@ -287,11 +213,12 @@ async function main() {
     derivedDataPath,
     "CODE_SIGNING_ALLOWED=NO",
     ...xcodebuildVersionOverrides(process.env),
+    ...xcodebuildSparkleOverrides(process.env),
     "build"
   ], { cwd: resolve(repoRoot, "apps/macos") });
 
   const builtAppPath = resolve(derivedDataPath, "Build/Products/Release/AgentRoom.app");
-  await cp(builtAppPath, appPath, { recursive: true });
+  await copyBuiltAppBundle(builtAppPath, appPath);
   await cp(resolve(outputRoot, "backend-resources/backend"), resolve(appPath, "Contents/Resources/backend"), {
     recursive: true,
     verbatimSymlinks: true
@@ -307,10 +234,11 @@ async function main() {
     backendNodeModules: resolve(appPath, "Contents/Resources/backend/node_modules"),
     bundleRoot: resolve(appPath, "Contents/Resources")
   });
+  await assertEmbeddedSparkleConfiguration(appPath, sparkleChannel);
 
   if (signingIdentity) {
     await requireExecutable("codesign");
-    await signAppBundle(appPath, signingIdentity);
+    await signAppBundle({ appPath, identity: signingIdentity, run });
   } else {
     console.log("Skipping code signing because AGENTROOM_CODESIGN_IDENTITY is not set.");
   }
@@ -391,6 +319,15 @@ async function main() {
 
   console.log(`Packaged ${appPath}`);
   console.log(`Created ${dmgPath}`);
+}
+
+/**
+ * Copies Xcode's app product without rewriting relative framework symlinks to
+ * absolute paths into DerivedData. Absolute links break the framework seal and
+ * would also point outside the installed app after the temporary build is gone.
+ */
+export async function copyBuiltAppBundle(source, destination) {
+  await cp(source, destination, { recursive: true, verbatimSymlinks: true });
 }
 
 async function packageBackendResources(repoRoot, destinationRoot, env) {
@@ -553,60 +490,6 @@ export async function createDmgStaging(stagingPath, appPath) {
   } catch {
     // The staging directory is freshly created; ignore only unusual filesystem symlink failures.
   }
-}
-
-/**
- * Binaries the signing pass leaves exactly as their publisher shipped them.
- *
- * Anthropic's terms for preinstalling Claude Code require the binary to run as
- * published, so the Claude Agent SDK's platform package (which carries it) is
- * never re-signed; it ships with Anthropic's own signature. Cursor's SDK ships
- * `cursorsandbox`, `rg`, and tree-sitter `binding.node` files in its
- * `@cursor/sdk-darwin-*` platform package, signed by Anysphere with the
- * hardened runtime and no entitlements (fact 4 of
- * docs/engineering/CURSOR_SDK_RUNNER.md); AgentRoom bundles the SDK unmodified,
- * so those keep their publisher's signature too. See
- * mirror/overlay/THIRD_PARTY_NOTICES.md.
- */
-export function isPublisherSignedBinary(path) {
-  return (
-    /\/@anthropic-ai\/claude-agent-sdk-darwin-[^/]+\//.test(path) ||
-    /\/@cursor\/sdk-darwin-[^/]+\//.test(path)
-  );
-}
-
-/**
- * Signs inside-out with the hardened runtime, which is what notarization
- * checks: every Mach-O under Contents/Resources first (the node-pty addon and
- * its spawn-helper, any dylib the runtime carries), then the node binary with
- * its JIT entitlements, then the app bundle. `--deep` is deliberately not
- * used: it does not reach binaries under Resources, and re-signing node
- * through it would drop the entitlements V8 needs under the hardened runtime.
- */
-async function signAppBundle(appPath, identity) {
-  const paths = bundledResourcePaths(appPath);
-  await assertPath(nodeRuntimeEntitlementsPath, `Missing node entitlements at ${nodeRuntimeEntitlementsPath}.`);
-  const resourcesRoot = resolve(appPath, "Contents/Resources");
-  const found = (await findMachOFiles(resourcesRoot)).filter((path) => path !== paths.nodeExecutable);
-  const binaries = found.filter((path) => !isPublisherSignedBinary(path));
-  const skipped = found.length - binaries.length;
-  console.log(`Signing ${binaries.length} bundled binaries under Contents/Resources (${skipped} left with their publisher's signature)`);
-  for (const binary of binaries) {
-    run("codesign", ["--force", "--timestamp", "--options", "runtime", "--sign", identity, binary]);
-  }
-  run("codesign", [
-    "--force",
-    "--timestamp",
-    "--options",
-    "runtime",
-    "--entitlements",
-    nodeRuntimeEntitlementsPath,
-    "--sign",
-    identity,
-    paths.nodeExecutable
-  ]);
-  run("codesign", ["--force", "--timestamp", "--options", "runtime", "--sign", identity, appPath]);
-  run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
 }
 
 function run(command, args, options = {}, displayOverride) {

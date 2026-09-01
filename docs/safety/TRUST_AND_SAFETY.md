@@ -1945,6 +1945,64 @@ Current posture:
   ends the app's own child, on the authority of having launched it. The backend
   arms that check before asynchronous startup and compares once immediately, so
   an app that dies before Node reaches the watchdog is still detected.
+- Published macOS updates have one signing authority and a closed compile-time
+  channel: `disabled`, `rc`, or `stable`. The project default and signed stable
+  workflow currently select `disabled`; those builds contain neither a Sparkle
+  public key nor a feed URL, never construct the updater, publish no appcast,
+  and make no update request. Exact `vX.Y.Z-rc.N` builds select `rc` and query a
+  moving prerelease that contains only the current RC appcast. GitHub excludes
+  that `rc` alias from latest-stable resolution. A later reviewed source change
+  may select `stable`, which uses the fixed latest-stable feed and the same
+  packaging checks. No Actions variable can change the channel. The private
+  manual RC publisher accepts only a version and positive RC number. It finds
+  the fixed open Release Please PR, requires its synthetic merge to contain
+  current `main` and the current PR head, and admits only the six generated
+  release files. It also proves that both package files changed only their
+  versions and both annotated source files changed only their annotated
+  versions. It then stages the ordinary allowlisted mirror, runs gitleaks, and
+  pushes an immutable public RC tag without moving public `main`; arbitrary
+  branches, SHAs, tags, and executable package changes are not inputs. The
+  normal mirror and stable publisher share its concurrency group. Merging the
+  Release Please PR remains the only stable tag path. Sparkle checks
+  an enabled channel's HTTPS `appcast.xml` automatically but never installs
+  silently; the operator must accept the standard update prompt.
+  Every enclosure points at the exact immutable tagged release DMG. Before any
+  enabled build, the release job derives the public key from the release-only
+  Ed25519 private seed and refuses a mismatch with the configured public key.
+  Sparkle independently requires the embedded key to match before signing the
+  appcast, and the installed app verifies the archive before extraction. The
+  release job publishes the versioned RC before moving the alias, serializes
+  release jobs, and refuses to replace an existing versioned RC release. The
+  same DMG is
+  Developer ID signed, notarized, and stapled. Source, unsigned smoke, and
+  current stable builds stay disabled. Packaging refuses a disabled bundle
+  carrying a key or feed, refuses any enabled channel without a signing
+  identity, and refuses an enabled bundle missing its key or fixed channel feed.
+  Sparkle compares increasing `CFBundleVersion` values and refuses a downgrade.
+  The check itself is one HTTPS GET to github.com on Sparkle's default
+  `SUScheduledCheckInterval` of a day. What rides on it is Sparkle's own user
+  agent, naming the app and its version, and nothing else: `SUSendProfileInfo`
+  is pinned `false`, so no OS version, CPU, model, or usage counter is
+  appended, and no bearer token, backend address, workspace path, or session
+  content is reachable from that code path at all. What GitHub can infer is
+  that some copy of a public app asked for a public file.
+  On enabled channels, `SUEnableAutomaticChecks` is pinned `true`, which
+  answers Sparkle's first-launch "check for updates automatically?" question
+  on the operator's behalf instead of asking it. That is the one consent this
+  entry decides rather than requests, and it is decided that way because a
+  Mac-hosted bridge that quietly stops receiving fixes is the worse outcome.
+  The lever is the same key in user defaults
+  (`defaults write dev.agentroom.AgentRoomMac SUEnableAutomaticChecks -bool false`),
+  which leaves the menu's Check for Updates as the manual path.
+  Its relaunch follows the existing sidecar contract: the old app records one
+  local restart marker only if it has an app-owned backend running. AppKit then
+  holds application termination while a bounded SIGINT and SIGTERM sequence
+  waits for the backend to exit. If the process remains alive, the app refuses
+  termination and clears the marker, so Sparkle cannot replace the app while the
+  old backend owns the port. The newly installed relaunch consumes a successful
+  marker and starts the bundled backend. An intentionally stopped backend
+  remains stopped. The update path does not rewrite
+  `$AGENTROOM_HOME`, Keychain, workspaces, managed settings, or durable sessions.
 - Backend sidecar crash restarts are capped.
 - Backend compatibility has one local authority and one public advisory source.
   `GET /health.release` contains only public product/API versions and client

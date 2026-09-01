@@ -71,7 +71,11 @@ owner's.
    `xcrun notarytool store-credentials` to turn the API key into a keychain
    profile, and sets `AGENTROOM_CODESIGN_IDENTITY` and
    `AGENTROOM_NOTARY_PROFILE`, both of which `package-macos.mjs` already
-   reads. No unsigned public DMG is planned.
+   reads. Sparkle update archives use a separate Ed25519 key: the private seed
+   is the public repo's `SPARKLE_PRIVATE_ED_KEY` secret and the matching public
+   half is its `SPARKLE_PUBLIC_ED_KEY` Actions variable. The workflow injects
+   them only when its source-controlled update channel is `rc` or `stable`.
+   No unsigned public DMG is planned.
 5. **Contribution model.** **Decided:** issues on, PRs accepted as proposals
    and ported here by hand, stated in `CONTRIBUTING.md` and a PR template.
 6. **Identities.** **Decided** with defaults: sync commits are authored as
@@ -161,7 +165,7 @@ at that commit travel (never the working tree, so `.env`, `.agentroom/`,
 | `apps/backend/` | The backend. `dist/` and `node_modules/` are untracked already. |
 | `apps/macos/` | The Mac app and its tests. Generated `.xcodeproj` is untracked already. |
 | `apps/shared/AgentRoomClient/` | Compiled into the Mac app by `project.yml`. |
-| `scripts/package-macos.mjs`, `scripts/install-macos.mjs` | `pnpm dist:macos` / `install:macos`. |
+| `scripts/package-macos.mjs`, `scripts/macos-sparkle.mjs`, `scripts/macos-distribution-security.mjs`, `scripts/verify-sparkle-key-pair.mjs`, `scripts/install-macos.mjs` | `pnpm dist:macos` / `install:macos`, including the updater policy, signing order, and release key-pair check. |
 | `scripts/generate-app-icons.swift` | `macosDistribution.test.ts` reads its source. It also writes visionOS icon paths, so it cannot *run* in the mirror; see Phase 1. |
 | `scripts/acp-conformance-agent.mjs` | Referenced by `ACP_CONFORMANCE.md`; harmless. |
 | `assets/branding/` | Inputs to the icon generator (two PNGs plus a README). Licensing note below. |
@@ -187,14 +191,15 @@ Never mirrored: `apps/visionos/`, `docs/reference/`, `docs/clients/VISIONOS.md`,
 `docs/README.md` (overlay versions replace them), `AGENTS.md` and `CLAUDE.md`
 (no public counterpart), `.agents/`, `.codex/`, `.claude/`,
 `skills-lock.json` (third-party skills with their own licenses; revisit
-later), `mirror/` itself, and this repo's `.github/workflows/mirror.yml`.
+later), `mirror/` itself, and this repo's private `mirror.yml`,
+`release-candidate.yml`, and `release-please.yml` workflows.
 
 ## How the sync works
 
 One script, runnable locally and in CI: `scripts/mirror-public.mjs`.
 
 ```text
-mirror-public.mjs --source-ref <sha> --target <public checkout> [--push] [--tag vX.Y.Z] [--dry-run]
+mirror-public.mjs --source-ref <sha> --target <public checkout> [--push] [--tag vX.Y.Z[-suffix]] [--dry-run]
 ```
 
 1. Reads `mirror/manifest.json`: `include` prefixes, `exclude` globs, overlay
@@ -215,16 +220,24 @@ mirror-public.mjs --source-ref <sha> --target <public checkout> [--push] [--tag 
 
 The job that runs it, `.github/workflows/mirror.yml` in this repo:
 
-- Triggers: push to `main`, push of a `v*` tag, `workflow_dispatch`.
+- Triggers: push to `main` and `workflow_dispatch` from `main`. It accepts no
+  tag event and creates no tag.
 - `runs-on: ubuntu-latest`, `concurrency: mirror` without cancellation so two
   pushes serialize.
 - Checkout with full depth (the body lists source commits), load an SSH deploy
   key from the `MIRROR_DEPLOY_KEY` secret, clone the public repo, run gitleaks
-  over the staging tree, run the script with `--push` (and `--tag
-  $GITHUB_REF_NAME` on tag events). A deploy key rather than a PAT because a
-  deploy key can push `.github/workflows/*` without the `workflow` scope
-  dance and is scoped to that one repo.
+  over the staging tree, and push the staged commit to public `main`. A deploy
+  key rather than a PAT can push `.github/workflows/*` without the `workflow`
+  scope dance and is scoped to that one repo. The mirror, RC, and stable
+  publishers load it through the same private
+  `.github/actions/load-mirror-deploy-key` composite action.
 - Fails closed: any refusal in step 3 or a gitleaks hit stops the push.
+
+Release candidates take one narrower path through the same script.
+`.github/workflows/release-candidate.yml` is a manual private-repository
+workflow. It publishes a public RC tag from the open Release Please candidate
+without pushing that candidate to public `main`; the stable publisher below
+remains the only path that moves public `main` for a release.
 
 The source is `main`, and this work lands there through a normal pull request
 from `feat/open-source-mirror`. The overlay describes the tree it ships with,
@@ -285,6 +298,20 @@ also triggers. Handing release-please a personal access token would have worked
 too and was rejected: the deploy key can write to one repository and nothing
 else, and it belongs to no person.
 
+The RC wrinkle is that the next version exists only in the open Release Please
+PR until the stable release decision. The ordinary mirror accepts no tag event,
+so it cannot represent or publish the candidate. `release-candidate.yml` resolves the fixed
+`release-please--branches--main--components--agentroom` PR and fetches GitHub's
+synthetic merge of its head with current `main`. It refuses a stale merge,
+another repository or branch, any changed path outside the six generated
+release files, a package-file change beyond `version`, or an annotated source
+change beyond its release version. It then runs the ordinary mirror staging
+and gitleaks scan, creates the exact public `vX.Y.Z-rc.N` tag, and pushes that
+tag only. RC tags therefore exist in the public repository, not this one.
+They are immutable. The workflow accepts no branch, SHA, tag, or feed URL from
+the operator and shares the `mirror` concurrency group with normal sync and
+stable publication.
+
 The config, the manifest, and `CHANGELOG.md` stay private. The changelog's
 entries link to pull requests in this repository, which a public reader cannot
 open, so the public release notes come from the release workflow instead.
@@ -293,16 +320,20 @@ public side sees only `Sync agent-room@...` commits.
 
 ## Releases and the DMG
 
-`release.yml`, triggered by a `v*` tag on the public repo (which the mirror job
-creates when the same tag is pushed here) or by `workflow_dispatch`. Runs on
-`macos-26` with `contents: write`.
+`release.yml`, triggered by a `v*` tag on the public repo or by
+`workflow_dispatch`, runs on `macos-26` with `contents: write`. Release Please
+publishes stable tags through its private workflow; `release-candidate.yml`
+publishes RC tags. Both tags point at an allowlisted, scanned public snapshot.
 
-1. Checkout, pnpm and Node 24, `pnpm install --frozen-lockfile`,
-   `brew install xcodegen`.
+1. Checkout, pnpm and Node 24, `pnpm install --frozen-lockfile`, and
+   `brew install xcodegen`. For an update-enabled channel, download the pinned
+   Sparkle 2.9.6 release tools after verifying their archive against the
+   checksum held in the workflow.
 2. Check the tag against `MARKETING_VERSION` in `apps/macos/project.yml`,
    `version` in `apps/backend/package.json`, and `backendVersion` in
    `apps/backend/src/releaseInfo.ts`. A mismatch fails the run; bumping those
-   three is a commit here before tagging.
+   three is a commit here before tagging. Stable tags use `vX.Y.Z`; the only
+   admitted prerelease shape is `vX.Y.Z-rc.N`.
 3. Download the official Node 24 LTS `darwin-arm64` tarball from
    `nodejs.org/dist`, verify it against `SHASUMS256.txt`, extract, and pass it
    as `AGENTROOM_NODE_RUNTIME_DIR`. The script already supports that variable;
@@ -315,8 +346,11 @@ creates when the same tag is pushed here) or by `workflow_dispatch`. Runs on
    `always()` cleanup step), set `AGENTROOM_CODESIGN_IDENTITY` to the
    certificate's common name, write the App Store Connect `.p8` to a temp
    file, run `xcrun notarytool store-credentials agentroom-ci --key ... --key-id
-   ... --issuer ...`, and set `AGENTROOM_NOTARY_PROFILE=agentroom-ci`. The
-   script then signs, notarizes, and staples without modification. A
+   ... --issuer ...`, and set `AGENTROOM_NOTARY_PROFILE=agentroom-ci`. For an
+   update-enabled channel, a separate step requires both Sparkle keys, derives
+   the public key from the private seed, and refuses a mismatch before injecting
+   `SPARKLE_PUBLIC_ED_KEY` into the app's Info.plist. The package script then
+   signs, notarizes, and staples without modification. A
    `workflow_dispatch` input `unsigned: true` skips this step for a smoke
    build that is never attached to a release.
 5. `node scripts/package-macos.mjs`. Rename the output to
@@ -326,16 +360,75 @@ creates when the same tag is pushed here) or by `workflow_dispatch`. Runs on
    DMG name, and writes `AgentRoom-<version>-release.json` with schema version
    1. A prerelease tag keeps its full suffix in the tag, DMG, and manifest file
    names, while its `X.Y.Z` marketing base must match the backend compatibility
-   version. Write `SHA256SUMS.txt` over both the DMG and manifest, then
-   `gh release create <tag> --generate-notes` with all three files attached.
-   Prerelease when the tag has a `-` suffix.
+   version. A disabled stable release writes checksums over the DMG and manifest
+   and publishes those files with `SHA256SUMS.txt`; it has no appcast. An
+   update-enabled release runs Sparkle's `generate_appcast` with the private key
+   over the notarized DMG, fails if its enclosure has no Ed25519 signature, and
+   writes an `appcast.xml` whose download URL names this exact release tag. Its
+   checksums and GitHub release include all four files. An RC build receives
+   `releases/download/rc/appcast.xml` at build time. After publishing the
+   versioned RC, the serialized workflow creates or advances that moving `rc`
+   prerelease with only the signed appcast; its enclosure still downloads the
+   immutable versioned RC DMG. A signed rerun of any published RC is refused;
+   only the moving `rc` release's appcast may be replaced. The implemented but
+   currently unselected `stable` channel uses
+   `releases/latest/download/appcast.xml`, which follows stable releases and
+   ignores prereleases.
+
+### RC update validation and stable promotion
+
+The release workflow pins `STABLE_SPARKLE_UPDATE_CHANNEL: disabled` in source.
+A GitHub setting cannot turn it on. Stable releases remain signed and notarized,
+but their app bundles contain no Sparkle key or feed and their releases contain
+no appcast.
+
+Before the first RC, the public repository must have the
+`SPARKLE_PRIVATE_ED_KEY` Actions secret and matching `SPARKLE_PUBLIC_ED_KEY`
+Actions variable. `scripts/setup-release-credentials.sh` configures both.
+
+Keep the Release Please PR open during this test. Do not create or push a
+private `vX.Y.Z-rc.N` tag. From this repository, dispatch the reviewed workflow
+from `main`:
+
+```bash
+gh workflow run release-candidate.yml --ref main \
+  -f version=X.Y.Z \
+  -f rc_number=1
+```
+
+The run resolves the open Release Please PR itself and publishes only the
+public `vX.Y.Z-rc.1` tag. Wait for the public versioned release and moving `rc`
+release, then manually install the DMG. Dispatch the same workflow with
+`rc_number=2`. Its later public release run supplies a larger
+`CFBundleVersion` and advances the alias. In RC.1 choose **Check for
+Updates…**, accept the RC.2 prompt, and confirm that the app and app-owned
+backend relaunch. Confirm that registered workspaces, Keychain-backed values,
+managed settings, and durable sessions are unchanged. Public `main` and the
+stable tag remain untouched throughout.
+
+After the RC path passes, promote stable updates in a separate reviewed change:
+
+1. Change `STABLE_SPARKLE_UPDATE_CHANNEL` in `release.yml` from `disabled` to
+   `stable`.
+2. Update the distribution test, this runbook, `docs/clients/MACOS.md`, the
+   trust entry, `AGENTS.md`, and `CLAUDE.md` in the same change.
+3. Merge that promotion into `main`, run the full release verification, then
+   merge the Release Please PR. Release Please publishes the stable `vX.Y.Z`
+   tag through the existing stable path. Its release must include the signed
+   appcast and its app must embed the public key plus
+   `releases/latest/download/appcast.xml`.
+4. Tell existing stable users to install that release manually once. Their
+   current updater-disabled build cannot discover it. Releases after that use
+   the normal Sparkle prompt.
 
 Apple Silicon only at first. The Xcode build is universal but the bundled Node
 and the `node-pty` binary are single-architecture, so an Intel DMG is a second
 matrix entry on `macos-26-intel`, added only if someone asks.
 
-What the signing pass touches, from a packaging run of the public tree: the
-bundled `node` (and, from a Homebrew runtime, `libnode`), the `node-pty` addon
+What the signing pass touches, from a packaging run of the public tree:
+Sparkle's `Installer.xpc`, `Downloader.xpc`, `Autoupdate`, `Updater.app`, and
+framework in its documented inside-out order; the bundled `node` (and, from a
+Homebrew runtime, `libnode`); the `node-pty` addon
 and `spawn-helper` for both Darwin architectures, and, because the package
 step copies the whole pnpm store, dev tooling binaries that have no business
 in the bundle (`esbuild`, `rolldown`, `lightningcss`, `fsevents`). Every
@@ -354,15 +447,9 @@ costs nothing. The `node-pty` prebuilds and the dev tooling
 binaries are only ad-hoc linker-signed as shipped, which is why the pass has
 to sign them.
 
-Two things to verify on the first signed build, which is the first release:
-
-- The script signs the bundled `node` with `--options runtime` and no
-  entitlements. A hardened-runtime Node without `com.apple.security.cs.allow-jit`
-  and `allow-unsigned-executable-memory` can refuse to start. Either pass an
-  entitlements plist for that one binary or sign it with
-  `--preserve-metadata=entitlements` so Node's own shipped entitlements survive.
-- `--deep` signing is deprecated by Apple; it works today, but if notarization
-  complains, sign inside-out (`pty.node`, `spawn-helper`, `node`, then the app).
+The bundled Node executable keeps the JIT entitlements in
+`scripts/codesign/node-runtime.entitlements`. `--deep` is used only to verify
+the result; signing is explicit and inside-out.
 
 Optional size work, not blocking: the current DMG is 231 MB and the app 516 MB
 because `package-macos.mjs` copies the whole `node_modules/.pnpm` virtual store
@@ -429,17 +516,23 @@ backend.
   on, wiki and projects off, description and topics set.
 - In the Apple Developer account: a Developer ID Application certificate
   exported as `.p12`, and an App Store Connect API key with the Developer
-  role. Store them as the six secrets named in the Releases section on the
-  public repo. They never enter this repo.
-  `scripts/setup-release-credentials.sh` walks all six, including the deploy
-  key, and is the fastest way to do it: it opens each portal page, verifies
+  role. Store the Apple credentials and Sparkle private signing seed on the
+  public repo, and the mirror deploy private key on the private repo: seven
+  secrets in total, plus the public Sparkle key as a public-repo Actions
+  variable. They never enter this repo.
+  `scripts/setup-release-credentials.sh` walks all six stages, including
+  the deploy key and Sparkle keypair, and is the fastest way to do it: it opens
+  each portal page, verifies
   the exported `.p12` really carries a Developer ID Application identity with
   its private key, asks Apple to confirm the API key with
   `xcrun notarytool history`, and writes each secret to the repository that
   needs it. Two constraints it surfaces because they stop the job dead: only
   the Apple team's **Account Holder** can create a Developer ID certificate,
   and the API key must be a **team** key, since `notarytool` takes
-  `--issuer` only for those and `release.yml` always passes it. That script
+  `--issuer` only for those and `release.yml` always passes it. The Sparkle
+  stage downloads checksum-pinned release tools, keeps the private key in the
+  operator's login Keychain, and sends its exported seed directly to GitHub.
+  That script
   is operator tooling for this org's own accounts and is deliberately not
   mirrored.
 - Generate an ed25519 keypair. Public half: deploy key with write access on the
@@ -466,9 +559,10 @@ backend.
 
 ## Phase 5: first release
 
-- Bump the three version fields to `0.1.0` if they drifted, merge, tag
-  `v0.1.0` here. The mirror job syncs and tags; `release.yml` builds
-  `AgentRoom-0.1.0-arm64.dmg` and publishes the release.
+- Merge the Release Please PR for `0.1.0`. Its stable publisher stages the
+  allowlisted public tree and pushes `v0.1.0`; `release.yml` builds
+  `AgentRoom-0.1.0-arm64.dmg` and publishes the release. The ordinary mirror
+  never accepts or propagates a private tag.
 - Download the DMG from the Releases page on a Mac that never built AgentRoom,
   install it by drag, launch it without clearing quarantine, and confirm
   Gatekeeper accepts it (`spctl -a -vv /Applications/AgentRoom.app` reports

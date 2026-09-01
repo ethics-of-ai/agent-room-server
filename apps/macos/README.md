@@ -29,6 +29,7 @@ generated `.xcodeproj`.
 - Import editor language packs and notify connected visionOS editors.
 - Inspect backend sessions, stored messages, metadata, and recent events.
 - Export redacted diagnostics and supervise app-owned backend crashes.
+- Test signed updates on RC builds and install them with Sparkle.
 
 The Threads view is for supervision. It can stop an active turn, but it does
 not send prompts or act as another chat client. Stopping a DeepSeek turn ends
@@ -104,3 +105,17 @@ build/distribution/macos/AgentRoom.dmg
 
 The app bundle contains the Node.js runtime, compiled backend, public assets,
 and production dependencies under `AgentRoom.app/Contents/Resources`.
+
+Local, unsigned, and signed stable builds currently omit the Sparkle key and
+feed. The updater does not start in those builds. Release-candidate tags must
+use `vX.Y.Z-rc.N`; those signed builds receive the public key and the mirror's
+rolling prerelease-only `rc` appcast. Install the first RC from its versioned
+release, then publish the next RC through the private manual
+`release-candidate.yml` workflow and choose **Check for Updates…** to test the
+signed replacement and relaunch path. Keep the Release Please PR open until
+that test passes.
+
+The workflow's source-controlled stable channel remains `disabled` until that
+test passes. Changing it to `stable` later uses the already-tested latest-stable
+feed path. Existing stable users must manually install the first enabled stable
+release because their current app has no updater authority.

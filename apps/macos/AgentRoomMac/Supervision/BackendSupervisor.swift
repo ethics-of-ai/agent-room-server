@@ -719,11 +719,19 @@ final class BackendSupervisor {
         appendDiagnostic("info", "Reset local diagnostics and cached backend snapshots.")
     }
 
-    func shutdownNow() {
-        if let process = supervisedProcessController {
-            isGracefullyStopping = true
-            stopImmediately(process)
+    func stopForApplicationTermination() async -> Bool {
+        cancelPendingCrashRestart()
+        guard let process = supervisedProcessController else { return true }
+
+        isGracefullyStopping = true
+        serverState = .stopping
+        appendDiagnostic("info", "Stopping backend sidecar before application termination.")
+        let stopped = await BackendProcessTerminator().stopAndWait(process)
+        if !stopped {
+            serverState = .failed
+            appendDiagnostic("error", "Application termination was cancelled because the backend sidecar did not stop.")
         }
+        return stopped
     }
 
     // MARK: - Sidecar adoption
@@ -982,17 +990,6 @@ final class BackendSupervisor {
         try? await Task.sleep(for: .seconds(3))
         if process.isRunning {
             appendDiagnostic("warning", "Backend did not stop after SIGINT; terminating process.")
-            process.terminate()
-        }
-    }
-
-    private func stopImmediately(_ process: any BackendProcessControlling) {
-        // The launch record stays in place until termination is observed. If
-        // neither signal lands, the next app session can still recognise the
-        // sidecar instead of meeting an orphan it cannot stop.
-        process.interrupt()
-        Thread.sleep(forTimeInterval: 0.5)
-        if process.isRunning {
             process.terminate()
         }
     }

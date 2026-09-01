@@ -4,6 +4,10 @@ options:
 settings:
   MARKETING_VERSION: 0.4.0 # x-release-please-version
   CURRENT_PROJECT_VERSION: 1
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.6
 targets:
   AgentRoomMac:
     type: application
@@ -14,8 +18,12 @@ targets:
       PRODUCT_MODULE_NAME: AgentRoomMac
       PRODUCT_BUNDLE_IDENTIFIER: dev.agentroom.AgentRoomMac
       ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-      GENERATE_INFOPLIST_FILE: YES
-      INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+      AGENTROOM_SPARKLE_FEED_URL: ""
+      AGENTROOM_SPARKLE_PUBLIC_ED_KEY: ""
+      GENERATE_INFOPLIST_FILE: NO
+      INFOPLIST_FILE: AgentRoomMac/Info.plist
+    dependencies:
+      - package: Sparkle
     sources:
       - path: AgentRoomMac
       - path: ../shared/AgentRoomClient/Sources/AgentRoomClient

@@ -6,12 +6,21 @@ struct AgentRoomMacApp: App {
     @NSApplicationDelegateAdaptor(AppTerminationDelegate.self) private var appDelegate
     @State private var supervisor: BackendSupervisor
     @State private var threadMirrorStore: BackendThreadMirrorStore
+    @State private var updateController: AppUpdateController
 
     init() {
         let supervisor = BackendSupervisor()
+        let updateRelaunchState = AppUpdateRelaunchState()
         _supervisor = State(initialValue: supervisor)
         _threadMirrorStore = State(initialValue: BackendThreadMirrorStore())
+        _updateController = State(
+            initialValue: AppUpdateController(
+                relaunchState: updateRelaunchState,
+                shouldRestartBackendAfterUpdate: { supervisor.hasSupervisedProcess }
+            )
+        )
         AppTerminationDelegate.supervisor = supervisor
+        AppTerminationDelegate.updateRelaunchState = updateRelaunchState
     }
 
     var body: some Scene {
@@ -25,6 +34,10 @@ struct AgentRoomMacApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
+                CheckForUpdatesButton(updateController: updateController)
+
+                Divider()
+
                 Button("Refresh Backend Status") {
                     Task { await supervisor.refreshConnectionStatus() }
                 }
