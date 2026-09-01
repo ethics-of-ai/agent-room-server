@@ -33,6 +33,9 @@ final class AppUpdateRelaunchStateTests: XCTestCase {
             publicEDKey: ""
         )
 
+        XCTAssertFalse(controller.isUpdaterAvailable)
+        XCTAssertFalse(controller.canCheckForUpdates)
+
         controller.recordBackendRestartIfNeeded()
         XCTAssertFalse(state.consumeBackendRestartRequired())
 

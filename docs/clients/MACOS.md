@@ -122,14 +122,18 @@ The build selects one Sparkle update channel: `disabled`, `rc`, or `stable`.
 The project default and the signed stable-release workflow currently select
 `disabled`. Those builds embed neither `SUPublicEDKey` nor `SUFeedURL`, and
 `AppUpdateController` does not start Sparkle. They make no scheduled update
-request, and **Check for Updates…** remains unavailable.
+request. The Overview dashboard still shows the installed version and the
+**Check for Updates…** button, but keeps the button disabled and explains that
+the build has no update feed or signing key. The application-menu command is
+disabled for the same reason.
 
 Signed builds made from an exact `vX.Y.Z-rc.N` tag select `rc`. They embed the
 release public key and the rolling prerelease-only `rc` feed URL. Automatic
 checks run once a day, but automatic installation remains off. When the
 appcast's `CFBundleVersion` is newer than the installed build, Sparkle presents
 its standard prompt and waits for the operator to choose Install and Relaunch.
-**Check for Updates…** runs the same check immediately. Sparkle refuses
+The Overview dashboard's **Check for Updates…** button and the matching
+application-menu command run the same check immediately. Sparkle refuses
 downgrades.
 
 The RC feed is the sole attached asset on a moving GitHub prerelease tagged
@@ -153,8 +157,10 @@ URL.
 To exercise the real update path without involving stable users, publish and
 manually install `vX.Y.Z-rc.1`, then publish `vX.Y.Z-rc.2`. The second workflow
 run gives the app a larger `CFBundleVersion` and advances the `rc` appcast. Use
-**Check for Updates…** in RC.1 to prompt for RC.2, accept the update, and verify
-that the app-owned backend stops before replacement and restarts after relaunch.
+the Overview dashboard's **Check for Updates…** button in RC.1 to prompt for
+RC.2, accept the update, and verify that the app-owned backend stops before
+replacement and restarts after relaunch. The application-menu command remains
+an equivalent macOS-standard entry point.
 Maintainers publish each RC with the private repository's manual
 `release-candidate.yml` workflow while the Release Please PR stays open. That
 workflow builds the candidate from current `main` plus Release Please's version

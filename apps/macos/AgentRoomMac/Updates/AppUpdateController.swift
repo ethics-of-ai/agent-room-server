@@ -7,6 +7,7 @@ import Sparkle
 @MainActor
 @Observable
 final class AppUpdateController: NSObject, SPUUpdaterDelegate {
+    private(set) var isUpdaterAvailable = false
     private(set) var canCheckForUpdates = false
 
     @ObservationIgnored private let relaunchState: AppUpdateRelaunchState
@@ -37,6 +38,7 @@ final class AppUpdateController: NSObject, SPUUpdaterDelegate {
             userDriverDelegate: nil
         )
         self.updaterController = updaterController
+        isUpdaterAvailable = true
         // The current value is read here rather than through an `.initial`
         // notification so the menu item is enabled on the first draw, and the
         // observation then carries only the new Bool across to the main actor.

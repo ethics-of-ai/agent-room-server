@@ -28,6 +28,7 @@ struct AgentRoomMacApp: App {
             SupervisionDashboardView()
                 .environment(supervisor)
                 .environment(threadMirrorStore)
+                .environment(updateController)
                 .frame(minWidth: 920, minHeight: 620)
         }
         .defaultSize(width: 1080, height: 720)

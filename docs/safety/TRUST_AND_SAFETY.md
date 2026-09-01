@@ -1993,7 +1993,8 @@ Current posture:
   Mac-hosted bridge that quietly stops receiving fixes is the worse outcome.
   The lever is the same key in user defaults
   (`defaults write dev.agentroom.AgentRoomMac SUEnableAutomaticChecks -bool false`),
-  which leaves the menu's Check for Updates as the manual path.
+  which leaves the Check for Updates actions in the Overview dashboard and
+  application menu as the manual paths.
   Its relaunch follows the existing sidecar contract: the old app records one
   local restart marker only if it has an app-owned backend running. AppKit then
   holds application termination while a bounded SIGINT and SIGTERM sequence
