@@ -176,7 +176,7 @@ final class BackendSupervisorManagedSettingsTests: XCTestCase {
         XCTAssertEqual(supervisor.managedSettings.terminalEnabled, true)
     }
 
-    /// Phase 1 of docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md: a runner
+    /// docs/engineering/RUNNERS.md: a runner
     /// the backend registers brings its own managed settings, and this build has
     /// no field for them. They were already carried through a write untouched;
     /// what was missing is that they were invisible, so an `auto_allow` posture
@@ -251,7 +251,7 @@ final class BackendSupervisorManagedSettingsTests: XCTestCase {
         XCTAssertFalse(contents.contains("remoteSettingsAdmin"))
     }
 
-    // MARK: - Phase 5: the version-2 document and its way back
+    // MARK: - Version-2 document and rollback
 
     func testSeededSettingsFileIsTheVersionTwoDocument() throws {
         let root = temporaryRootURL()

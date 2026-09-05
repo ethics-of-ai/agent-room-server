@@ -3,8 +3,8 @@ import type { CursorSdkAuth, CursorSdkAuthStatus } from "./sdk";
 import { loadCursorSdkAuth } from "./sdk";
 
 /**
- * The operator's Cursor sign-in command (docs/engineering/CURSOR_SDK_RUNNER.md,
- * Step 7; docs/clients/MACOS.md, *Signing in to Cursor*).
+ * The operator's Cursor sign-in command
+ * (docs/engineering/CURSOR_SDK_RUNNER.md, "Credentials and billing").
  *
  * It runs `Cursor.auth.login()` where the browser is. The SDK opens the system
  * browser when that is likely to work, and this command prints the login URL

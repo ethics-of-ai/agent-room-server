@@ -1,2220 +1,748 @@
-# Trust And Safety
+# Trust and safety
 
-Current posture:
+This document owns AgentRoom's trust decisions, gates, bounds, rationale, and
+known limitations. The [API](../api/API.md) owns wire shapes. The
+[runner guide](../engineering/RUNNERS.md) owns adapter architecture.
 
-- Registered local workspaces are the only session targets.
-- The API accepts runner kinds `codex`, `claude_code`, `deepseek`, and
-  `cursor`; all four execute only on the backend behind the `AgentRunner`
-  boundary.
-- Clients send turn messages; they do not execute shell commands.
-- Runner execution stays behind the backend `AgentRunner` adapter.
-- Mutating routes require bearer auth when `AUTH_TOKEN` is configured.
-- Secrets are read from env or macOS Keychain and are never returned by
-  `/api/config`, `/api/status`, `/api/logs`, or `/api/audit`.
-- Backend configuration is a **managed settings file beside the environment**,
-  and the line between what may live in that file and what may not is a trust
-  boundary rather than a convenience. `$AGENTROOM_HOME/config/settings.json`
-  (dev fallback `<cwd>/.agentroom/config/settings.json`) holds only *managed*
-  settings: the preference tier (default runner, models, effort, feature flags,
-  Git timeouts) and the trust-posture tier (terminal access and its cap, the
-  Claude Code permission mode / workspace-settings loading /
-  provider-credential inheritance, the Codex approval policy, sandbox mode, and
-  workspace network access). `GET /api/config` reports them with provenance and
-  `PATCH /api/config` edits them; the macOS app writes the same file directly,
-  because its panes must keep working while the backend is stopped. Posture:
-  - **The never-remote tier is absent by construction.** `AUTH_TOKEN`,
-    `CODEX_EXECUTABLE`, `CODEX_ARGS`, `CODEX_RUNNER_PROTOCOL`,
-    `CLAUDE_CODE_EXECUTABLE`, `TERMINAL_SHELL`, `HOST`, `PORT`, `STATE_DIR`,
-    `WORKSPACE_ROOT`, `AGENTROOM_HOME`, and `EDITOR_CATALOG_DIR` are not managed
-    keys, so they are not in the file, not in the metadata block, and not in the
-    PATCH schema — asking for one is refused exactly as a typo is. This is not a
-    filter applied late: an executable path is "run this binary", which is
-    remote code execution by configuration; `AUTH_TOKEN` is the credential the
-    request itself rides on; and the bind/storage class would strand or relocate
-    the backend mid-edit. It is also what keeps the ungated `GET /api/config`
-    non-secret — the projection cannot grow a secret it has no key for. The
-    natural seam is the same one: a file cannot configure a process that has not
-    started.
-  - **One precedence rule, and an environment value locks the key.** Env wins,
-    else the file, else the code default, and a key set in the environment is
-    reported as `source: "env"` with `editable: false` — the file value for it
-    is inert rather than pending. This extends the model `config/env.ts` already
-    had, where real process env is protected from the `$AGENTROOM_HOME/config/.env`
-    overlay, and it means an operator can still pin any managed key beyond a
-    client's reach by setting it in the environment.
-  - **Everything applies on backend restart, and only the Mac can restart it.**
-    Config is snapshotted once at startup and the gated routes are
-    registered-or-absent from that snapshot, so no route is added or removed and
-    no runner is reconfigured underneath a running turn. `requiresRestart` is
-    therefore always `true`, and `pendingValue` reports what a restart would
-    produce, derived by re-reading the file per request — compose-on-read, no
-    watcher, no cached state.
-  - **The trust tier is remotely editable only behind a Mac-side master switch.**
-    Without it, the bearer token alone would escalate to an unsandboxed shell
-    (`terminalEnabled`) or a widened agent sandbox, collapsing the distinction
-    between "may drive this backend" and "may decide what this backend is
-    allowed to do". `REMOTE_SETTINGS_ADMIN` is **environment-only and default
-    off**, injected by the macOS app: deliberately *not* a managed key, because a
-    key in the file could be granted by whoever already holds the bearer token.
-    While it is off, a patch naming a tier-2 key is a `403` naming those keys,
-    and the metadata reports every tier-2 entry as `editable: false` so a client
-    renders the refusal instead of discovering it. The macOS panes are
-    unaffected: they edit the file on the machine the switch is protecting.
-  - **A file that cannot be used is dropped whole, never applied in part.** An
-    unparseable or schema-invalid file lands every key on its code default with
-    one bounded startup warning, and every managed default is the conservative
-    direction (terminal off, no Codex workspace network access,
-    `workspace-write`). A partially applied trust posture would be a worse answer
-    than the safe defaults. For the same reason the read-merge-write refuses to
-    merge into a file it could not parse — that would silently drop the
-    operator's other keys — and reports `409` instead.
-  - **Which settings exist is declared by the runner that owns them.** The
-    globals are declared in `config/globalManagedSettings.ts`; every runner-owned setting
-    is a `ManagedSettingDefinition` on that runner's `RunnerDescriptor`, carrying
-    its schema, tier, environment variable, and default. The file schema, the
-    env-name table, the tier table, the defaults, the PATCH schema, and the
-    `/api/config` metadata are all derived from those declarations. This is a
-    safety property, not only a tidiness one: the tier of a setting and the schema
-    that bounds it are stated **once**, beside the runner whose posture they
-    describe, so a trust setting cannot be introduced in one table and forgotten
-    in another. Each declaration reuses the same schema object
-    `serviceConfigSchema` is built from, which is what keeps "a file that parses
-    can never make the next startup throw" true by construction rather than by
-    review.
-  - **One file, exactly one schema, and version 2 is what this backend writes.**
-    A version-2 document nests each setting under its owner — `global.<field>`
-    and `runners.<runnerKind>.<field>`. A version-1 document (flat, no
-    `schemaVersion` field) is still read, and is migrated **whole** by the next
-    write that changes something: never key by key, and never into a document
-    holding one setting at two addresses, because that is a precedence question
-    nobody should have to answer. Reading settings never rewrites the file, so a
-    pane that only looks at the posture cannot change it. The rules that bound
-    this:
-    - A version-1 document's `global`/`runners` sections were **never applied** —
-      the flat key is what the backend resolved — so the migration preserves only
-      the addresses this backend does not know and **drops** the ones it does.
-      Carrying a known address forward would silently activate a trust value the
-      running backend had been ignoring.
-    - Unknown runner namespaces and unknown fields are preserved verbatim and
-      never applied (forward compatibility), while a malformed **known** value
-      still makes the file unusable — the trust rule that outranks it.
-    - `schemaVersion: 2` alongside a legacy top-level key is rejected outright,
-      since one file has exactly one schema and assigning precedence would
-      silently answer a question the operator did not know they were asking.
-    - A version this backend does not know is reported as
-      `unsupportedSchemaVersion`: as unusable as a broken file, and a *distinct
-      state*, because a newer file is repaired by updating AgentRoom and a broken
-      one by resetting it — and resetting a newer file would destroy a posture the
-      operator did author. The Mac's reset refuses outright on that state.
-    - `writeManagedSettings` emits version 2, or version 1 for the deliberate
-      **rollback** path, and throws on anything else, so a writer can never
-      strand the operator on a file only a future backend can open. Documents are
-      key-sorted at every level, so the backend's writer and the macOS app's
-      produce the same bytes for the same settings.
-  - **Running an older AgentRoom is a supported step, not a lost posture.** An
-    older build cannot be taught to read the nested document — it would call the
-    file malformed and drop the whole trust posture onto defaults — so the macOS
-    app's Advanced pane offers "Convert settings for an older AgentRoom", which
-    rewrites the file as the flat version-1 document (deliberately with **no**
-    `schemaVersion` field, because an absent version *is* version 1) through the
-    same validation and atomic publish. Every setting this release knows survives
-    both directions; a section only a newer release understands rides along
-    unaddressed, exactly as the reader-first release taught the older reader to
-    preserve it. A current AgentRoom converts the file forward again on the next
-    change. One value is **refused** rather than converted: `runnerKind` naming a
-    runner the older build predates (a bundled `deepseek`, an operator's own
-    `acp_*`). An unknown `runners.<id>` namespace is preserved-and-never-applied,
-    so a third runner's settings cross a downgrade untouched — but `runnerKind`
-    is a *known* key, and the malformed-known-value rule above would then drop
-    the operator's whole posture onto defaults, which is precisely what this
-    conversion exists to prevent. The Mac names the runner and disables the
-    conversion until the operator changes it, deliberately rather than rewriting
-    it for them: which agent their turns run on is not a detail to adjust in
-    service of a file format.
-  - **The offline runner catalog is the same non-secret projection as the route.**
-    A backend that starts successfully writes `$AGENTROOM_HOME/config/runners.json`
-    beside the settings file: the id, display name, and three availability states
-    `GET /api/runners` serves, and nothing else — deliberately not that route's
-    fourth state, since a backend that has just started has proved no runtime
-    readiness and a stopped one could only be misread. It exists because the macOS
-    settings panes work while the backend is stopped and `runnerKind` is a picker
-    over runners only the backend knows. It carries no descriptor policy field and
-    no tier-3 material — an executable path, an environment name, a Keychain slot
-    is not in a descriptor at all — which is why it can sit beside `settings.json`
-    without becoming a secret. It is a cache: the backend never reads it, the Mac
-    prefers its own bundled floor for an absent, unreadable, empty, or
-    newer-versioned file, and a failed write is logged rather than fatal.
-  - **The write is one JSON file in the backend's own config directory.** Never a
-    registered workspace, never an executable path, never a shell. It is
-    validated before it is written (the file schema is at least as strict as the
-    service-config schema per key, so an accepted patch can never make the next
-    startup throw), published atomically (sibling temp opened `O_EXCL`, then
-    renamed) with mode `0600`, and serialized behind a per-process mutex.
-    Cross-process contention with the macOS app stays last-write-wins for v1; an
-    optimistic-lock token mirroring the workspace write's `baseModifiedAt` is the
-    noted hardening.
-  - **The change event carries key names, never values.** A patch that changes at
-    least one key publishes one `config_reloaded` carrying `changedKeys`,
-    `requiresRestart: true`, and an `audit` block repeating those names — a value
-    on the wire would put the operator's trust posture in front of every
-    subscriber, and durable audit persists only `payload.audit`. A tier-2 change
-    also writes one `request.log.warn` naming the keys, the same reflex as the
-    terminal's startup warning. `GET /api/config` stays the one place values are
-    reported, which is safe only because of the tier-3 exclusion above.
-  - **The metadata is LAN-readable.** `GET /api/config` is not gated by the
-    mutating-method preHandler, so anything in the `settings` block is readable
-    by anyone who can reach the backend — including three managed values the
-    older flat projection deliberately omitted (`terminalMaxSessions`,
-    `artifactsEnabled`, `languageCatalogEnabled`), because a client cannot render
-    or edit a setting it cannot read. What protects it is that none of it is a
-    secret: it is the operator's posture, not their credentials. The same test
-    admits the two fields that describe a key's *shape* — `valueKind`, and the
-    `options` a declaration bounds its value to — which report the schema rather
-    than the posture and are what let a client render a setting it was not built
-    with (Phase 1 of
-    `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md`). They are derived from
-    the declaration, so a tier-3 key has no shape to report here either.
-  - **Both addresses are served, and both are accepted.** Every managed setting
-    appears in that block twice — at its canonical version-2 path and at its
-    version-1 flat key — and `PATCH /api/config` takes either, with
-    `settingsSchemaVersion` on the same response saying which is canonical. A
-    headset and a backend upgrade independently, so a client that only knows flat
-    keys must keep working against a backend that has moved on. It is dual
-    emission with the same retirement rule as the legacy `coding_*` metadata
-    blocks: it goes when the advertised floor moves. Naming one setting at both
-    addresses in a single patch is a `400` rather than a resolution — assigning
-    precedence would apply a value the caller did not send.
-- `GET /api/runners` reports which runners the backend registers, and is the one
-  projection of a runner descriptor that leaves the process. It carries a
-  runner's id, its display name, the three availability states the registry
-  resolves (`registered`, `configured`, `enabled`), and the runtime-readiness
-  state below — nothing else. What is absent
-  is the posture: the descriptor fields that decide backend behavior
-  (`promptDelivery`, `turnDiffSource`, `workspaceSkills`, `restoreStrategy`) are
-  no client's business, and the tier-3 material a runner needs in order to start
-  — an executable path, an environment variable name, a Keychain slot — is not in
-  a descriptor at all, so `configured` can say *that* the operator supplied a
-  runner's bootstrap without saying what it is. The route is additive and ungated
-  for the same reason `GET /api/config` is ungated: it is the operator's posture,
-  not their credentials. A client renders its runner pickers from it instead of a
-  compiled-in list, so a runner the backend registers becomes selectable without
-  shipping the apps again; a runner id no descriptor covers is rendered as itself
-  and never coerced to a known runner, which would put a wrong name — and every
-  trust posture that name implies — on a live thread. If this route is absent or
-  its read fails, the Mac's stopped-backend settings path may use its full bundled
-  identity floor, but a remote client uses only the runners that predate the
-  route. That compatibility floor deliberately excludes newer runners until the
-  backend supplies their availability; silence cannot be treated as admission.
-- Runner readiness has **two authorities and stays two**, because one collapsed
-  answer is how a runner comes to read "ready" in a client that cannot start it.
-  - **Backend runtime readiness** — could the backend spawn this runner's child,
-    complete the handshake, and read its model list? Only the adapter can answer
-    it, and only in a running process. The probe is the capability discovery the
-    backend already performs (`GET /api/coding-agent/capabilities`), so nothing
-    spawns a second child to learn what the first established, nothing is probed
-    at startup, and `GET /api/runners` stays a pollable read that initiates
-    nothing. It reports the observation as `ready`, **omitted** for a runner
-    nothing has asked about — "not probed" is not "not ready", and a default
-    would be the same lie inverted. The state is in-memory per backend process:
-    a restart has spawned nothing and says so. A failed probe reports `ready:
-    false` and no text — the child's own diagnostic stays on the bounded `error`
-    of the capabilities response, which is the string `util/redactSecrets`
-    already covers.
-  - **Mac bootstrap readiness** — is the local prerequisite satisfied? It
-    inspects the operator's own machine (an installed executable, the
-    presence-only `claude login` Keychain lookup, the presence-only stat of
-    Cursor's SDK sign-in file) and **must work while the backend is stopped**, which is exactly when an operator is fixing why it
-    would not start, so it is answered on the Mac and never served from here.
-    The tier-3 material it reads — an executable path, an environment variable
-    name, a Keychain account — is not in a public descriptor at all, so it can
-    neither arrive from `/api/runners` nor be inferred from it. What the Mac
-    reads is a **bundled** `RunnerBootstrapDescriptor` per runner: its tier-3
-    slots (each naming the environment variable its value is injected as) and its
-    probes (`executablePath`; `filePath`; `keychainPresence`, which stays the
-    presence-only lookup described below; and `filePresence`, its file analog,
-    which stats a path and never opens, reads, returns, or logs it, because
-    for Cursor the file `~/.cursor/sdk/auth.json` *is* the credential). Bundled
-    is the safety property — a descriptor that
-    could be served would let a remote answer name a binary to run — and the
-    launch environment is built by walking those descriptors, so a stored value
-    for a runner or slot this build does not describe is preserved in Keychain
-    and reaches no child process. Only the *default* runner's unmet required
-    probes block setup, and a runner with no bundled descriptor contributes no
-    check at all rather than another runner's.
-- **External ACP adapters are a new trust surface, and are off by default.**
-  Phase 7 of `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md` admits an
-  operator-configured agent speaking Agent Client Protocol v1
-  (`apps/backend/src/runner/acp`), so a second ACP-speaking agent is tier-3
-  configuration rather than another adapter. Executing an operator-supplied
-  binary that receives workspace paths and drives turns is **not** covered by the
-  Codex or Claude Code entries above: those are two known programs with
-  documented postures, and this is an arbitrary one. Posture:
-  - **Off by default, and absent when off.** `ACP_ADAPTERS_ENABLED` (default
-    `false`) gates the channel in the spirit of `TERMINAL_ENABLED`: with it
-    unset, no definition is parsed, no runner is registered, and nothing can be
-    spawned. Definitions live in `ACP_ADAPTERS`, a JSON list validated with zod;
-    a malformed list is dropped **whole** with one bounded warning rather than
-    applied in part, the same rule the managed settings file follows.
-  - **Tier 3, environment-only, and never served.** The executable path, its
-    fixed arguments, and the environment names an adapter may receive are
-    environment configuration and nothing else. An executable path is "run this
-    binary" — remote code execution by configuration — so it is not a managed
-    setting, is absent from `GET /api/config` and the PATCH schema by
-    construction, and can arrive from neither `/api/runners` nor
-    `config/runners.json`. What those two report about a configured adapter is
-    exactly what they report about a built-in runner: an id, a display name, the
-    availability states, and the observed `ready` — never what the bootstrap is.
-  - **Admission is a decision about a specific program.** The path must be
-    absolute (a relative one would resolve against a *registered workspace*, so
-    the repository being worked on would choose the binary), must not be a
-    symlink (whose target can be repointed after the operator reviewed it), and
-    must be a regular file with an executable bit. It is canonicalized with
-    `realpath` and the resolved path is what is spawned. argv is assembled by the
-    backend from the definition's fixed arguments: no shell, no caller fragment.
-  - **The child environment is an allowlist, not an inheritance.** This is
-    deliberately stricter than the built-in runners, which inherit the operator's
-    environment minus `AUTH_TOKEN` (and, for Claude Code, the provider
-    credentials it scrubs) because they need it to find their own credentials.
-    An arbitrary allowlisted binary has no such claim, so it receives only
-    `PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`, `USER`, `LOGNAME` plus the
-    credential names the operator explicitly granted it. `AUTH_TOKEN` is refused
-    as a grant and never present, the same rule every other spawned child
-    follows.
-  - **The protocol is bounded at every step.** `AcpStdioClient` caps frame size
-    (1 MB, including an unterminated line still accumulating), nesting depth
-    (64, because the value reaches the canonical mapper, the bounded `native`
-    blob, and durable audit), total stdout volume per child, and the retained
-    stderr tail. Handshake, turn, cancel, and shutdown each carry a timeout, and
-    a breach is not negotiated: the child is killed (`SIGTERM`, then `SIGKILL`)
-    and every pending request rejects with a bounded reason. Every consumed
-    message is zod-validated on receipt — shape validation is **not** trust, the
-    allowlist is; validation is what keeps a malformed frame from reaching the
-    mapper as an unchecked shape.
-  - **Only restorable agents are admitted.** AgentRoom reaps idle children and
-    resumes them, so an agent advertising neither `session/resume` nor
-    `loadSession` is refused at `initialize` rather than allowed to silently
-    begin a fresh conversation under an existing AgentRoom session id. Resume is
-    preferred; a `session/load` replay is consumed with updates **suppressed**,
-    because AgentRoom already holds that transcript and emitting the replay would
-    duplicate every past message.
-  - **Filesystem and terminal capabilities are declined.** AgentRoom advertises
-    `fs.readTextFile: false`, `fs.writeTextFile: false`, and `terminal: false` at
-    `initialize`. ACP's fs methods take absolute paths, carry no
-    optimistic-locking or conflict detection, and mandate create-on-write — all
-    three incompatible with the bounded, `baseModifiedAt`-locked,
-    parent-must-exist workspace PUT that remains the only client-initiated
-    workspace write. A conforming agent therefore never calls them (verified
-    against the reference agent in the Phase 0b spike); one that calls anyway is
-    refused per request and the breach is logged.
-  - **Permission requests are refused by default.** `session/request_permission`
-    selects a rejection option the agent itself offered, or cancels when it
-    offered none. It never invents `allow_always` and never selects an allow
-    option. The other two postures are values of that same **tier-2** per-adapter
-    managed setting (`<prefix>PermissionPolicy`, env
-    `ACP_<ID>_PERMISSION_POLICY`), so a paired client can only set either behind
-    the Mac's `REMOTE_SETTINGS_ADMIN` switch: `ask` holds the request open for a
-    person to answer (the **Interactive permission approval** section below), and
-    `auto_allow` is the unattended posture. All three answer with an option the
-    agent supplied *for that request* and can express nothing else.
-  - **Adapter-authored text is redacted.** The bounded stderr tail and every
-    error the agent's own protocol returns pass through
-    `util/redactSecrets` before reaching a response, an event, or durable audit —
-    the same rule as the Codex stderr tail, and for the same reason: those
-    strings surface on reads the mutating-method preHandler does not gate.
-  - **Ids are namespaced, and settings prefixes are checked rather than
-    assumed.** A configured adapter's id must match `acp_[a-z...]`, so an
-    operator cannot shadow a built-in runner or reach its managed-settings
-    prefix. The namespace alone is *not* enough, though, and treating it as
-    sufficient would be the mistake: two configured adapters can still derive the
-    same or a prefixing settings key from different ids (`acp_foo` and
-    `acp_foo_` both reach `acpFoo…`), which would resolve one adapter's trust
-    setting into the other's namespace — a posture landing on the wrong runner.
-    So prefixes are compared explicitly rather than inferred from the id: the
-    definition reader checks each configured adapter against the others, and
-    registration checks every candidate against the built-ins as well, which is
-    the check that has to hold because it is the one a test or a future caller
-    also reaches. A collision is refused **whole**: the reader drops the entire
-    definition list, and registration validates every candidate before committing
-    any, so a rejected set can never leave a partly-populated registry behind. The built-in admission list is
-    what this build *ships* (`codex`, `claude_code`, `deepseek`) and an adapter
-    never joins it: the rollout gate is about a *bundled* id reaching an older
-    Mac's settings file, which an id that Mac's own operator configured is not. An unknown runner namespace in the
-    settings document is already preserved-but-never-applied, which is what makes
-    this safe.
-  - **The agent's own sandbox posture is never projected into a turn setting.**
-    A v1 `session/new` response carries `configOptions`, a list of session
-    configuration selectors each tagged with a reserved category. `model` and
-    `thought_level` map into `CodingAgentCapabilities` so an ACP runner's model
-    picker works like any other runner's. `model_config` deliberately does not:
-    ACP defines categories as UX hints, and that one may describe context size,
-    speed/quality, or several independent controls, so presenting its first value
-    as a service-tier "Speed" picker would misrepresent a compliant agent. The
-    fourth category, **`mode`, is deliberately dropped**, and not for want of a
-    place to put it: it is the agent's own
-    approval/sandbox preset, whose values on the reference agent run from
-    `read-only` to `agent-full-access` ("edit files outside this workspace and run
-    commands with network access"). Turn settings are chosen per turn by anyone
-    holding the bearer token, whereas every other runner trust posture — the Codex
-    sandbox mode and network pin, the Claude Code permission mode, this adapter's
-    own `permissionPolicy` — is a tier-2 managed setting a paired client can only
-    change behind `REMOTE_SETTINGS_ADMIN`. Carrying `mode` across would put a
-    sandbox-widening control on the composer with none of that gating, which is
-    the same escalation the tier-2 rule exists to prevent. AgentRoom therefore
-    neither reports it nor sets it; an operator who wants a different mode
-    configures the agent itself. A selection is applied with
-    `session/set_config_option` before the prompt (ACP has no per-turn model
-    parameter, so it is session-scoped), only for a value the agent itself listed
-    for that selector, and only where it differs from the live one. The required
-    complete-state response must confirm the selected value, and a complete
-    agent-initiated config update replaces the live record even while idle. See
-    `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md`.
-  - **Image attachments are negotiated per adapter, and bounded when they are
-    accepted.** An agent receives image content blocks only if it advertised the
-    exact ACP boolean `promptCapabilities.image: true` at `initialize`; a truthy
-    malformed value and an explicit or absent `false` all fail closed. The answer
-    is stored on the child that supplied it because concurrently retained
-    children can negotiate differently. Before any handshake, or when completed
-    handshakes disagree, synchronous validation treats support as *unknown*
-    rather than letting one child authorize or refuse delivery to another; the
-    selected child's own handshake then decides, with the same explicit refusal
-    instead of a silently dropped attachment. When every recorded answer is
-    `false`, validation can refuse before a turn exists. Because ACP has no
-    local-file image source, an accepted attachment is inlined as base64 in the
-    prompt frame, so
-    the **total decoded image bytes one prompt may carry is bounded** (16 MB) on
-    top of the per-file cap the upload already applies — eight 10 MB attachments
-    would otherwise be ~107 MB of base64 written to an arbitrary child on a
-    single line. It is the one outbound bound on that transport, and it exists
-    for the same reason the inbound ones do.
-- **Interactive permission approval lets a client authorize one action inside a
-  running turn, and it is a trust surface in its own right.** Phase 2 of
-  `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md`. Until it landed, a runner
-  that asked permission mid-turn had two answers available: refuse everything, or
-  the unattended `auto_allow` above. This is the third — ask the person driving
-  the session — and everything about it is shaped by the fact that the answer
-  authorizes an agent to act on the operator's Mac. Posture:
-  - **Nobody is asked unless the posture says so.** The `ask` value of the
-    per-adapter `permissionPolicy` is what opens the channel, and it is **tier
-    2** like the other two, so a paired client can only select it behind
-    `REMOTE_SETTINGS_ADMIN`. Asking is deliberately *not* implied by a client
-    being connected: a posture that changed with who happened to be listening
-    would be no posture at all, and every turn under the default `reject` would
-    otherwise stall for the timeout before refusing. `auto_allow` still never
-    asks, connected client or not.
-  - **The route selects an option; it is not a "run this" endpoint by another
-    name.** `POST /api/agent-sessions/:sessionId/permissions/:requestId` takes one
-    outstanding request id and one `optionId`, and the runner checks that id
-    against the options the **agent itself** offered for that request. An option
-    the agent did not supply is a `400`; a request that is not outstanding is a
-    `404`. It cannot invent `allow_always`, cannot name a tool, a path, or a
-    command, and cannot reach a request in another session. It is a mutating
-    POST, so the global preHandler requires the bearer token when `AUTH_TOKEN` is
-    configured — authorizing an agent's action is not something an
-    unauthenticated caller on the LAN can do.
-  - **The wait is bounded and falls back conservatively.** A request holds for
-    `permissionTimeoutMs` (5 minutes) and then gets exactly what the configured
-    policy would have answered — for `ask`, the conservative refusal. A turn that
-    blocks indefinitely on an absent operator is a worse failure than a refusal.
-    The resolved event carries `decidedBy` (`human`, `policy`, or `timeout`),
-    because "allowed" reads very differently depending on who allowed it.
-  - **Outstanding requests are per session, bounded, and in memory.** At most 8
-    per session — past that a request is answered by the policy rather than
-    queued, which is what keeps a looping or hostile agent from growing the map —
-    and an empty, duplicate, overlong, or over-cap answer vocabulary is never
-    advertised as a client-answerable request. Registration happens before the
-    live event carries `requestId` and `options`, so their presence means the
-    route is already open. Admitted vocabularies contain at most 16 unique,
-    exact option ids; opaque ids are never trimmed or truncated between the
-    event, route, and store. Requests are released when the session is deleted,
-    when its child dies or is torn down, and when the turn settles, so no wait
-    outlives what it belongs to. Nothing about a pending request is persisted.
-  - **Audit records the decision, not the payload.** A resolved request publishes
-    one sanitized `agent_permission_resolved` carrying the request id, the
-    selected option, the authority, and the status — and that is what durable
-    audit keeps. The tool call the agent was about to run is deliberately not in
-    it: it can carry anything, and a durable log is the wrong place for it. What
-    the operator needs in order to *decide* rides the live
-    `coding_permission_requested` event instead (the agent's own tool-call block,
-    bounded by the canonical mapper like every other content it carries) — the
-    same class of model-authored text the `coding_tool_activity_*` stream already
-    carries, and subject to the same caveat: the recent-event buffer is readable
-    through `/api/status` and `/api/logs`, which the mutating-method preHandler
-    does not gate.
-  - **The posture stays per-runner.** This adds an answer channel; it does not
-    reconcile the Codex approval policy, the Claude Code permission mode, and an
-    ACP adapter's `permissionPolicy` into one enum. The built-in runners
-    answer from their own postures and expose no outstanding request (Cursor's
-    SDK offers no approval callback at all), so the
-    route's `404` is the honest answer for them — it reads the absence of a
-    runner's approval channel, never which runner it is.
-- **Clarifying questions let an agent pause a turn to ask the person driving
-  the session for direction, and answering one authorizes nothing.** A runner
-  that is unsure which way to go raises one *batch* of one or more *sets* —
-  each a prompt, the options it offers, how many may be chosen, and whether
-  free text is accepted beside or instead of a choice — and waits; the person
-  answers through one route and the turn continues with the answers. It is the
-  sibling of interactive permission approval on the same shared waiting store
-  (`runner/shared/PendingRequests.ts`, `PendingQuestionRequests.ts`), and it
-  differs from it in the one way that matters: a permission answer lets an
-  agent *act* on the operator's Mac, whereas a question answer is the person's
-  own choices and words going back to an agent that asked for them — the same
-  class of input as the turn message. Posture:
-  - **One route, minted ids, no invented answers.**
-    `POST /api/agent-sessions/:sessionId/questions/:requestId` selects options
-    the agent itself offered per set, and carries free text only where the set
-    invited it. At least one set must be answered; a set marked `required`
-    needs nonblank discussion even when it also offers options. Request, set,
-    and option ids are AgentRoom's (`question-<uuid>`,
-    `set-<n>`, `opt-<n>`); each adapter keeps the map back to the agent's own
-    question text and labels, so nothing a client sends is a string the agent
-    interprets as an id. A set or option the agent did not offer is `400`; a
-    batch that is not outstanding is `404` — which is also the honest answer
-    for a runner with no way to ask, because the route calls an optional
-    `AgentRunner.answerQuestionRequest` hook and never reads runner identity.
-    Mutating, so the global preHandler requires the bearer token. The read
-    beside it, `GET /api/agent-sessions/:sessionId/questions`, returns
-    model-authored question text and is gated like `/messages`.
-  - **The wait is bounded, and a timeout is reported as a timeout.** A batch
-    holds for ten minutes (longer than a permission request's five: a question
-    asks for a decision, and a headset put down to think about one should still
-    find the turn waiting), then the runner applies its own away fallback — the
-    agent is told nobody answered and to proceed on its best judgment — and the
-    resolved event says `decidedBy: "timeout"`. The channel never picks a
-    default option on the person's behalf; a cancelled turn or a lost child
-    resolves the batch `cancelled`, with no authority at all.
-  - **Outstanding batches are per session, bounded, and in memory.** At most 8
-    per session (a blocking agent asks one at a time; the cap is for a looping
-    or non-blocking one), at most 8 sets of at most 8 options, text clamped at
-    every boundary, and a batch outside those bounds is refused to the agent
-    rather than truncated into a vocabulary the person never saw. Released when
-    the turn settles, the child dies, or the session is deleted; nothing about a
-    pending batch is persisted. A turn blocked on a question is busy, so the
-    session host never idle-reaps its child underneath it.
-  - **Audit records the decision; the thread records the words.**
-    `agent_question_resolved` carries the request id, status, authority, and
-    each answered set's option ids — never the free text. The free text is the
-    person's own message and goes where their messages go: the backend appends
-    the rendered answer to the session history as a `role: "user"` message
-    (`context.questionRequestId`), which the bearer-gated `/messages` read
-    serves. A set the agent marked `sensitive` renders its discussion field
-    securely. Codex's `isSecret` mapping is free-text-only; a prompt-contract
-    runner may still offer non-secret option labels beside sensitive discussion.
-    AgentRoom sends that discussion only to the agent and omits it from the
-    resolved event, message, audit, and logs. As with any model input, the model
-    can choose to restate it in later assistant output; `sensitive` is a storage
-    and rendering rule, not a model non-disclosure guarantee.
-  - **Claude Code's posture is unchanged by supplying the SDK callback.** The
-    CLI's `AskUserQuestion` tool reaches the host only through the SDK
-    `canUseTool` callback, and the CLI routes it there *before* consulting the
-    permission mode — so under the default `bypassPermissions` the callback is
-    invoked for that tool alone (verified against SDK 0.3.172 / CLI 2.1.172:
-    read-only and mutating tools never reach it). Under a stricter configured
-    mode a tool that needs a prompt does reach it, and the runner refuses it
-    with the CLI's own headless wording — exactly what the headless CLI did
-    before the callback existed. The callback is never passed to the isolated
-    capability probe, and it is passed at all only while
-    `clarifyingQuestionsEnabled` is on; off, the SDK adds no permission-prompt
-    tool and the CLI behaves as it did before the channel.
-  - **Codex's tool is switched on per thread, and the dispatcher that serves
-    it refuses everything else.** The app-server's `request_user_input` tool is
-    "unavailable in Default mode" unless two config keys are set, so the runner
-    pins `tools.experimental_request_user_input = { enabled: true }` and
-    `features.default_mode_request_user_input = true` on `thread/start` and
-    `thread/resume` the same way it pins the network-access key — per thread,
-    following the managed switch, never by editing the operator's global Codex
-    config (verified against codex-cli 0.149). Serving the request meant giving
-    `JsonRpcLineClient` a request dispatcher it never had; every other
-    server→client request — the approval family under a prompting
-    `approvalPolicy`, a method a newer app-server invents — is now refused
-    with a JSON-RPC `-32601` and a warn log, where before it was silently
-    dropped and the turn hung waiting for an answer nobody would send. A
-    question the agent marks `isSecret` maps to a `sensitive` free-text set.
-  - **DeepSeek's question channel is model-authored control text with a narrow
-    grammar, not a server-to-client request.** The DeepSeek descriptor owns the
-    standing instruction because its parser owns the matching syntax;
-    `AgentTurnContextAssembler` injects it only for `prompt_contract` mode. The
-    streaming parser accepts at most one line-start `<agentroom-question>` JSON
-    block per Harness protocol turn, buffers at most 64 KiB, zod-validates the
-    shared 8-set × 8-option vocabulary and text caps, and mints every set and
-    option id itself. It removes only a complete valid block. Inline,
-    malformed, incomplete, oversized, or later blocks remain assistant prose,
-    so model variability cannot silently erase output. A valid block is still
-    model-authored text: it rides the live canonical request and the
-    bearer-gated re-seed read under the same caveat as native question text.
-    Parsing it authorizes nothing and performs no action.
-  - **A DeepSeek answer continues the same AgentRoom turn through a second
-    Harness prompt.** The first Harness `turn/end` does not settle the public
-    turn while a parsed batch is pending. The existing bearer-gated answer
-    route settles the shared wait; the adapter maps offered ids back to labels
-    and invited discussion, sends no AgentRoom ids, and queues that text on the
-    already-live Harness session. The continuation's terminal event settles
-    the AgentRoom turn. Timeout or an unavailable wait sends no choice and asks
-    the model to proceed on its best judgment. Sensitive discussion is sent in
-    that internal prompt but stripped from the canonical resolution before the
-    shared transcript and audit paths see it. Cancellation, child loss,
-    session deletion, and disposal release the wait. This adds no route,
-    permission, shell, or process surface.
-  - **Cursor's question channel is one custom tool AgentRoom registers, and
-    the SDK's own `askQuestion` is always disallowed.** The SDK's built-in tool
-    is absent from the headless catalog (fact 3 of
-    `docs/engineering/CURSOR_SDK_RUNNER.md`), and every `agent/start` passes
-    `disallowedTools: ["askQuestion"]` so a later SDK cannot open a question
-    path AgentRoom has no answer for. While `clarifyingQuestionsEnabled` is on,
-    the host registers `ask_user_question` as a `local.customTools` entry whose
-    input schema is the shared 8-set × 8-option vocabulary; its `execute` sends
-    one `question/ask` request to the backend over the host's own JSON-RPC and
-    awaits the answer, so the SDK's tool call stays open for exactly the shared
-    wait. The backend mints every id and emits the same canonical pair; the
-    tool result the model sees is the person's labels and invited text, never
-    an AgentRoom id; a timeout returns a result saying nobody answered and
-    asking the model to continue on its best judgment. A `sensitive` set's text
-    enters that tool result and is stripped from the canonical resolution,
-    transcript, audit, and logs. Off, no tool is registered and no prompt
-    mentions one. The vendor's note that a custom tool "never requires
-    interactive approval" is correct here: answering it authorizes nothing, and
-    the sandbox and auto-review posture are untouched by it.
-  - **One tier-1 kill switch.** `clarifyingQuestionsEnabled` (env
-    `CLARIFYING_QUESTIONS_ENABLED`, default on) is a preference, not a trust
-    setting: answering a question widens nothing, and turning the channel off
-    costs only the agent's ability to ask. Every runner reads it the same way —
-    off means the runner is given no channel at all, never a channel that
-    answers on the person's behalf. For DeepSeek, both the standing instruction
-    and the parser are absent; matching text the model emits anyway remains
-    ordinary assistant prose. Codex's per-thread enable flags are explicitly
-    pinned false so a user-global Codex config cannot bypass the switch, and a
-    defensive request handler returns an empty answer if a process asks anyway.
-- **Context compaction is reported, and reporting it adds no surface.** A runner
-  that summarizes its own conversation to free context announces it, and three
-  of the four bundled runners already did while the adapters discarded it: a
-  long thread's occupancy fell between two turns with nothing saying why, and
-  the transcript above that point was a conversation the agent no longer held in
-  full. Two canonical activity kinds now carry it
-  (`context_compaction_started` and `context_compaction_completed`, on the
-  matching `coding_context_compaction_*` event types) and one optional field
-  reports where a runner's auto-compaction fires. There
-  is no route, managed setting, gate, bound, descriptor field, or write path,
-  and no way to *trigger* a compaction: this channel only observes one. Posture:
-  - **The compaction summary never leaves the adapter.** Cursor's `task` message
-    is the model's own summary of the conversation, and a Codex compaction item
-    may carry content. That is model-authored text of unbounded length
-    describing everything the thread has done. It reaches neither the canonical
-    payload, the activity `content` block, the transcript, the recent-event
-    buffer that `/api/logs` and `/api/status` serve ungated, nor durable audit.
-    What crosses the `AgentRunner` boundary is a trigger word and two integers,
-    and for Cursor only the kind. Claude Code's `compact_error` is dropped on the
-    same rule: it is the child's own text, and the `failed` flag is what a reader
-    actually needs.
-  - **The threshold is read, never invented.** `contextCompactionThresholdTokens`
-    is owned only by a runner that supplies the number. Claude Code does;
-    Codex keeps its limit internal, Cursor summarizes on a schedule it does not
-    publish, and DeepSeek reports nothing. Drawing the line at a share of the
-    context window for the others would be a behavioral decision keyed to runner
-    identity, living outside `runner/` where
-    `apps/backend/test/runnerRegistry.test.ts` fails the build on it, and it
-    would also just be wrong. Absence is reported as absence, the same rule
-    `runner/runtimeReadiness.ts` applies to an unprobed runner's `ready`: not
-    known is not zero, and a default would be the same lie inverted. A failed,
-    timed-out, unsupported, or malformed control read preserves the last known
-    runner value; a valid response that disables auto-compaction or supplies no
-    usable threshold explicitly clears it. Clients render the resulting absence
-    rather than substituting a fraction of their own.
-  - **The read initiates nothing.** The Claude Code adapter calls the SDK's
-    `get_context_usage` control request at turn start, against the child the
-    turn's prompt is about to go to, bounded at five seconds and never awaited.
-    It is a control round trip rather than a model call, so it costs no tokens,
-    and it spawns nothing, resumes nothing, and is never performed to answer a
-    request. Answering a display question by starting a child is what the
-    readiness surface already refuses to do. A failed, timed out, unsupported,
-    or malformed read is silent and preserves the last known value; a valid
-    switched-off response clears it. Neither path surfaces a control-read error.
-  - **The occupancy correction is an ordinary token-usage report.** When a
-    compaction reports the occupancy left afterwards, the adapter emits a
-    `token_usage_updated` beside the activity, on the path that already carries
-    every other occupancy report. The threshold takes that same path. Both are
-    persisted with the session record like the context window beside them, so a
-    restored thread shows what its last turn read until an authoritative response
-    replaces or clears it; an event with no threshold knowledge leaves the value
-    alone.
-  - **Nothing reads a runner's name.** The kinds come from adapters, and the
-    threshold event carries a number, an explicit clear, or no new knowledge.
-    No code above the `AgentRunner` boundary branches on which runner compacted.
-- The API does not expose arbitrary shell execution.
-- Bounded harness actions use fixed command templates, require registered
-  workspace paths, and reject resolved project paths outside that workspace.
-- Workspace registration requires existing absolute directories.
-- Registration stores metadata under `STATE_DIR`, not inside selected folders.
-- User-selected workspaces are preserved unless the user explicitly deletes
-  them outside AgentRoom.
-- Workspace tree and file-preview APIs are read-only, registered-workspace-only,
-  bounded, symlink-checked, and bearer-authenticated when `AUTH_TOKEN` is
-  configured.
-- Workspace mutation is limited to seven fixed routes:
-  `PUT /api/workspaces/:id/file` → `WorkspaceExplorer.writeTextFile`,
-  `DELETE /api/workspaces/:id/file` → `WorkspaceExplorer.deleteFile`,
-  `POST /api/workspaces/:id/directory` → `WorkspaceExplorer.createDirectory`,
-  `POST /api/workspaces/:id/entry/rename` → `WorkspaceExplorer.renameEntry`,
-  `POST /api/workspaces/:id/entry/move` → `WorkspaceExplorer.moveEntry`,
-  `POST /api/workspaces/:id/entry/copy` → `WorkspaceExplorer.copyEntry`,
-  and `DELETE /api/workspaces/:id/directory` →
-  `WorkspaceExplorer.deleteDirectory`. All are mutating, so the global
-  preHandler requires bearer auth when `AUTH_TOKEN` is configured (they do not
-  use the read-auth helper). All reuse the read path's bounding: the relative
-  path is lexically normalized (rejecting NUL, absolute, and `..` segments)
-  before any filesystem call, the workspace root is not an entry target,
-  containment is asserted against the realpath of the existing parent, and any
-  secret-named (`.env*`, key material) or generated-directory (`.git`,
-  `.agentroom`, `node_modules`, build dirs) segment is refused in both the
-  caller path and the resolved parent. Mutations also refuse every name hidden
-  from tree and index reads, including `.DS_Store` and the internal
-  `.agentroom-tmp` staging suffix, so a caller cannot create a successful result
-  that the workspace APIs immediately conceal. An in-workspace directory
-  symlink cannot tunnel a mutation into an excluded directory, and a symlink
-  leaf is refused.
+## Security model
 
-  The PUT body is UTF-8 text only (NUL-rejected), capped at 256 KB. Overwrites
-  require an optimistic-lock `baseModifiedAt` matching the current on-disk mtime
-  — a missing or stale token returns `409`, so a blind overwrite of a file
-  changed since the client loaded it is rejected. If the token names a path
-  removed by a concurrent rename or delete, PUT also returns `409` instead of
-  recreating the old name. A PUT without that token is create-only. The write
-  is atomic (sibling temp opened `O_EXCL`, then renamed over the leaf), uses
-  `node:fs` only (no shell, no Git), and emits `workspace_file_written`.
+AgentRoom is a personal-use system running on an operator's Mac. Registered
+local workspaces are the only session targets. The backend owns workspace
+access, runner execution, session state, events, and audit. Clients submit
+bounded requests; they do not receive provider credentials or a general process
+execution API.
 
-  File DELETE requires `baseModifiedAt` for every request, accepts regular files
-  only, and calls `node:fs.unlink` only after the token matches. It emits
-  `workspace_file_deleted`.
+When `AUTH_TOKEN` is configured, every mutating HTTP route requires its bearer
+token. Reads that expose workspace structure or content, session content,
+artifacts, editor assets, spatial documents, questions, Git state, and file
+search use the same bearer check explicitly. WebSocket routes authenticate in
+their handlers because an upgrade is an HTTP GET.
 
-  Directory POST creates one empty directory and is the only mutation with no
-  `baseModifiedAt` — it replaces nothing, so there is no prior version a caller
-  could be asked to prove it had seen. What stands in for the token is
-  exclusivity: `mkdir` runs **without** `recursive`, so an occupied name is
-  `EEXIST` rather than a silent success on a folder someone else made, and the
-  route answers the same `409` rename, move, and copy give. It is also what
-  keeps the route from becoming "materialize this whole path": the parent must
-  already exist, exactly as it must for the PUT, so one request creates one
-  directory. The path passes the same lexical bound, secret/generated refusal on
-  both the caller's text and the resolved parent, and realpath containment as
-  every other write, and the leaf goes through rename's own 255-byte name rule.
-  The response carries the new directory's `modifiedAt`, so it is immediately a
-  rename, move, paste, or delete target without a second read. It emits
-  `workspace_directory_created` (`workspaceId`, `workspacePath`, `path`) and is
-  deliberately the one mutation that does **not** invalidate the file index: that
-  index enumerates files, and an empty directory contributes none.
+`WS /api/events` is the existing exception: it is not bearer-authenticated.
+Recent events are also available through the ungated status and logs reads.
+Live assistant and tool-output events contain bounded text that can include
+workspace source content. File and Git mutation events carry metadata only.
+Child diagnostics must remain bounded and secret-redacted; sensitive question
+discussion follows the [question storage rules](#clarifying-questions) below.
+Output limits and diagnostic redaction do not remove source text from the live
+stream. Closing this broadcast-read gap remains future hardening.
 
-  Rename also requires `baseModifiedAt` and accepts only a regular file or
-  directory. `newName` is one trimmed leaf name, at most 255 UTF-8 bytes; it
-  cannot contain `/`, name `.`/`..`, enter a protected path, change the parent,
-  or overwrite a sibling. A same-name request is an idempotent no-op, and the
-  same-inode exception allows a case-only rename on a case-insensitive Mac
-  filesystem only when both spellings resolve to that same directory entry;
-  a distinct hard link is an occupied sibling and returns `409`. A file
-  destination is claimed without overwrite by an exclusive hard link before
-  the old link is removed; a directory destination is first reserved as an
-  empty directory before `node:fs.rename`. If another process wins either
-  destination race, the request fails rather than replacing its entry.
-  Case-only same-entry renames use `node:fs.rename` directly. A successful
-  change emits `workspace_entry_renamed`
-  with `oldPath`, the new `path`, `entryType`, and file size when applicable.
+`AUTH_TOKEN` is removed from every runner child and terminal environment. It is
+an API transport secret, not a runner credential. Child-authored diagnostics
+pass through `util/redactSecrets` before reaching responses, events, logs, or
+durable audit. This redaction covers labelled secrets and bearer values; it is
+defense in depth, not a substitute for environment isolation.
 
-  Move is rename generalized to a second directory, and it is **one
-  implementation**: rename calls it with the entry's own parent, so the
-  no-overwrite claim above is the same code in both contracts rather than two
-  that can drift. `destinationParent` is bounded exactly as every other written
-  parent is (lexical bound, realpath containment, secret/generated refusal on
-  the caller's text *and* the resolved path, and it must be a real directory);
-  `newName` is optional and an omitted one keeps the entry's own name. Two
-  refusals exist only because a second directory is involved: a folder moving
-  into itself or a descendant is refused on realpaths, so a symlinked
-  destination cannot smuggle the source's own subtree past a lexical check, and
-  a destination on another filesystem (a volume mounted inside a registered
-  workspace) is reported rather than surfacing as an unhandled `EXDEV`. Move
-  never takes a collision strategy: silently renaming an entry someone asked to
-  *move* would apply a decision they did not make, so an occupied destination is
-  the same `409` rename gives. If a symlinked parent spelling resolves back to
-  the source's existing directory entry, move returns an idempotent no-op and
-  emits no event. Success emits `workspace_entry_moved`, whose payload matches
-  the rename event so a client re-keys the old path identically. This is still
-  not a general move surface: no shell, no path pair the caller assembles, and
-  no destination outside the same registered workspace.
+## Configuration and secrets
 
-  Copy duplicates one entry inside the same workspace and is the **one workspace
-  write whose bytes never transit the API**, which changes what bounds it: the
-  256 KB cap is a request-body bound and says nothing here, so copy is bounded
-  by the recursive-delete caps instead — 20,000 entries and 1 GiB — applied to a
-  single file as much as to a tree, with the same refusals for symlinks,
-  protected/generated names, and unsupported entry types. That is a deliberate
-  widening over what a client could previously write in one request, and the
-  residual it leaves is disk fill by repetition, which the PUT already has at
-  256 KB a time. Everything is inventoried before a byte is written, the result
-  is staged beside the destination and published under the caller's chosen name
-  only once complete (so a failure leaves nothing partial for someone to mistake
-  for the copy they asked for), and the copy pass re-checks every entry rather
-  than trusting the inventory, since the two passes run over a live filesystem.
-  Regular files are opened with `O_NOFOLLOW`; the opened device/inode, size, and
-  mtime must still match the entry the walk selected, the bytes are read through
-  that pinned handle under the 1 GiB cap, and the handle is statted again before
-  publication. Selected directories are likewise checked before and after
-  listing. A source swapped for a symlink or another inode therefore fails the
-  copy instead of redirecting it, and the response counts come from the copy
-  pass rather than the earlier inventory.
-  `baseModifiedAt` is required even though copy touches nothing: it is not
-  protecting the source from loss, it is what makes "this is a copy of the entry
-  I was looking at" true, and a stale token means re-read and copy again.
-  `onCollision` defaults to `fail` — the same refusal rename gives — and
-  `keep_both` walks a bounded `-2`…`-5` name ladder that suffixes the stem
-  rather than the extension and then refuses, so the server never renames unless
-  asked and always reports the name it took. Success emits
-  `workspace_entry_copied`, carrying `sourcePath` rather than `oldPath` because
-  a copy vacates nothing.
+### Managed settings
 
-  Directory DELETE requires the rendered directory's `baseModifiedAt` and
-  inventories the complete subtree before removal. The preflight refuses any
-  symlink, protected/generated name, socket/device/other non-file entry, more
-  than 20,000 entries including the selected directory, or more than 1 GiB of
-  regular-file data. A failure removes nothing. After inventory the selected
-  directory's type and mtime are checked again, then `node:fs.rm` removes that
-  directory recursively; the workspace root is never accepted. Success emits
-  `workspace_directory_deleted` with file/directory counts and total regular-file
-  bytes. A symlink introduced after preflight is unlinked rather than followed,
-  but a concurrent process can add or alter a contained regular file after its
-  check and before removal. The operation is therefore bounded and symlink-safe,
-  not a transactional filesystem snapshot.
+`$AGENTROOM_HOME/config/settings.json`, with a development fallback under
+`.agentroom/config`, contains only managed preferences and trust posture. It
+never contains bootstrap, secret, executable, bind, storage, or process-start
+settings. In particular, `AUTH_TOKEN`, runner executable paths and arguments,
+`TERMINAL_SHELL`, `HOST`, `PORT`, `STATE_DIR`, `WORKSPACE_ROOT`,
+`AGENTROOM_HOME`, and `EDITOR_CATALOG_DIR` are not managed keys and cannot be
+read or patched through `/api/config`.
 
-  Mutation events carry workspace identity, relative paths, types/counts, and
-  byte counts only — never file content. Durable audit entries retain the event
-  type and workspace identity, not file bytes. Every mutation intentionally
-  dirties the working tree, which can later `409` a branch switch or
-  session-branch restore; that consequence is surfaced through the existing
-  Git-status refresh, not auto-committed or stashed. This slice does not block
-  workspace mutation while a runner turn is active, so a client action can race
-  a concurrent unsandboxed turn; optimistic tokens narrow that race but do not
-  make mtime checks transactional with rename/unlink/removal.
-- Session content reads that expose model/user text — the session list and
-  detail reads through their `lastMessage`, agent session messages (`/messages`),
-  and live artifacts (`/artifacts`) — also require the bearer token when
-  `AUTH_TOKEN` is configured, since the global preHandler only gates mutating
-  methods. The shared read-auth check lives in `routes/readAuthorization.ts`.
-- **Agent session records are persisted under `STATE_DIR`**, one JSON document
-  per session at `sessions/<sessionId>.json` holding the session record, its
-  turns, and its message history: user text, assistant text, and the backend's
-  own question-answer messages. A backend restart, a crash, or a DMG update
-  therefore no longer empties `GET /api/agent-sessions`, and the next turn on a
-  restored thread continues the native conversation the runner was already
-  holding. This is the same class of data as session attachments (already under
-  `STATE_DIR`) and the runners' own transcripts (already on this disk under the
-  operator's home), not the audit log: it is **not** passed through
-  `redactSecrets`, because a redacted transcript is a corrupted thread, and it
-  is read back only through the routes that require the bearer token for
-  session content: the list and detail reads, `/messages`, and `/artifacts`.
-  The directory is created `0700`. Posture:
-  - **Write-through, never write-at-exit.** Every mutation of a session, a
-    turn, or the message list marks the record, and the store coalesces marks
-    into at most one write in flight per session, so a crash, the parent-exit
-    watchdog's abrupt exit, or a force quit loses at most one coalesced write.
-    Persistence never depends on a graceful shutdown. There is one now all
-    the same: `SIGINT` and `SIGTERM` run `app.close()` under a two-second
-    ceiling (`util/shutdown.ts`) — inside the macOS supervisor's three-second
-    `SIGINT` window, so its `SIGTERM` escalation stays the backstop — which is
-    what runs the runner `dispose()` hooks that end resident children, the
-    terminal teardown, and the store's flush. A second signal during the close
-    exits at once. The parent-exit watchdog keeps its abrupt exit; write-through
-    is what makes that safe.
-  - **A restart is an interruption, not a decision.** A turn that was running
-    when the process ended settles at the next startup through the ordinary
-    failure path with the fixed reason `Backend restarted during this turn`:
-    the assistant message for that turn is marked failed, the session drops to
-    `failed`, and `agent_turn_failed` reaches durable audit because the audit
-    store is attached before the session service is built. An outstanding
-    permission or question batch ends with that turn the way a cancelled one
-    does: nobody chose, and a restart is never a default choice.
-  - **The runner's memory is seeded from AgentRoom's record, never rebuilt
-    from the runner's transcript.** A hydrated session's recorded native id is
-    handed to its runner through the optional `AgentRunner.rememberResumableId`
-    hook, and the next turn takes the same acquire-miss resume branch a reaped
-    or crashed child takes, with the same explicit runtime settings and
-    isolation posture as a fresh start. Reading `~/.codex/sessions` or
-    `~/.claude/projects` to reconstruct a thread would put per-runner file
-    knowledge above the `AgentRunner` boundary and make AgentRoom's thread a
-    projection of a file another program owns and prunes.
-  - **A resume the runner did not honor is reported, not hidden.** A rejected
-    resume already falls back to a fresh native thread with a warning in the
-    log; after a restart that would be a silent memory wipe from the person's
-    side, with the transcript on screen and an agent that has never seen it.
-    So when a restored thread's runner reports a session start whose native id
-    differs from the seed, the backend appends one `system` message to the
-    thread saying the agent has started a new conversation and has not seen
-    the messages above. The native ids stay in the log; the thread carries
-    neither. The check compares two values of the same field and asks no
-    runner anything new. Which runners reach it depends on what each does
-    with a stale id: Codex and ACP fall back to a fresh thread (so they get
-    the message), while Claude Code fails the turn with the SDK's own error
-    (`No conversation found with session ID: …`, observed against CLI
-    2.1.246 after its transcript was deleted) and starts nothing. Either way
-    the person sees it, and a fresh conversation is never presented as the
-    old one.
-  - **A runner that declares no restore path never continues a restored
-    thread.** A hydrated session whose descriptor says
-    `restoreStrategy: "unsupported"` (DeepSeek) and that had a native
-    conversation hydrates as readable history, and its next turn is refused
-    with `409` and the adapter's own wording, so a restart never begins a fresh
-    conversation under an existing thread's id — the outcome the shared host
-    is built to prevent. The mark is derived from the document and the
-    descriptor at every hydration and never persisted; it reads a descriptor
-    field, never a runner's name. A session whose runner this process does not
-    register (an ACP adapter removed from `ACP_ADAPTERS`) hydrates the same way
-    and its turn gets the `400` an unconfigured runner already gets.
-  - **Deleting a thread removes its document before the delete is reported**,
-    after the runner's child and the attachments are released, so an
-    explicitly deleted thread is never hydrated and a delete that fails midway
-    leaves the file rather than losing it. The store marks the session id
-    deleted before it waits for an in-flight write, so a queued or late runner
-    event cannot schedule a replacement document while deletion yields. The
-    runner's resume token is forgotten in the same call as before.
-  - **Version skew follows the settings-file rules.** A document a newer build
-    wrote is left untouched, counted, and not served (update the app, not reset
-    the thread); a document this build cannot validate is left in place and
-    logged. Nothing is deleted on read.
-  - **No route, event, or bound is added.** `GET /api/agent-sessions` serves the
-    hydrated list through the same code path as a live one. There is no cap on
-    session count, thread length, or age; the delete route remains the one way
-    a thread goes away.
-- Workspace Git status reads are read-only, registered-workspace-only, bounded
-  to changed file metadata, and bearer-authenticated when `AUTH_TOKEN` is
-  configured because changed paths and line counts expose project structure.
-- Workspace Git file-baseline reads (`GET /api/workspaces/:id/git/file-base`,
-  serving a file's HEAD blob so editors can render working-tree change
-  decorations) are read-only, registered-workspace-only, and bearer-authenticated
-  when `AUTH_TOKEN` is configured because they return committed file content. The
-  route runs fixed `git cat-file` invocations (no shell), shares the preview
-  path's lexical bounding and secret-name refusal (a committed `.env` is as
-  sensitive at HEAD as on disk), applies the same NUL/binary rejection and 256 KB
-  cap (an over-cap blob returns metadata only, never partial content), and
-  resolves the pathspec `HEAD:./<path>` relative to the registered workspace
-  directory so a workspace registered inside a larger repository stays bounded to
-  its own subtree. Files absent from HEAD and non-repository workspaces are
-  ordinary data responses, not errors, and like the other reads the route emits
-  no events or audit entries.
-- Workspace skills listing reads (`GET /api/workspaces/:id/skills`, backing the
-  clients' composer `/` slash picker) are read-only, registered-workspace-only,
-  and bearer-authenticated when `AUTH_TOKEN` is configured because skill names
-  and descriptions expose project structure. The route scans only the fixed
-  committed skill directories each runner kind natively loads (`.claude/skills`
-  for Claude Code; `.codex/skills` and `.agents/skills` for Codex), reuses the
-  tree read's symlink containment (an escaping link is skipped, not followed),
-  parses only each `SKILL.md`'s frontmatter `name` and `description` — never
-  body content, which remains subject to the normal preview rules — and loads
-  or executes nothing: it is discovery metadata for autocompletion, not a
-  loading mechanism. For `claude_code` the response mirrors the
-  workspace-settings gate above: when sessions would not load workspace skills
-  (`CLAUDE_CODE_LOAD_WORKSPACE_SKILLS=false` or a stricter permission mode) it
-  reports `available: false` with an empty list, so clients cannot offer
-  invocations an isolated session would ignore. Like the other reads, it emits
-  no events and no audit entries.
-- Workspace file-index and content-search reads (`GET /api/workspaces/:id/files`,
-  the ranked file list backing quick-open and the composer `@` mention picker, and
-  `GET /api/workspaces/:id/search`, the literal-substring "search in all files"
-  read) are read-only, registered-workspace-only, bounded, and
-  bearer-authenticated when `AUTH_TOKEN` is configured: the index exposes project
-  structure and the search returns matched file content, which puts both in the
-  same sensitivity class as the file-preview read. Like the other reads they emit
-  no events and no audit entries. Posture:
-  - **One filtered enumeration, shared by both.** Both routes rank or scan the
-    same per-workspace path index (cached ~15s, dropped when the bounded write
-    creates a path or a branch switch changes the checkout, and released when
-    the workspace is unregistered), so there is exactly
-    one place where a path can enter either surface. A Git workspace enumerates
-    through a fixed `git ls-files -z --cached --others --exclude-standard` argv
-    with the registered workspace as cwd — no shell, no client-supplied
-    arguments — which bounds the listing to that directory's own subtree even
-    inside a larger repository and gets `.gitignore` respect for free; anything
-    else falls back to a bounded filesystem walk that never descends through a
-    symlinked directory.
-  - **The path filter applies to Git's output too.** Every candidate passes the
-    shared lexical bound (`boundedRelativeSegments`: NUL bytes, absolute paths,
-    and `..` segments rejected) and then a per-segment refusal of secret names
-    (`.env*`, key material) and generated directories (`.git`, `.agentroom`,
-    `node_modules`, build dirs) — including paths that came back from Git, via
-    `indexableRelativePath` — so those files can be neither listed nor searched
-    regardless of whether they are tracked. Realpath containment is re-checked
-    **at point of use**, not only when the index was built, so a leaf or
-    intermediate segment that became a symlink out of the workspace after
-    enumeration is skipped rather than followed, and the search reads apply the
-    preview path's NUL/binary rejection (a binary file is read, counted as
-    scanned, and skipped, never returned).
-  - **No caller-supplied pattern is ever compiled.** Regex is deliberately
-    excluded from v1: a caller-supplied pattern evaluated in-process is a ReDoS
-    vector against the single-threaded backend, so `query` is a literal substring
-    with only `matchCase`/`wholeWord` modifiers. The optional `include` filter is
-    a simple glob applied by a linear two-pointer matcher for the same reason —
-    it is never translated into a regular expression.
-  - **Every bound reports partial results instead of running long.** 20,000
-    indexed paths, at most 200 index results per request (default 50), at most
-    2,000 files scanned, 20 matches per file, 500 total matches, 256 KB read per
-    file (the same ceiling as the read/write path), a 3,000 ms wall-clock budget,
-    and a 200-character match preview. Each is
-    surfaced through a `truncated` flag, the same convention as the 200-file
-    Git-status cap, so a large or hostile repository degrades to a partial answer
-    rather than an unbounded request.
-  - **Shared Git stdout ceiling.** Adding `ls-files` required raising the
-    `execFile` stdout ceiling in `workspace/git/execution.ts` from Node's 1 MB
-    default to 16 MB: past the limit `execFile` fails the *whole* command with
-    `ENOBUFS`, which `ls-files` hits on a large repository and a very dirty tree's
-    `status --porcelain` could hit too. The raise is shared by every fixed Git
-    invocation; each consumer still caps how much of the output it retains.
-- Git branch switching is limited to a fixed registered-workspace endpoint. It
-  accepts only an existing local branch name, uses `git switch` without a shell,
-  and rejects branch changes when the workspace has uncommitted or untracked
-  changes.
-- Mutating Git operations (`POST /api/workspaces/:id/git/{stage,unstage,discard,
-  commit,fetch,pull,push,branch/create}` → `WorkspaceGitService`) are the
-  source-control counterpart to that branch switch, and they stay inside the same
-  boundary: they are the *only* way a client changes Git state, and they are not a
-  shell. Posture:
-  - **Fixed argv, never a command.** Every operation is a fixed argument vector
-    assembled in `LocalWorkspaceGit` and run with `node:child_process.execFile`
-    (no shell). A caller contributes workspace-relative pathspecs and a commit
-    message — never a flag, a refspec, a remote, or a ref. There is no
-    caller-supplied `--` passthrough and no operation that takes arbitrary Git
-    arguments, so this cannot become the arbitrary-shell surface the terminal is
-    the single documented exception for.
-  - **No history rewriting, and no forced push.** The exposed set deliberately
-    excludes amend, reset, rebase, cherry-pick, tag, remote add/set-url, and
-    `push --force`/`--force-with-lease`. Pull is **fast-forward only**
-    (`git pull --ff-only`): a diverged branch fails with git's own message rather
-    than producing a merge commit or a conflicted worktree that a client with no
-    conflict-resolution surface could not finish. A rejected non-fast-forward push
-    is likewise surfaced, never forced past.
-  - **The same path filter as every other workspace surface.** Every
-    caller-supplied path passes `indexableRelativePath` — the shared lexical bound
-    (NUL, absolute, and `..` rejected) plus the tree read's per-segment refusal of
-    secret names (`.env*`, key material) and generated directories (`.git`,
-    `.agentroom`, `node_modules`, build dirs). An explicitly named refused path is
-    a `415` rather than a silent drop; a "stage everything" enumeration skips them
-    and reports them in `skippedPaths`. This is what keeps a secret-named file out
-    of an index this API would then commit and push, so it is a stronger rule here
-    than for a read: staging is the step before exfiltration.
-    Explicit stage and unstage requests must also resolve to exact changed-file
-    entries. Directory pathspecs are rejected, preventing a safe parent such as
-    `src` from recursively staging a refused child such as `src/.env`.
-  - **`git add -A` is never run.** "Stage all" enumerates changed paths from an
-    uncapped `status --porcelain` read, filters them, and passes the survivors as
-    `:(literal)` pathspecs in bounded batches — so the filter above cannot be
-    bypassed by staging wholesale, and a very dirty tree cannot silently miss
-    files the 200-file status projection would have dropped. The `:(literal)`
-    prefix means a path beginning with `:` is read as a path, never as Git
-    pathspec magic.
-  - **Commit validates the complete index.** `git commit` records the repository's
-    whole index, even when AgentRoom registered only a subdirectory and even when
-    another process staged the entry. Immediately before committing, the backend
-    reads that full staged set and rejects any path outside the registered
-    workspace or refused by the secret/generated filter. Workspace status and
-    path operations remain scoped and relative to the registered subdirectory;
-    the broader read exists only for this pre-commit guard.
-  - **Discard is destructive and explicit.** It reverts each named path to its
-    HEAD content and deletes a path HEAD does not have (untracked, or added to the
-    index only). The discarded work is not stashed anywhere and cannot be
-    recovered. It therefore has **no "discard all"**: a caller names every path,
-    and the visionOS client confirms before sending.
-  - **Remote operations are non-interactive and credential-safe.** Fetch, pull,
-    and push run with `GIT_TERMINAL_PROMPT=0` and SSH batch mode
-    (`GIT_SSH_COMMAND=ssh -o BatchMode=yes`, both respecting an operator-set
-    value), so a repository that would need an interactive prompt fails with git's
-    error instead of hanging a request invisibly. Credential helpers (the macOS
-    keychain helper) are deliberately left intact — they are what makes an HTTPS
-    push work without a prompt — and the backend neither reads, stores, nor logs
-    any credential. These three operations carry their own longer timeout
-    (`GIT_NETWORK_TIMEOUT_MS`, default 120s) so a slow fetch is not mistaken for a
-    hung local command, and that timeout also bounds a helper that stalls.
-  - **Git's own error text is redacted before it leaves the backend.** A remote
-    failure can echo the remote URL, and an HTTPS remote can carry credentials in
-    its userinfo (`https://user:token@host/repo`), so `gitErrorMessage` strips URL
-    userinfo and then applies the shared `util/redactSecrets` helper before the
-    text reaches an HTTP response, an event, or durable audit. It also falls back
-    to stdout, because some git failures (a commit with nothing staged) explain
-    themselves there.
-  - **Commit runs the workspace's hooks.** `git commit` is not passed
-    `--no-verify`, so the registered workspace's `pre-commit`/`commit-msg` hooks
-    execute — the same committed-configuration trust the workspace already carries
-    for the bundled runners (Codex's `.codex/config.toml` layer, Claude Code's
-    `project` settings source, Cursor's `.cursor/hooks.json`). A hook that
-    rejects the commit surfaces its message; a hook
-    that hangs is bounded by the local command timeout.
-  - **Bearer-authed, sanitized, and audited.** All eight are mutating POSTs, so the
-    global preHandler requires the bearer token when `AUTH_TOKEN` is configured;
-    none opts into the read-auth helper. Each publishes one
-    `workspace_git_operation` event carrying identifiers, the operation, the
-    resulting branch/commit, and counts — **never file content, never a path list,
-    and never a remote URL** — plus the durable audit entry that event produces.
-  - **Same concurrency caveat as the bounded file write.** These operations do not
-    block while a runner turn is active, so a client commit can still interleave
-    with an unsandboxed Claude Code turn writing files. Git's own index locking
-    prevents a corrupt repository, but not a commit that captures a half-finished
-    turn; an active-turn guard is the same recommended next hardening noted for
-    the file write.
-- Codex workspace network access is disabled by default for AgentRoom JSON-RPC
-  sessions. Operators may explicitly enable it for trusted registered
-  workspaces — through the managed settings file or an environment variable,
-  both of them trust-tier decisions per the block above — when turns need
-  networked Git operations such as fetch, pull, or push. The backend pins
-  `sandbox_workspace_write.network_access` explicitly in the Codex
-  `thread/start` and `thread/resume` configs in **both** states (not only when
-  enabling), because a
-  registered workspace's committed `.codex/config.toml` merges into the
-  thread's effective config as a Codex project layer and an omitted key would
-  let the workspace silently re-enable network access inside the
-  `workspace-write` sandbox; the explicit override makes
-  `CODEX_WORKSPACE_NETWORK_ACCESS` authoritative over every config layer.
-  Commit and push workflows also need a sandbox
-  mode that can write `.git` metadata; the packaged Mac app's Runner toggle
-  sets the Codex JSON-RPC app-server launch,
-  `CODEX_SANDBOX_MODE=danger-full-access`, and network access together.
-- Codex sessions natively load the registered workspace's committed agent
-  configuration. This is Codex app-server behavior that AgentRoom neither adds
-  nor can switch off (verified against codex-cli 0.142.5, which exposes no
-  isolation lever for it). Starting a thread in a registered workspace loads:
-  - the workspace `AGENTS.md` as thread instructions;
-  - repo-scoped skills from the workspace's `.codex/skills` and
-    `.agents/skills` directories;
-  - the workspace's `.codex/config.toml` as a Codex **project config layer**
-    merged into the thread's effective config — including `mcp_servers`
-    entries, which are registered for the session and execute on the
-    operator's Mac outside the turn sandbox, and any `hooks` configuration.
-  This is the Codex analog of the Claude Code workspace-settings loading below
-  and the **same class of trust decision**: registering a workspace for Codex
-  sessions trusts its committed `.codex` configuration. In addition,
-  `thread/start` durably records the workspace folder as trusted in the
-  operator's `~/.codex/config.toml`
-  (`projects."<path>".trust_level = "trusted"`), which also affects later
-  interactive Codex use of that folder. What AgentRoom enforces around this:
-  - **Explicit thread parameters win.** The operator-configured approval
-    policy and sandbox mode are passed explicitly on `thread/start` — and
-    identically on the `thread/resume` used to restore a session's thread
-    after its child process is lost or idle-reaped — and cannot
-    be changed by the workspace layer, and
-    `sandbox_workspace_write.network_access` is pinned in both states (above)
-    so the workspace cannot widen network access on fresh or resumed threads. Other nested sandbox keys
-    (for example `writable_roots`) and workspace `mcp_servers`/hooks have no
-    per-key shadow the backend could pin without enumerating the workspace's
-    own config, so they remain part of the registration trust decision.
-  - **Discovery stays inert.** Codex capability discovery (`model/list`)
-    starts no thread, so it loads no workspace configuration and writes no
-    trust entry — parallel to the isolated Claude Code discovery probe.
-  - **No partial-isolation toggle.** There is deliberately no
-    `CODEX_LOAD_WORKSPACE_SKILLS` analog: the app-server offers no switch that
-    actually unloads repo skills or the project config layer
-    (`project_doc_max_bytes = 0` would only drop `AGENTS.md`), and a toggle
-    that delivered partial isolation would misrepresent the posture. Operators
-    who do not trust a workspace's committed `.codex` configuration should not
-    register it for Codex sessions.
-- Claude Code turns default to `bypassPermissions`
-  (`CLAUDE_CODE_PERMISSION_MODE`): the runner passes the SDK's explicit
-  `allowDangerouslySkipPermissions` opt-in and turns are NOT sandboxed or
-  filesystem-bounded to the registered workspace. This is a deliberate
-  personal-use trade-off on the operator's own Mac and account; it is more
-  permissive than the Codex `workspace-write` default. Stricter modes
-  (`acceptEdits`, `dontAsk`, `default`) are selectable as a trust-tier managed
-  setting, and the posture should be revisited when interactive permission
-  approvals land.
-- Claude Code sessions load the registered workspace's `project` settings source
-  by default (`settingSources: ['project']` with `skills: 'all'`,
-  `CLAUDE_CODE_LOAD_WORKSPACE_SKILLS`), so the workspace's `.claude/skills`,
-  `CLAUDE.md`, and subagents are available to the session. This is the **whole**
-  `project` source, not just skills: loading it also means the workspace's
-  `.claude/settings.json` **hooks** and any `.mcp.json` **MCP servers** run
-  automatically at session start (before any model turn), and its
-  `permissions.*` rules and `env`/`apiKeyHelper` take effect inside the spawned
-  CLI. Treat this as the **same class of trust decision as `bypassPermissions`
-  itself** — you are trusting the registered workspace's committed configuration
-  to run on your Mac:
-  - **Automatic code execution.** A registered workspace's `SessionStart`/
-    `PreToolUse` hooks and project `.mcp.json` stdio servers execute on session
-    init without a model decision or a turn — a broader vector than the
-    model-mediated shell that `bypassPermissions` already allows. Only register
-    workspaces whose `.claude` configuration you trust.
-  - **Billing is not guaranteed under this default.** The child-env scrub
-    (below) removes `ANTHROPIC_*`/`CLAUDE_CODE_OAUTH_TOKEN` from the process
-    environment, but a workspace `.claude/settings.json` can re-supply an
-    `env.ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` or an `apiKeyHelper` that the
-    CLI applies after the scrub, so a hostile workspace can bill an arbitrary key
-    or run a credential helper. Deterministic billing holds only for workspaces
-    you trust or with `CLAUDE_CODE_LOAD_WORKSPACE_SKILLS=false`.
-  - **Gated to `bypassPermissions`.** Project settings load **only** at the
-    default `bypassPermissions` posture (which is already fully permissive). Under
-    a stricter configured `permissionMode` (`acceptEdits`, `dontAsk`, `default`)
-    the runner forces isolation (`settingSources: []`) so a workspace's
-    `permissions.allow`/hooks cannot silently widen the operator's chosen mode.
-  - **Project scope only, and unbounded upward.** Only the `project` source loads,
-    not the interactive CLI's `user` (`~/.claude`) or `local`
-    (`.claude/settings.local.json`) sources — so this is **not** identical to an
-    interactive `claude` run in that folder. Conversely, `CLAUDE.md` memory and
-    `.claude/skills` are read from the cwd **and its ancestors**, so a workspace
-    registered inside a larger repository also loads that parent repo's
-    `CLAUDE.md`/skills — outside the registered-workspace subtree that the other
-    read routes bound.
-  - **Discovery stays isolated.** The capability-discovery probe (which spawns a
-    session in the backend's own working directory, not a registered workspace)
-    always forces `settingSources: []` and loads no skills, so a model-list read
-    never executes the backend cwd's hooks/MCP servers.
-  - Operators who need full SDK settings isolation (`settingSources: []`, no
-    on-disk skills/CLAUDE.md/hooks/MCP) can set
-    `CLAUDE_CODE_LOAD_WORKSPACE_SKILLS=false`. The effective value is reported by
-    `GET /api/config` as `claudeCodeLoadWorkspaceSkills`.
-  - Skill enablement is a context filter, not a sandbox: unlisted or unloaded
-    skill files still exist on disk and remain reachable via Read/Bash, so skill
-    files must not hold secrets.
-- AgentRoom's own bearer token never reaches a spawned child. `AUTH_TOKEN` is the
-  transport secret for the API, not something a coding agent, the MCP servers its
-  project config layer starts, or an interactive shell has any use for, so it is
-  removed from the environment of every child the backend spawns for a session:
-  the Codex app-server (`codexChildEnv`), the Claude Code CLI
-  (`claudeCodeChildEnv`, scrubbed in **both** auth postures because it is not a
-  provider credential and the `CLAUDE_CODE_INHERIT_PROVIDER_AUTH` opt-in does not
-  cover it), and the terminal PTY. The rest of the operator environment is still
-  inherited, since each runner needs it to find its own credentials and tooling.
-- Runner diagnostics that quote a child's own output are redacted before they
-  leave the backend. The Codex runner keeps a bounded stderr tail so a startup or
-  crash failure carries the child's explanation, but that text is the child's, not
-  AgentRoom's: a config-parse error can quote a workspace `.codex/config.toml`
-  line, including an `mcp_servers.*.env` value. The tail passes through the shared
-  `util/redactSecrets` helper (bearer headers and labelled
-  `token`/`secret`/`password`/`api_key` assignments) before it is appended to an
-  error, because those errors surface on `GET /api/coding-agent/capabilities`, in
-  turn-failure events, and in `/api/logs` and `/api/status` recent events — reads
-  that are **not** bearer-gated (the global preHandler covers mutating methods
-  only). Durable audit applies the same helper to `message`/`error` entries. The
-  redaction is deliberately conservative — unlabelled high-entropy strings are
-  indistinguishable from the thread ids, hashes, and paths that make the
-  diagnostic useful — so it is defense in depth behind the environment scrub
-  above, not a boundary.
-- **DeepSeek Harness turns are `bypassPermissions`-class, and the posture that
-  bounds them is the harness's own.** The `deepseek` runner drives an
-  operator-installed DeepSeek Harness runtime over its first-party SDK JSON-RPC
-  protocol (`apps/backend/src/runner/deepseek`). It is a bundled runner, so —
-  unlike an external ACP adapter — it inherits the operator's environment and is
-  configured through Keychain-backed bootstrap on the Mac rather than through a
-  tier-3 JSON blob. What it does **not** inherit is a sandbox AgentRoom can
-  describe:
-  - **What bounds a turn is the operator's composition, and AgentRoom cannot
-    read it.** The runtime boots the Cordis plugin graph named by
-    `DEEPSEEK_CORDIS_CONFIG`, and that file — not this backend, and not the
-    `permissionMode` below — decides whether the agent's filesystem and shell
-    tools are confined. Upstream ships both answers: the vendor's own
-    `examples/jsonrpc-agent/minimal.cordis.yml` mounts
-    `sandbox-policy: mode: danger-full-access` and says in as many words that
-    its Bash and absolute editor paths "can modify any path available to the
-    runtime process", while the `dsh` CLI's profiles default to a
-    `workspace-write` preset confining mutations to the session workspace and
-    temporary roots. Nothing on the SDK wire reports which one is mounted, so
-    AgentRoom does not claim to know: it treats this runner as
-    `bypassPermissions`-class, the way the Claude Code default and the
-    interactive terminal are read — a deliberate personal-use trade-off on the
-    operator's own Mac — because that is the safe reading when the graph cannot
-    be inspected. The permissive case is not hypothetical: the same harness,
-    reached over ACP, wrote outside a registered workspace at its own default
-    posture and raised no permission request
-    (`docs/engineering/ACP_CONFORMANCE.md`). **Read the composition before you
-    point at it.**
-  - **Two environment values are pinned rather than left to the graph's
-    fallbacks**, the same reflex as the Codex `network_access` pin, and for the
-    same reason: a value AgentRoom depends on must be stated rather than assumed
-    from a default an operator-authored file may have changed.
-    - `DSH_CWD` is pinned to the registered workspace. The child's own cwd
-      already is that directory, so this agrees with the stock
-      `process.env.DSH_CWD ?? process.cwd()` fallback; what it buys is that a
-      composition reading the variable cannot bind the agent's tools elsewhere.
-    - `DSH_SESSION_ROOT` is pinned under `STATE_DIR`, the rule attachments and
-      artifacts already follow. The stock compositions resolve persistence as
-      `process.env.DSH_SESSION_ROOT ?? './.sessions'`, and that relative default
-      is taken against the child's cwd — so unpinned, the harness writes its
-      JSONL session log **into the registered workspace**, dirtying the working
-      tree, appearing in the settle-time Git diff this runner derives, and
-      sitting where a later commit could sweep it up.
-  - **There is no interactive approval channel, by protocol.** The SDK wire
-    documents server-to-client requests as a dead capability, so the adapter
-    implements no `answerPermissionRequest` hook and the answer route's `404` is
-    the honest reading for this runner. This does not preclude the bounded
-    clarifying-question prompt contract described above: answering a question
-    authorizes nothing and uses the question route, not the permission route.
-    The only approval lever is the harness's own posture, carried as the
-    tier-2 managed `runners.deepseek.permissionMode` and injected as
-    `DSH_PERMISSION_MODE`. Its *vocabulary* belongs to the profile the runtime
-    composes: AgentRoom bounds the shape, passes the value through, and does not
-    claim to own the enum — so a client renders free text there rather than a
-    closed picker, and the posture actually enforced is the composed profile's.
-  - **Which runtime and which composition run are trust decisions the operator
-    makes in the environment.** `DEEPSEEK_EXECUTABLE`, `DEEPSEEK_CORDIS_CONFIG`,
-    and `DEEPSEEK_ARGS` are tier 3 — absent from the settings file, the
-    `/api/config` metadata, and the PATCH schema by construction — because an
-    executable path is "run this binary" and the composition selects which
-    plugin graph, and therefore which tools, the agent has. The backend
-    assembles argv itself; there is no shell. Both of the first two are required
-    before `GET /api/runners` reports this runner `configured`: the runtime
-    demands an explicit composition and exits nonzero without one, so an
-    executable alone would advertise a runner that fails its first turn.
-  - **The executable is the SDK runtime, never the `dsh` launcher.** `dsh` boots
-    profiles (`--profile <name>`, `--profile headless "task"`, `web`, `plugin`)
-    and has no entry mode that speaks this protocol; the serving bin is
-    `dsh-jsonrpc-agent` or the packaged single-file runtime. This is a
-    correctness point with a safety edge: a launcher pointed at here would start
-    something — a web server on a listening port, most likely — rather than fail
-    closed, so the adapter checks the wire-stable `initialize.serverInfo.name`
-    and refuses a child that is not the SDK runtime.
-  - **The harness can drive sub-agents, including other coding agents.** Those
-    grandchildren inherit this child's environment and are processes AgentRoom
-    neither bounds nor observes. The adapter ignores their session logs (it
-    filters `session.event` to the session it owns), which is a correctness
-    property, not a containment one.
-  - **`AUTH_TOKEN` never reaches the child**, the same unconditional scrub every
-    other spawned child gets, and for the same reason: it is the API's transport
-    secret and would otherwise propagate into every process a turn spawns.
-  - **A conversation is bound to its live DeepSeek runtime.** The protocol has
-    no resume method, and reusing a session id in a fresh process may lazily
-    create an empty agent/session pair unless the selected composition mounted
-    persistence. The handshake cannot prove that persistence exists, so the
-    descriptor declares `restoreStrategy: "unsupported"`: the shared host never
-    idle-reaps the child, and cancellation or child loss makes that AgentRoom
-    session uncontinuable. A later turn fails with an instruction to create a
-    new session instead of silently losing the conversation.
-  - **A released runtime is asked to stop before it is made to.** Teardown walks
-    the ladder the protocol documents and the vendor's own client implements:
-    the `shutdown` request (which flushes the response and disposes the root
-    context so agents, subscriptions, and persistence reach quiescence), then
-    stdin EOF, then `SIGTERM`, then `SIGKILL`, each rung bounded because each can
-    be the one that hangs and the last one cannot. **Cancellation deliberately
-    enters below the first rung**: `shutdown` drains to quiescence, which would
-    let the work the operator just stopped run to completion, so a stop request
-    closes stdin and signals instead. The ladder runs in the background — the
-    session host frees its slot without waiting on a child that may not go
-    quietly — and the same rungs reap the capability probe's throwaway child,
-    because a runtime that ignores `SIGTERM` leaks whether or not anyone was
-    talking to it.
-- **Cursor turns are sandboxed by default, and the sandbox bounds writes and
-  network, not reads.** The `cursor` runner drives the bundled `@cursor/sdk`
-  inside a host child the backend spawns (`apps/backend/src/runner/cursor`,
-  `docs/engineering/CURSOR_SDK_RUNNER.md`). Like Claude Code it is a bundled
-  runner with a bundled credential path, so there is no executable to admit and
-  `GET /api/runners` reports it `configured` without a bootstrap value. Posture:
-  - **The sandbox is the tier-2 managed `runners.cursor.sandbox`, default
-    `true`, and it is narrower than the vendor's reference says.** The run that
-    settled it (fact 7 of the plan): with `local.sandboxOptions.enabled` a write
-    outside the registered workspace failed, writes inside the workspace and
-    under `/private/tmp` succeeded, network egress failed at DNS, and a read of
-    a file in the home directory **succeeded**, `ls ~/.cursor/sdk` included. The
-    vendor's reference says reads outside the workspace are blocked; this entry
-    reports the run. So a sandboxed shell can read any file the operator can,
-    the SDK's own `~/.cursor/sdk/auth.json` among them, and the bound is on
-    what leaves the workspace and the Mac, not on what the model sees. Egress
-    is allowlisted by the workspace's own `.cursor/sandbox.json`, which the
-    workspace controls and AgentRoom cannot pin: the same class of clause as
-    Codex's `.codex/config.toml`, except that Codex's `network_access` pin has
-    no analog here. With `sandbox: false` the runner is
-    `bypassPermissions`-class like the Claude Code default and the interactive
-    terminal, in those words. The unsandboxed shell tool runs in the host
-    process's cwd rather than `local.cwd`, so the adapter spawns the host with
-    its cwd set to the registered workspace and the two agree either way.
-  - **There is no interactive approval channel.** The SDK exposes no approval
-    callback, so the adapter implements no `answerPermissionRequest` and the
-    permissions route's `404` reads the absence of a channel. The configured
-    posture is the only answer. `runners.cursor.autoReview` (tier 2, default
-    `false`) turns on the vendor's server-side review classifier, which denies
-    a blocked call rather than escalating it; it never widens. The
-    clarifying-question channel is unaffected: it rides one custom tool whose
-    callback the host relays to the backend, and answering authorizes nothing.
-  - **Loading the workspace's `project` settings source is the tier-2
-    `runners.cursor.loadWorkspaceSettings`, default `true`.** On, the SDK reads
-    the registered workspace's `AGENTS.md`, `.cursor/rules/*.mdc`, the hooks in
-    `.cursor/hooks.json`, the MCP servers in `.cursor/mcp.json`, and skills from
-    `.cursor/skills`, `.agents/skills`, `.claude/skills`, and `.codex/skills`
-    (fact 6: all four, and only the workspace's). Hooks and MCP servers take
-    effect inside the turn, which is the same class of trust decision as Claude
-    Code's `project` source; off passes `settingSources: []` and nothing on
-    disk loads. The capability-discovery probe always forces `settingSources:
-    []` in the backend's own cwd, so reading the model list never runs a hook.
-  - **The SDK runs in a host child, and the child's environment is the scrub.**
-    `@cursor/sdk` runs its agent loop inline in whatever process imports it, so
-    the backend never imports it: it spawns `runner/cursor/host.js` with its own
-    Node runtime and speaks JSON-RPC to it over stdio. The shell tool's children
-    inherit the host's environment verbatim (fact 2), so what the host gets is
-    what a turn's shell gets: the operator's environment minus `AUTH_TOKEN`, the
-    same unconditional scrub every other spawned child gets. The agent's
-    persisted state (the SQLite store `Agent.resume` continues from) is pinned
-    under `STATE_DIR/cursor/agents`, never `~/.cursor/projects` and never the
-    registered workspace. The `commandAudit` row names the Node runtime and one
-    argument, never a workspace path and never a credential.
-  - **Billing follows the sign-in, and the credential is tier 3.** A turn bills
-    the Cursor account signed in through the SDK's web login
-    (`~/.cursor/sdk/auth.json`, a minted user API key written `0600` with a
-    90-day default lifetime), or `CURSOR_API_KEY` when set, which wins.
-    `CURSOR_API_KEY` and `CURSOR_BACKEND_URL` are environment-only: absent from
-    the settings file, the `/api/config` metadata, and the PATCH schema by
-    construction, never logged, never returned, and never in an audit row. The
-    host passes `apiKey` to the SDK only when the key is configured and
-    otherwise passes nothing, so `HOME` stays the operator's. There is no third
-    path: the `cursor-agent` CLI's own login is not read. The Mac's probe checks
-    that the sign-in file exists and never opens it. An expired key surfaces as
-    `ready: false` on `GET /api/runners` and an authentication error on the
-    first turn; the remedy is running the sign-in again. `Cursor.auth.logout()`
-    forgets the file but does not revoke the key; revocation is the dashboard's.
-    A Cursor Pro plan or better is required; the SDK refuses a free account at
-    `/v1/models` before anything runs.
-  - **Turn settings are mapped, never passed through.** A turn's `model` is
-    an id the catalog listed or the operator configured; `reasoningEffort` and
-    `serviceTier` become `ModelSelection.params` under the parameter name the
-    selected model declared (`effort` or `reasoning`, and the boolean `fast`),
-    and a value the model does not offer fails the turn. `mode` (`agent` |
-    `plan`) is not a setting in this release. Nothing a client sends reaches
-    the SDK as a free string.
-  - **Telemetry.** The SDK reports run lifecycle, latency, failure events, and
-    feature-gate checks to Cursor under the API key's identity, with no opt-out
-    the bundle exposes; repository identity in those events follows the Cursor
-    account's privacy mode. Model inference leaves the Mac, as it does for every
-    runner. If a later SDK adds an opt-out it belongs in the host environment,
-    set unconditionally.
-  - **Sub-agents are processes inside the host.** The `task` tool starts them,
-    they inherit the host's environment, and AgentRoom neither bounds them
-    separately nor observes them beyond the `task` message.
-  - **Other runners' provider secrets reach this host**, as they reach every
-    bundled runner's child: a Cursor turn's shell can read `DEEPSEEK_API_KEY`
-    exactly as a DeepSeek turn's can read `CURSOR_API_KEY`. A per-runner scrub
-    of the other runners' tier-3 names is a change to all four bundled runners
-    and is listed under the plan's residuals rather than made here.
-- Claude Code billing is deterministic for trusted workspaces: the runner scrubs
-  `ANTHROPIC_*` and `CLAUDE_CODE_OAUTH_TOKEN` from the child environment so turns
-  bill the Mac user's `claude login` subscription, unless the operator explicitly
-  sets `CLAUDE_CODE_INHERIT_PROVIDER_AUTH=true` (or a loaded workspace
-  `.claude/settings.json` re-supplies credentials, as noted above).
-- Restorable persistent runner children are idle-reaped. Each AgentRoom
-  session keeps one runner child process; for Codex, Claude Code, and Cursor,
-  after 30 idle minutes the backend kills the child (matching the terminal's
-  idle window), keeping the session's recorded native thread/session/agent id.
-  The next turn — and any turn after a child crash, an unresponsive-cancel
-  kill, or a backend restart, since the id is persisted with the session
-  record and seeded back into the runner at startup — resumes that
-  conversation (Codex `thread/resume`, Claude Agent SDK
-  `resume`, Cursor `Agent.resume` from the store pinned under `STATE_DIR`) in a
-  fresh child with the **same explicit runtime settings and isolation posture
-  as a fresh start**: the Codex resume re-passes the operator's approval
-  policy, sandbox mode, and pinned network access (verified against codex-cli
-  0.146: resume applies explicit overrides and echoes the effective sandbox),
-  the Claude resume rebuilds the same `settingSources`/permission-mode gating,
-  and the Cursor resume is the same `agent/start` as a fresh one (model,
-  sandbox, auto-review, settings source, question tool) with the kept agent id
-  added. When a Cursor child dies or the cancel ladder must kill it with a run
-  still active, the first resumed `agent/send` also sets the SDK's local
-  `force` recovery flag; idle-reaped sessions do not need it. A
-  rejected resume (for example a thread with no recorded turn, which has no
-  rollout) falls back to a fresh thread rather than failing the turn. Deleting
-  an AgentRoom session forgets its resumable id, so an explicitly deleted
-  thread is never silently resumed. Those adapters get this from one
-  implementation (`runner/shared/PersistentRunnerSessionHost.ts`) rather than
-  two parallel ones, and each declares how it can be restored
-  (`native_resume`, `history_replay`, `unsupported`). The host arms an idle
-  timer **only** for a runner it can restore: reaping a child that cannot be
-  restored would silently begin a fresh conversation under the same AgentRoom
-  session id, which is a worse outcome than a long-lived idle process. Codex
-  and Claude Code are `native_resume`; DeepSeek is `unsupported`, stays resident
-  while idle, and refuses same-session continuation after cancellation or child
-  loss.
-- The interactive terminal (PTY) is the **one deliberate exception to "no
-  arbitrary shell execution"**, and it is **off by default**. It is the
-  client-driven analog of the Claude Code `bypassPermissions` posture: a real
-  login shell the operator can drive from a client, **unsandboxed and not
-  filesystem-bounded** to the registered workspace once running. It is gated by
-  `TERMINAL_ENABLED` (default `false`); when unset the WS route is **not
-  registered at all**, so the surface is entirely absent. It is a **tier-2
-  managed setting**, so turning it on from a paired client additionally requires
-  the Mac-side `REMOTE_SETTINGS_ADMIN` switch and a backend restart; the
-  environment variable still wins and locks the key. Posture when enabled:
-  - **Bounded start, not bounded run.** The shell is spawned with `cwd` set to the
-    `realpath` of a registered workspace (rejecting an unregistered or missing
-    workspace), so it always *starts* inside a registered workspace. It is a real
-    shell, so it can then `cd` elsewhere — the bound is the starting directory and
-    the registered-workspace gate, not a sandbox. This is strictly more permissive
-    than the Codex `workspace-write` default and on par with the Claude Code
-    `bypassPermissions` default; it is a personal-use trade-off on the operator's
-    own Mac and account.
-  - **Bearer-authed channel.** `WS /api/workspaces/:workspaceId/terminal` performs
-    its **own** bearer check in-handler (`authorizedForRead`), because the global
-    preHandler only gates mutating *HTTP* methods and a WS upgrade is a GET. A
-    missing/incorrect token when `AUTH_TOKEN` is configured gets an `error` frame
-    and an immediate `1008` close — before any shell is spawned. (Note: the
-    pre-existing `WS /api/events` stream is not yet bearer-gated; that gap is
-    tracked separately and is intentionally **not** changed by this slice.)
-  - **No shell I/O is ever logged, returned, or persisted.** Keystrokes and output
-    can contain secrets, so they live only on the live socket. The
-    `terminal_session_started`/`terminal_session_closed` events and durable audit
-    entries carry only `sessionId`, `workspaceId`/`workspacePath`, and (on close)
-    `exitCode` and `durationMs` — never frame bytes.
-  - **Bounded lifecycle.** The global per-process session cap is operator-configurable
-    (`TERMINAL_MAX_SESSIONS`, default 8, schema-bounded 1–64) and applies across all
-    workspaces. A client may hold several sessions for one workspace — across several
-    terminal windows, since the visionOS client can move a tab between windows, which
-    transfers the live session and never spawns one — but every create
-    reserves a slot before the async workspace lookup, so concurrent upgrades cannot
-    race past the cap. Idle sessions are reaped (timer reset on input, output, and
-    resize, so an active-but-quiet session is not killed), resize frames are clamped to
-    a sane range, and every shell is killed (`SIGTERM`) when its socket closes, when the
-    session is reaped, or on backend shutdown. Output is flow-controlled — the PTY is
-    paused when the WebSocket send buffer grows and resumed when it drains — so a fast
-    producer with a slow client cannot balloon backend memory, and a single inbound
-    frame is size-capped.
-  - **Environment.** The shell inherits the backend user's environment plus
-    `TERM=xterm-256color`, like opening Terminal.app, with one exception: AgentRoom's
-    own bearer token (`AUTH_TOKEN`) is scrubbed from the PTY environment so it does not
-    leak into the shell or its subprocesses (a client already holds that token to reach
-    the route, but Terminal.app would not carry it). The resolved shell path
-    (`TERMINAL_SHELL`, else `$SHELL`, else `/bin/zsh`) is never returned by
-    `/api/config`: it is a tier-3 key, so it is absent from the managed settings
-    file and from the metadata block by construction. The switch itself and the
-    session cap are tier-2 managed settings and *are* reported there — a client
-    that may offer the terminal has to be able to see whether it is on.
-- Mac-hosted editor language services are an **opt-in local execution surface**.
-  `LANGUAGE_SERVICES_ENABLED` is a tier-2 managed setting and defaults to
-  `false`; while false, the workspace WebSocket is not registered. The always-
-  present `GET /api/editor/language-services` read is deliberately probe-free:
-  it returns only descriptor id/display name, configured/enabled state,
-  observed `ready` after a socket attempt, supported language ids, and each
-  descriptor's supported subset of the five fixed feature kinds. It never
-  resolves or starts a binary and never returns an executable path, argv,
-  environment, stderr, project root, or document content.
-  `SOURCEKIT_LSP_EXECUTABLE` is tier 3 and environment-only; an
-  override must be an absolute executable regular file and not a symlink. With
-  no override, SourceKit-LSP is resolved from the active Xcode toolchain by the
-  fixed `xcrun --find sourcekit-lsp` invocation only after an authenticated
-  document open. TypeScript and JavaScript use pinned production dependencies:
-  the current Node runtime starts the resolved `typescript-language-server`
-  5.3.0 CLI with fixed `--stdio` argv and supplies the resolved TypeScript 5.9.3
-  `tsserver.js` as a fixed initialization option. Neither path is configurable
-  or projected to a client. Automatic type acquisition is disabled so the
-  server does not invoke npm to fetch ambient types. Python uses pinned Pyright
-  1.1.413: the current Node runtime starts the resolved
-  `pyright/langserver.index.js` entry with fixed `--stdio` argv. Its path is
-  likewise neither configurable nor projected to a client.
-  The optional Rust, Go, Java, Kotlin, and C# descriptors are selected only by
-  tier-3 environment values: `RUST_ANALYZER_EXECUTABLE`, `GOPLS_EXECUTABLE`,
-  `JDTLS_EXECUTABLE`, `KOTLIN_LSP_EXECUTABLE`, and `CSHARP_LS_EXECUTABLE`.
-  AgentRoom does not search `PATH`; each configured value must be an absolute,
-  executable regular file and not a symlink. The admitted versions and fixed
-  argv are rust-analyzer 2026-08-31 with no arguments, gopls 0.23.0 with
-  `serve` and fixed initialization that enables its otherwise-disabled semantic
-  tokens, Eclipse JDT LS 1.61.0 with a backend-created unique `-data` directory,
-  Kotlin LSP 262.9593.0 alpha with `--stdio`, and csharp-ls 0.27.0 with
-  `--loglevel warning`. JDT LS process data is outside the workspace and is
-  removed when its process closes. These executable paths, argv, temporary
-  paths, and environment values are never managed settings or public fields.
-  - **External LSP descriptors are separately gated and fail closed.**
-    `EXTERNAL_LANGUAGE_SERVICES_ENABLED` defaults to `false`; while false the
-    backend does not parse `LANGUAGE_SERVICE_ADAPTERS` and registers no external
-    descriptor. The general `LANGUAGE_SERVICES_ENABLED` gate must also be on
-    before any built-in or external child can run. The definition list is tier
-    3 and environment-only, capped at 64 KiB and eight descriptors, zod-validated
-    as one strict document, and dropped whole on malformed JSON, an unknown
-    field, a duplicate, or a conflict. IDs live under `external_lsp_*`, and each
-    external language id is unique and must be absent from the built-in registry,
-    so a definition cannot shadow the service a client reaches for an existing
-    language. No definition value enters managed settings or a public response;
-    the existing registry route projects only the safe identity, availability,
-    language-id, and feature-kind fields it projects for built-ins.
-  - **An external definition admits one exact program, not a command line.** Its
-    `command` is absolute, must be an executable regular file, cannot be a
-    symlink, and is realpath-canonicalized immediately before spawn. `args` are a
-    bounded fixed array and no shell or client fragment participates. The
-    definition also fixes the operator-tested version, exact/dot-suffix project
-    markers with explicit priority and entry type, standalone-root policy, and
-    its subset of the five closed features. The client still names only a
-    language id and a fixed feature kind; it cannot select the descriptor,
-    executable, argv, marker, or LSP method.
-  - **The external child environment is an allowlist.** It receives the base
-    language-service names (`PATH`, `HOME`, `TMPDIR`, locale, and user identity)
-    plus at most 16 names the operator explicitly grants. A grant must use a
-    bounded uppercase environment name and cannot be `AUTH_TOKEN`, a
-    credential-shaped `*_TOKEN`/`*_API_KEY`/`*_SECRET`/`*_PASSWORD`, or an
-    Anthropic, OpenAI, Cursor, DeepSeek, or AWS-prefixed value. Unset names stay
-    absent. The generated descriptor is conservatively recorded as able to invoke
-    build tools and load plugins — a declaration cannot make arbitrary local code
-    safer — and admits only the bounded progress-create and null-per-item
-    workspace-configuration server answers. Every other request keeps the
-    existing `-32601` refusal.
-  - **Execution is not a workspace sandbox.** Each server starts with `cwd` set
-    to a realpath-proven project root inside a registered workspace, but a
-    language server may read SDKs outside that workspace or load project state
-    and plugins. SourceKit-LSP may ask SwiftPM/Xcode to invoke build tools; the
-    TypeScript descriptor does not invoke project build tools but may load
-    TypeScript plugins. The Pyright descriptor admits neither project build-tool
-    invocation nor language-server plugin loading, though Pyright may inspect
-    Python environments and import sources available to the backend process.
-    rust-analyzer may invoke Cargo and procedural macros; gopls may invoke Go
-    project tooling but does not admit plugins; Eclipse JDT LS and Kotlin LSP may
-    invoke Maven or Gradle and load project plugins; csharp-ls may invoke the
-    .NET/MSBuild toolchain and load analyzers or source generators. Those tools
-    can execute project-controlled code or perform network access according to
-    their own configuration. Register and open only trusted projects. Every
-    descriptor records its tested version, UTF-16 position encoding, and this
-    project-loading posture; the bounded workspace preview APIs do not weaken
-    it.
-  - **Closed, authenticated workspace protocol.** The only execution route is
-    `WS /api/workspaces/:workspaceId/editor/language-service`. It performs its
-    own bearer check before accepting buffer text. Client frames are the strict
-    version-1 `open`/`change`/`request`/`cancel`/`close` union; requests can name
-    only completion, hover, definition, document symbols, or full semantic
-    tokens. There is no raw LSP method, command, executable, argv, environment,
-    HTML, or arbitrary-JSON escape hatch. `/api/events` remains the only
-    **broadcast event** socket; this route and the terminal are authenticated,
-    workspace-scoped protocols.
-  - **Bounded file and project selection.** An open path passes the existing
-    lexical and secret-name filters, then every path segment and the regular
-    file are realpath-checked; symlink aliases are refused. Project selection
-    walks no higher than the registered workspace, chooses the nearest
-    descriptor-declared marker and explicit same-directory priority, and reports
-    `ambiguous_project` rather than relying on filesystem order. The instance
-    key is `(workspaceId, descriptorId, projectRoot)`. SourceKit-LSP, TypeScript,
-    Pyright, rust-analyzer, gopls, Eclipse JDT LS, and Kotlin LSP may fall back to
-    the registered workspace root; csharp-ls requires an admitted project marker
-    and otherwise reports `project_not_found`. One socket generation
-    leases one canonical workspace file path, including its case aliases; a competitor gets `document_busy`
-    without its buffer reaching the child.
-  - **Bounded process, memory, and transport.** The host admits 8 processes
-    globally and 4 per workspace, 32 shadows per process, 256 KiB per shadow,
-    and 32 MiB of shadow text globally. LSP frames are capped at 4 MiB and the
-    private stderr tail at 64 KiB. Each child's queued stdin, including the
-    active write and framing bytes, is capped at 4 MiB. An overflow terminates
-    that service through the existing bounded restart path. Socket input/output frames are capped at
-    384 KiB/2 MiB, with separate 8-frame/512 KiB inbound-operation and send
-    queues; outstanding feature requests are capped at 16 per socket and 64 per process. Initialize,
-    feature, and shutdown deadlines are 20 s/10 s/3 s. Full-buffer changes
-    coalesce for 150 ms. An idle process closes after 10 minutes. Shutdown,
-    and workspace removal release child processes. Disconnect and explicit close
-    release their shadows, requests, and leases; the now-idle child then follows
-    the bounded idle-close path.
-  - **Versioned replay, never a disk reconstruction.** Client versions must be
-    positive and strictly increase; LSP versions are backend-owned and increase
-    across changes, reconnects, and crash replay. A non-monotonic change reports
-    `resync_required` and closes the socket. A crashed child may restart three
-    times in five minutes (the budget clears after ten healthy minutes); replay
-    sends `didOpen` with the latest bounded in-memory draft and a fresh LSP
-    version. It never rereads an unsaved buffer from disk. Stale, cancelled, or
-    cross-generation responses are dropped. Readiness applies to the current
-    socket generation even if typing has advanced past its opening version;
-    diagnostics and feature results still require the current document version.
-  - **Narrow results and server authority.** Diagnostics, completions,
-    definitions, document symbols, semantic tokens, strings, legends, and tree
-    depth are normalized to the Phase 0 caps. Definition targets must be
-    existing regular, non-symlink files inside the same workspace. Completion
-    commands, snippets, additional edits, and insert-replace edits do not cross
-    the boundary. Plain `insertText` is retained separately from the display
-    label and capped at 256 KiB, like an explicit edit. Documentation and
-    diagnostic strings preserve code punctuation, including literal Markdown
-    or HTML source; clients render them as inert text with HTML and link
-    execution disabled. Each descriptor owns its fixed
-    server-request allowlist and responses. SourceKit-LSP admits only bounded
-    `window/workDoneProgress/create`; the TypeScript, Pyright, rust-analyzer,
-    gopls, Eclipse JDT LS, Kotlin LSP, and csharp-ls language servers admit that
-    request plus `workspace/configuration` with one fixed `null` per bounded
-    item. Apply-edit, command,
-    interactive prompt, dynamic-registration, and every unknown request receive
-    JSON-RPC `-32601`. Buffer text and server payloads are never logged or
-    persisted, and the child's descriptor allowlist is still filtered to scrub
-    `AUTH_TOKEN` and provider-credential names.
-- Agent turn context accepts only selected workspace-relative paths; the backend
-  resolves and bounds previews before injecting them into runner prompts.
-- Backend turn context assembly is limited to the original user message,
-  explicit workspace context paths, and session-scoped attachment ids; it does
-  not perform automatic file selection, embeddings, summarization, token
-  budgeting, or arbitrary binary file handoff.
-- Session attachments accept only uploaded PNG, JPEG, or WebP image files for
-  the first slice. The backend validates type/signature, hashes content, stores
-  files under `STATE_DIR`, and attaches them to turns by session-scoped id
-  without writing into the registered workspace. Session deletion removes that
-  session's backend-owned attachment storage.
-- Live artifacts are model-authored sketches streamed in-band as an
-  `<artifact kind="svg|mermaid">` region of assistant text. The backend parser
-  only opens a region for an `<artifact …>` tag at the start of a line (matching
-  the prompt contract), so an inline `<artifact …>` the model is merely quoting
-  in prose is left untouched rather than silently swallowing the surrounding
-  text; the close marker tolerates surrounding whitespace and case
-  (`</artifact >`, `</Artifact>`) and a self-closing `<artifact …/>` is dropped
-  as an empty control tag, so a slightly malformed tag bounds the region instead
-  of consuming the rest of the turn. Regions are parsed and stored backend-side
-  only: bounded per session (count cap) and per artifact (a 64 KB UTF-8 byte cap,
-  trimmed on a code-point boundary and flagged `truncated`), in-memory, released
-  on session deletion, and never written into the registered workspace. The live
-  delta stream only carries what the store actually retained, so it never exceeds
-  the cap or diverges from the reconnect snapshot. Only `svg` and `mermaid` kinds
-  are accepted; other kinds are left as ordinary chat text. The channel is gated
-  by `ARTIFACTS_ENABLED` (default on). Because artifact content is model-authored
-  markup, any client that renders it must sandbox the render surface. The
-  visionOS client does this per kind: SVG renders in a `WKWebView` with
-  JavaScript disabled, and Mermaid (which requires JavaScript) renders with a
-  vendored, bundled `mermaid.min.js` that is never fetched from the network and
-  is injected as a `WKUserScript`. Both surfaces share one
-  Content-Security-Policy, `default-src 'none'; style-src 'unsafe-inline';
-  img-src data:`: `default-src 'none'` is the fallback that blocks every network
-  fetch, connection, font, frame, and subresource (so an `<image href>`/`<use
-  href>` or CSS `@import` cannot phone home — disabling JavaScript alone does not
-  stop those requests, the CSP does), `style-src 'unsafe-inline'` permits the
-  inline page styles, and `img-src data:` allows only inline `data:` images,
-  which are not network requests. On the Mermaid surface the injected user script
-  runs regardless of CSP (that is how Mermaid renders), but the same
-  `default-src 'none'` still blocks every document request. The untrusted Mermaid
-  diagram source is only ever handed to Mermaid in `securityLevel: 'strict'`
-  (DOMPurify-sanitized output, no HTML labels, no click bindings) with
-  `suppressErrorRendering` so partial mid-stream source cannot inject markup, and
-  it is passed via `evaluateJavaScript` as a JSON-encoded string literal (never
-  interpolated into HTML), so it cannot break out into script. In both renderers
-  no base URL is set and the navigation policy allows only our own host-less,
-  in-memory `loadHTMLString` loads (`about:blank`); any other navigation — link
-  taps, redirects, form submits, or a script-initiated navigation to a hosted
-  URL — is cancelled, so model markup cannot reach the host or the network even
-  if a renderer-level check were bypassed. The shared CSP, web-view
-  construction, render scheduling, and navigation policy live in one place
-  (`SandboxedWebView.swift`) so the boundary cannot drift between the two
-  surfaces. HTML-with-JS and 3D artifact kinds are intentionally not supported.
-- The visionOS code editor is an **interactive, editable** web view, distinct from
-  the read-only artifact surfaces above. It renders the vendored Monaco editor,
-  served to the web view only from the app bundle by a private `agentroom-editor://`
-  `WKURLSchemeHandler` (`MonacoSchemeHandler`) that returns files solely from the
-  bundled `Resources/Monaco` directory — never the network or the workspace. It is a
-  deliberate, documented divergence from the artifact surfaces' read-only
-  `SandboxedWebView` CSP, which has no `script-src` because those surfaces run no page
-  scripts.
-  - **CSP.** The page runs under a strict `default-src 'none'` Content-Security-Policy.
-    Each fetch directive names the editor's own origin as `'self' agentroom-editor:` —
-    the custom scheme is listed explicitly because WebKit does not reliably match a
-    `WKURLSchemeHandler` origin against bare `'self'`:
-    - `script-src 'self' agentroom-editor: 'wasm-unsafe-eval'` — the editor's own
-      bundled scripts, including the vendored `vscode-textmate` highlighting engine;
-      `'wasm-unsafe-eval'` compiles the bundled Oniguruma regex WASM that engine runs.
-    - `style-src 'self' agentroom-editor: 'unsafe-inline'` and `font-src 'self'
-      agentroom-editor: data:` for Monaco's runtime-injected CSS and inline icon font;
-      `img-src 'self' agentroom-editor: data:`.
-    - `connect-src 'none'` blocks any fetch/XHR/WebSocket; `worker-src data:` covers the
-      single inert no-op `data:` worker (workers are disabled; tokenizing runs on the
-      main thread); `child-src`, `base-uri`, `form-action`, and `object-src` are all
-      `'none'`.
-  - **Navigation.** The navigation policy allows only the editor origin and a host-less
-    `about:blank` and cancels everything else (including host-less `file:`/`data:`/`blob:`
-    URLs), so file content cannot leave via a redirect, link, or scripted navigation.
-  - **Bridge and untrusted input.** The native↔web bridge accepts only the whitelisted
-    message types (`ready`, `change`, `findResult` — match counts only: `total`, `index`,
-    and `limited`, never matched text, matched lines, or file content — and the
-    diagnostic-only `fatal`/`log`, which can drive the editor to a failure overlay or write
-    to Console but carry no file content); the only untrusted input — the file's text — is
-    injected as a JSON-encoded JavaScript string literal, never interpolated into HTML.
-  - **No new mutation path.** Edits stream back to the model and save only through the
-    existing single bounded write (`PUT /api/workspaces/:id/file`).
-  - **Side-by-side diff view stays inside the boundary.** The editor can toggle a read-only
-    two-pane diff (git HEAD baseline on the left, the working buffer on the right) rendered by
-    two plain Monaco editors — not Monaco's own diff editor, which needs the editor worker this
-    app stubs out. Unlike the gutter quick-diff bridge (`__setGitDiffDecorations`, line numbers
-    and kinds only), the diff view's `__showDiff` bridge call injects the HEAD baseline text into
-    the page. That is the **same class of data as the working buffer the page already holds** —
-    committed bytes the client already fetched over the bearer-authed, bounded
-    `GET /api/workspaces/:id/git/file-base` read (which reuses the preview path's lexical
-    bounding, secret-name refusal, NUL/binary rejection, and 256 KB cap) — and it is injected as
-    JSON-encoded string arguments, never interpolated into HTML. The page keeps
-    `connect-src 'none'` and the editor-origin-only navigation policy, so neither the baseline
-    nor the working text can leave. The diff alignment (`GitDiffHunk`) carries only line
-    numbers/counts and a kind. It is read-only and opens no new write or fetch path.
-  - **Find in file is native chrome over a literal search.** The search UI is a **native**
-    window ornament, not web chrome, so the untrusted query never becomes page markup: it
-    crosses to the page as a **JSON-encoded JavaScript string argument** to `__findInFile`
-    (the same injection discipline as the file text), never interpolated into HTML. The
-    search itself is **literal only — Monaco's `isRegex` is hard-coded false** — so a query
-    is never compiled as a pattern, and results stop at a 1,000-match cap that is reported
-    as a `limited` flag. The remaining bridge calls carry no content either: `__findGoTo`
-    takes a match ordinal, `__findClear` takes nothing, and `__revealLine` takes only
-    clamped 1-based line/column geometry. This opens **no new read, write, or network
-    path** — no route is called, `connect-src 'none'` and the editor-origin-only navigation
-    policy are unchanged — and replace-in-file is deliberately not implemented. Any future
-    replace must go through the existing single bounded write
-    (`PUT /api/workspaces/:id/file`), not a page-side buffer mutation.
-  - **Highlighting is data, not code.** The vendored Oniguruma WASM, the
-    `.tmLanguage.json` grammars, the scope-based token themes, and the VS Code language
-    configurations (brackets, comments, auto-closing) are read from the app bundle by
-    native and injected over the bridge (the page is `connect-src 'none'`, so it cannot
-    fetch them); the web view runs the vendored engine but never loads a language as
-    executable script, and when those assets are absent it degrades to Monaco's built-in
-    Monarch highlighting and default editing behavior.
-- The visionOS editor can source its language assets from a **backend-served language
-  catalog** (Phase C) instead of only the app bundle, so new/updated grammars, themes,
-  and language configs ship without an app update. This stays inside the existing
-  boundaries:
-  - **App/global data, not workspace files.** The assets are served by two new bounded
-    read routes (`GET /api/editor/catalog` manifest + `GET /api/editor/catalog/asset`)
-    that **never touch a registered workspace or the workspace file API**. Both require
-    the bearer token when `AUTH_TOKEN` is configured (via `authorizedForRead`).
-  - **Data only, never executable code.** The catalog serves `.json` and `.wasm`,
-    enforced by an extension allowlist, and only paths the manifest references; it
-    **never serves executable code** (`.js`/Monarch language packs) — the TextMate engine
-    JS stays bundled in the app, same-origin under the editor's `script-src 'self'`. The
-    asset route reuses the workspace read bounding (lexical normalize, realpath
-    containment, symlink-leaf refusal).
-  - **Gated and absence-safe.** The routes are gated by `LANGUAGE_CATALOG_ENABLED`
-    (default on; not exposed in `/api/config`); when the curated
-    `apps/backend/catalog-assets/` directory is absent the manifest is null and the
-    routes 404.
-  - **Webview stays no-network.** The editor WKWebView keeps `connect-src 'none'`: native
-    fetches the catalog over REST and injects it over the existing bridge, exactly like
-    the bundled path — the webview, `MonacoSchemeHandler`, and the page CSP are unchanged.
-  - **Hash-verified, whole-generation fallback.** The client **verifies every fetched
-    blob's sha256 and byte count** against the manifest before use and caches assets
-    content-addressed on device. It activates a backend generation only when every
-    required asset verifies; a partial generation never mixes with bundled accessors.
-    **Bundled assets remain the offline fallback**, so a malformed, tampered, or absent
-    catalog does not break the editor.
-- The editor language catalog directory is **operator-managed and reloadable** (Phase C.5),
-  so an operator can push a new/updated catalog from the macOS app **without rebuilding the
-  backend**. This does not widen the catalog's boundaries — it only makes its source
-  configurable and re-readable at runtime:
-  - **Configurable root, same bounding.** The served directory resolves
-    `EDITOR_CATALOG_DIR` (default `$AGENTROOM_HOME/catalog-assets`) and prefers it when it
-    holds a manifest, else the **bundled** `apps/backend/catalog-assets`, else no catalog
-    (routes 404 → client uses its bundled floor). Whichever root is chosen, the asset route
-    keeps the **same read bounding** (lexical normalize, realpath containment, `.json`/`.wasm`
-    extension allowlist that never admits `.js`, refusal of symlinks in every path component,
-    manifest-referenced paths only).
-    The catalog root is **never a registered workspace** and never routes through the
-    workspace file API; reads stay bearer-authed via `authorizedForRead`.
-  - **Validated immutable generations.** Language maps, theme maps, grammar extensions,
-    dependencies, types, paths, hashes, JSON depth, claim counts, grammar counts, and byte
-    sizes are validated before a snapshot becomes live. Both theme maps must define
-    `AgentRoom-Light` and `AgentRoom-Dark`, the names every client resolves, so a
-    catalog no client could use is refused here rather than ignored on the headset. The frozen ceilings are 256
-    languages, 4,096 total detection claims (64 per language), 256 primary and 512
-    auxiliary grammars, dependency depth 8, 2 MiB per grammar/WASM, 64 KiB per language
-    configuration, 32 MiB aggregate asset bytes, and JSON depth 32. Language
-    configurations are parsed as JSONC and checked for object shape, consumed
-    field types, and depth before acceptance, then embedded as strict JSON so
-    every client reads the validated value. Accepted referenced
-    bytes are pinned in memory, so a later disk write cannot race the advertised hashes.
-    A rejected runtime reload preserves the last accepted generation; an invalid startup
-    override falls back to the bundled snapshot. A schema-2 index is checked further: every
-    scope named as an injection must exist and its grammar must declare an
-    `injectionSelector`, the injection graph is cycle-free within the depth bound, a grammar
-    may name at most 128 external scopes, and each grammar's `dependencyScopes` are derived
-    from its own `include` rules rather than declared, so a catalog cannot claim a dependency
-    it does not use or hide one it does. An `include` no grammar supplies is not a
-    rejection: that text tokenizes as its enclosing scope, and the status route reports the
-    count as `unresolvedScopeCount` so an operator can see which embedded blocks stay plain.
-  - **Reload route.** `POST /api/editor/catalog/reload` re-reads the directory and swaps only
-    a validated complete snapshot. It is a mutating method, so the global preHandler **requires the
-    bearer token when `AUTH_TOKEN` is configured**; it is gated by `LANGUAGE_CATALOG_ENABLED`
-    and performs **no workspace mutation**. `GET /api/editor/catalog/status` (a bearer-gated
-    read) reports only live source/version, schema versions, aggregate counts, and a bounded
-    validation code/location for the operator UI, never asset content.
-  - **New writable surface (operator-side).** The macOS Languages pane imports an
-    operator-chosen folder by copying its **data files only** (`.json`/`.wasm`, never `.js`)
-    into a sibling staging directory, then activating it by same-volume rename. The prior
-    override remains as a rollback target until the backend accepts the candidate.
-    The supervisor admits one import, reset, or reload at a time and holds that
-    ownership through acceptance or rollback. This is the one
-    new write, and it targets AgentRoom's **own app-support directory on the operator's Mac**
-    — not a registered workspace and not an arbitrary path. The TextMate engine JS stays
-    bundled in the app, so the served catalog can still never carry executable language packs.
-  - **Grammars enter the source tree through a maintainer importer, never the operator
-    path.** `apps/backend/scripts/import-editor-grammars.mjs` reads a pinned source table
-    (`editor-grammar-sources.json`), fetches each grammar, language configuration, and
-    license text verbatim from that ref over HTTPS, validates it as JSON data against the
-    same bounds the backend enforces, and writes it into the visionOS source catalog with a
-    provenance record and the license text beside it; it then runs the one-way sync into
-    the committed backend catalog. It executes nothing it fetches, admits only `.json`
-    grammars, and runs only from a developer checkout with network access. The operator
-    importer above stays what it was: a local folder copy that downloads nothing.
-  - **Auto-propagation carries no content.** A reload that changes the aggregate version
-    publishes an `editor_catalog_changed` event over `WS /api/events` carrying only
-    `{version, languageCount}` — never asset bytes. visionOS re-hydrates on receipt and still
-    **verifies every fetched blob's sha256 and byte count** before use, so a malformed or
-    tampered push leaves the current complete generation active rather than reaching the editor.
-- The spatial render engine adds **no new execution or write surface**.
-  Geometry-first scenes (`<name>.scene.json`) and semantic solution diagrams
-  (`<name>.diagram.json`) are ordinary workspace files; human placement lands
-  only in their sibling `*.human.json` layers through the existing bounded,
-  optimistic-locked `PUT /api/workspaces/:id/file`. The single
-  `GET /api/workspaces/:id/spatial-scene` read dispatches both suffixes through
-  the explorer's existing lexical bounding, symlink containment,
-  secret/generated filtering, and 256 KB cap, and requires bearer auth when
-  configured. Scene documents keep their 64-entity numeric caps and structured
-  4xx validation failures. Diagram documents are strictly zod-validated with
-  64-node / 128-edge / 16-group caps; schema/reference failures return a
-  bounded `{ errors }` render document, while unknown role/kind vocabulary
-  degrades to generic primitives plus bounded warning strings rather than
-  disabling the whole diagram. The diagram override layer's `collapsed` flag
-  (group entries only, added for group collapse/expand) changes only which
-  bounded entities compose — a collapsed group emits one stand-in instead of its
-  members — and adds no route, event, or write path. A collapsed member that was
-  already hidden contributes only its bounded source id and label to
-  `suppressedHiddenEntities`, so the existing restore ornament can undo that
-  hide without treating it as renderable geometry; an unknown override field is
-  still refused by the strict schema. `staleOverrides` is the same class of
-  bounded, non-renderable metadata: one entry per override whose id the base
-  document no longer declares, carrying that entry's own id and adjustment flags
-  and nothing else — no label, no coordinates, and no id the two files did not
-  already hold. It is derived at compose time from the same two bounded reads and
-  is bounded by the override layer's own cap, and it neither deletes the entry
-  nor adds a way to; discarding an orphaned adjustment is the client rewriting
-  the override layer through the existing optimistic-locked PUT, so this adds no
-  route, event, or write path either. The service keeps **no state**: it composes on
-  every read, with no watcher, tracked-scene registry, or new event type;
-  clients reuse `workspace_file_written`, `workspace_file_deleted`,
-  `workspace_directory_deleted`, `workspace_entry_renamed`, and turn settlement
-  signals. While
-  Named flows (base `schemaVersion: 2`, optional `flows`) are bounded the same
-  way — 16 flows of at most 32 steps, each step an id that must reference a
-  declared edge — and compose resolves them to already-composed connector ids,
-  so they add no geometry, no id the document did not already carry, and no
-  client-side lookup. Choosing one is view state in the volume: it writes
-  nothing, so unlike lock, hide, and collapse it never reaches the override
-  layer or the bounded PUT. Descriptions (base `schemaVersion: 3`, optional
-  bounded `description` on the document, nodes, edges, and groups, ≤ 500
-  characters each, trimmed) are the same class of additive, versioned field:
-  compose passes them through to the composed entities, connectors, and
-  document verbatim — file content the composed read already serves, no new
-  data class — and the selection card renders them. Declaring one below
-  version 3 is a validation error, so the version stays an honest capability
-  marker. A document that declares an older version stays valid and simply
-  composes an empty `flows` and no descriptions, so an older committed diagram
-  is not turned into an error card by either bump. While
-  `SCENE_ENGINE_ENABLED` is on, the backend injects one constant authoring
-  contract into Codex turn prompts and appends the same stable string to Claude
-  Code's SDK system prompt. The contract frames diagrams as an on-request
-  capability and forbids edits to `*.diagram.human.json`. The composed result is
-  bounded data for native RealityKit rendering; no model-authored markup or
-  script executes. Disabling the flag unregisters the route and omits every
-  prompt-delivery path.
-- The Mermaid import bridge (`POST /api/spatial-scene/mermaid-import`) is the
-  spatial surface's one **pure-compute** route, and it deliberately touches
-  nothing: no workspace, no filesystem, no child process, and no execution of
-  mermaid.js or any other model-authored markup — conversion is a hand-rolled,
-  bounded, single-pass parser in `src/scene/diagram/mermaidImport.ts`. Posture:
-  - **No caller input is ever compiled into a RegExp.** The module's few regex
-    literals are fixed and applied to length-bounded text; everything
-    structural is character scanning, so a hostile source degrades to a
-    structured error rather than an in-process ReDoS — the same reasoning that
-    keeps regex out of the content search.
-  - **Bounded at every step.** The request `source` is capped at 64 KB (the
-    artifact content cap; the route answers `413` past it), the parser bounds
-    lines and line length, the emitted document is capped by the diagram
-    schema's own 64-node/128-edge/16-group limits (over-cap is a structured
-    error, never silent truncation), and warnings/errors are count-capped.
-  - **It converts; it never writes.** The response is canonical `.diagram.json`
-    text the *client* writes through the existing bounded, optimistic-locked
-    workspace file PUT — create-only (no `baseModifiedAt`), so an import
-    cannot overwrite an existing diagram. No new write surface, no event, no
-    audit entry, no state.
-  - **Gated and bearer-authed.** Registered only while `SCENE_ENGINE_ENABLED`
-    is on (off ⇒ the route is absent), and as a mutating POST the global
-    preHandler requires the bearer token when `AUTH_TOKEN` is configured; the
-    handler does not double-authenticate.
-  - **Deterministic, and lossy edges are reported.** Identical input produces
-    identical output, and every conversion loss (a sanitized id, a dropped
-    self-loop or subgraph-endpoint edge, a flattened nested subgraph) is a
-    bounded warning — a renamed id matters because human overrides key on
-    diagram ids, so the warnings are what keep a re-import from silently
-    orphaning placement.
-- The diagram edit route (`POST /api/spatial-scene/diagram-edit`) is the import
-  bridge's sibling and inherits its posture wholesale: **pure compute** — no
-  workspace, no filesystem, no child process, no caller input compiled into a
-  RegExp — that converts and never writes. It applies a bounded, zod-typed
-  list
-  of semantic operations (at most 32) to base document text (capped at the
-  256 KB file write cap) and returns new canonical `.diagram.json` text the
-  *client* writes through the existing bounded, optimistic-locked workspace
-  PUT, passing the base layer's `modifiedAt` token from the composed read it
-  edited against — so a concurrent agent regeneration surfaces as the PUT's
-  `409`, never as a lost update, and the route itself adds no write surface,
-  event, audit entry, or state. What it will not do is as deliberate as what it
-  does:
-  - **No rename-id op.** Ids are the keys human overrides attach to (the
-    `staleOverrides` mechanism exists because a changed id orphans them), so
-    the op vocabulary edits labels and the backend derives created ids from
-    them with the shared sanitizer and a deterministic collision ladder. A
-    client edit therefore cannot orphan placement the way an agent rename can.
-  - **All-or-nothing, never a partial apply.** The first inapplicable op fails
-    the whole request with a bounded op-indexed `422`; the document caps
-    (64 nodes / 128 edges / 16 groups) are enforced at op time as structured
-    errors, never silent truncation. Knock-on effects of a delete (incident
-    edges, flow steps, ungrouped members) are bounded warnings, never silence.
-  - **Gated and bearer-authed.** Registered only while `SCENE_ENGINE_ENABLED`
-    is on (off ⇒ the route is absent), and as a mutating POST the global
-    preHandler requires the bearer token when `AUTH_TOKEN` is configured.
-  - **Deterministic and canonical.** Identical input produces identical output
-    through the same canonical serializer the import uses
-    (`diagram/canonical.ts`), so the two conversion surfaces cannot drift apart
-    byte-wise and a no-op edit round-trips cleanly.
-- Two things the backend puts in a turn prompt are **not** constant. Both are
-  diagram-scoped, bounded at every step, gated by `SCENE_ENGINE_ENABLED`, held
-  only in memory per session, and delivered once per accepted turn to both
-  runner kinds; each keys on the one authorship signal that already exists for
-  its author, so neither adds a watcher, a scan, an event type, or a route. The
-  first is the
-  human-edit summary (Phase 5 slice 1, widened by Phase 6 slice 6) — a bounded
-  line naming what the human changed in a diagram since that session's last
-  turn: placement adjustments in its `*.diagram.human.json` layer, structure
-  edits to the `*.diagram.json` base document (the writes the diagram-edit route
-  produces), and the override ids left orphaned when the base document no longer
-  declares them — the prompt-side counterpart of the composed read's
-  `staleOverrides`, which is how an agent learns its own earlier rename orphaned
-  a human adjustment. It is gated by the same `SCENE_ENGINE_ENABLED` flag, and it
-  is deliberately the narrowest thing that closes the salience gap the always-on
-  contract leaves:
-  - **It is derived from the written diagram's own two files alone**, never from
-    the workspace tree or any other file. The override layer holds semantic ids
-    plus bounded placement-state fingerprints; the base document is the design
-    the agent authors, reads, and is being asked to edit. The summary names ids
-    and change categories only — no labels, no description text, no
-    coordinates, no file content, and
-    no data class the agent could not already reach with the Read the standing
-    contract already instructs. Because the delta is computed against the state
-    this session was last shown, an out-of-band edit the event stream never
-    announced can fold into the next human delta; the contract's re-read rule
-    remains the floor for anything the summary does not see.
-  - **It is bounded at every step**: at most 4 diagrams per turn (the rest
-    reported only as a count), 8 ids per category, and a 1200-character cap, over
-    at most two reads per tracked diagram (base and override, at most 16 per
-    workspace) that go through the explorer's bounded preview path like every
-    other workspace read.
-  - **It reads only what a bounded PUT announced.** The tracker subscribes to the
-    existing `workspace_file_written` event — the client's own writes to a
-    diagram's two layers are its only source, and agent file edits publish no
-    event, which is the entire authorship discrimination — so it adds no
-    fs-watcher, no new event type, no scan of the
-    workspace on the turn-start path, and no tracked-open state. A file that
-    cannot be read, or that fails its strict schema, is skipped silently
-    rather than relayed into a prompt or failed onto a turn.
-  - **It is per-session and delivered once.** Session pointers and compact
-    per-layer snapshots are in-memory, bounded, and released on
-    `agent_session_deleted`; nothing about a human edit is persisted, audited,
-    or emitted. The pointer advances only after turn input validation succeeds,
-    so a rejected turn leaves the summary available to retry. Unlike the contract, the summary goes into
-    the **turn** prompt for both runner kinds, because a value that changes
-    between turns cannot live in Claude Code's stable, cached system prompt.
-- The second non-constant prompt injection is the diagram render feedback
-  (visual-refinement Phase 6 slice 1) — a bounded line telling the agent what
-  the `*.diagram.json` documents its own last turn wrote actually rendered as:
-  compose warnings (an unknown role or edge kind falling back to the generic
-  treatment), validation errors (the state the volume shows as an error card),
-  or the over-cap state. Without it the agent authors blind — those outcomes
-  surface only in the volume, and the human has to relay them by hand. It is
-  the human-edit summary's mirror image, and deliberately narrow the same way:
-  - **It keys on turn settlement, never on `workspace_file_written`.** That
-    event is the human-edit tracker's authorship discrimination (only the
-    bounded PUT publishes it; agent writes never do), and this channel needs
-    the opposite author. The agent-authorship signal that already exists is
-    the settling turn's own `coding_diff_updated` file summary — the
-    settle-time Git delta for Claude Code, Codex's own `turn/diff/updated` —
-    so a `*.diagram.json` base path among its files is what triggers
-    validation. No fs-watcher, no new event type, no route, and no scan of the
-    workspace; the diff's documented attribution caveat (a concurrent human
-    write during a turn is attributed to the turn) is inherited knowingly, and
-    the read reports what is actually on disk either way.
-  - **It reads at most a handful of bounded previews at settlement, off the
-    turn-start path.** At most 4 diagrams per settled turn get one read each
-    through the explorer's bounded preview (writes beyond that are reported
-    only as an unchecked count); validation is the same zod schema and compose
-    pass the read route runs, so the reported strings are exactly the bounded
-    `warnings`/`errors` the composed read already serves the volume — no new
-    data class reaches a prompt. A read failure is skipped silently, a clean
-    render clears any pending report for that diagram, and a diagram the diff
-    reports deleted — or renamed away, via the diff entry's `oldPath` — drops
-    its pending report rather than relaying a stale one.
-  - **It is per-session, ordered, delivered once, and never persisted.**
-    Settlement validations are serialized per session, and the next turn's
-    prompt assembly waits out the in-flight chain — waiting never starts a
-    read, so the turn-start path stays read-free while an immediately queued
-    follow-up turn still carries the previous turn's feedback, and an older
-    settlement can never record over a newer one. Outcomes wait in memory
-    keyed by session (bounded per session and across sessions), ride the next
-    accepted turn's prompt for both runner kinds, and are consumed only when
-    the turn is accepted **and** the report's line actually fit under the
-    summary's character cap — a rejected turn retries with them, and a report
-    the cap squeezed out stays pending for the turn after. Everything is
-    released on `agent_session_deleted`, which also cancels any validation
-    still in flight so a completing read cannot recreate a deleted session's
-    state. Nothing is audited, emitted, or returned by a route.
-  - **A human's broken edit is not double-reported.** The diagram-edit route
-    rejects an inapplicable op list with a `422` the client already surfaces,
-    so it never lands on disk and never reaches this channel; what lands
-    through the bounded PUT during a turn is subject to the attribution
-    caveat above, nothing more.
-- Rendering a spatial document on a **real surface** (the visionOS client's
-  mixed immersive space) adds no surface class either. It is a second
-  presentation of the document the volume already holds: the same composed read,
-  the same shared renderer, and the same `*.human.json` writes through the same
-  bounded, optimistic-locked PUT — it adds no route, event, contract field, or
-  backend state, and the backend cannot tell the two presentations apart. It
-  also takes **no new device capability**. Anchoring uses RealityKit's own
-  (`AnchorEntity(.plane(.horizontal, classification:, minimumBounds:))`), where
-  the system resolves the surface and the app is never handed the plane:
-  AgentRoom opens no `ARKitSession`, requests no world-sensing authorization,
-  ships no sensing usage-description string, and receives no room geometry,
-  scene mesh, or hand data. When no surface resolves, the fallback places the
-  content once relative to the head pose (`trackingMode: .once`) and then stops
-  tracking, so the client neither follows the wearer nor records where they
-  were. Nothing about the room is read, stored, or sent anywhere.
-  The scale presets layered on top change none of that. A preset is a container
-  size plus the surface classification and minimum bound that size implies, so
-  choosing one changes **which** surface the system is asked to resolve and how
-  far a drag may travel — not what comes back, which is still nothing. Asking
-  for the placement again rebuilds the same anchors; it reads no more of the
-  room than the first attempt did. The preset is client state held on
-  `AppStore`: it reaches no `*.human.json` layer, no route, no event, and no
-  contract field, so the backend composes the identical document at every scale
-  and cannot tell which one is rendering.
-  The room's memory across app launches adds no data class either, because the
-  thing that would have been a new one is the thing it deliberately does not
-  store. What persists is the placement *choice* — the scale preset, and the
-  workspace id plus workspace-relative path of the document that was left
-  resting — written to the app's own `UserDefaults` on the device. The **spot is
-  not stored, and could not be**: RealityKit's anchoring resolves the surface
-  system-side and hands the app no plane, transform, or identity, and the only
-  visionOS API that remembers a physical point across launches is an ARKit
-  `WorldAnchor`, which needs the `ARKitSession` this posture rules out. So a
-  restored room re-runs the same surface search from where the person is
-  standing now and reads no more of the room than a first placement does;
-  nothing about the room is recorded, and nothing leaves the device. The stored
-  document reference is the same class of local preference as the server URL
-  beside it — a path, never file content — and it reaches no workspace file, no
-  request, and no event, so the backend cannot tell that a room was ever
-  remembered.
-- The visionOS client derives file context from explicit `@` file mentions in
-  the turn composer; browsing and previewing workspace files does not add turn
-  context by itself.
-- The visionOS client can upload selected Photos images or pasted clipboard
-  images, including copied screenshots, as session attachments, but it only
-  sends backend attachment ids on the turn; backend turn context assembly
-  resolves the ids and runner input parts.
-- Durable audit persists only sanitized lifecycle and runner audit entries.
-- The macOS app strips the AgentRoom-managed and secret-tier env vars it owns
-  from the inherited environment before launching the backend, so a value
-  exported by whatever launched the app cannot silently lock a managed key or
-  shadow a Keychain-held secret. The secret-tier half of that list is derived
-  from the bundled bootstrap descriptors, so the names it strips and the names it
-  injects are the same set by construction. Exported diagnostics follow the
-  opposite rule on purpose: redaction walks every *stored* slot value rather than
-  the descriptor allowlist, since an unknown value must still never reach an
-  exported bundle, and the status block reports only whether each slot is
-  configured — never what it holds. It is not a credential filter for the operator's
-  wider environment: unrelated developer credentials are inherited by the backend
-  and, as documented above, by the children it spawns (minus `AUTH_TOKEN` and,
-  for Claude Code, the provider credentials it scrubs).
-- The macOS app's Claude Code sign-in readiness check is a presence-only login
-  Keychain lookup for the `claude login` credential (service
-  `Claude Code-credentials`). It requests no item data, never reads, returns, or
-  logs the credential value, and runs only locally on the operator's Mac.
-- The macOS app can signal a backend sidecar it did not spawn, and what bounds
-  that is the identity it recorded rather than the pid alone. A sidecar outlives
-  an app that was force quit or crashed — `applicationWillTerminate` never runs,
-  and the child is reparented to launchd — so the app records each launch's pid,
-  kernel process start time, executable path, and port, and a later session
-  adopts that process only when every field still matches **and the same process
-  owns a listening TCP socket on the configured backend port**. `Process` cannot
-  attach to a pid it did not create, so the stop is `kill(pid, SIGINT)` and then
-  SIGTERM, the same ladder the owned path uses. Pids are recycled, so the
-  identity is re-checked immediately before `kill` inside the signal call rather
-  than at the call site. That rejects a record already known to be stale.
-  Darwin does not provide this app a stable process handle that atomically binds
-  an arbitrary pid's start identity to signal delivery, so there remains a
-  narrow race if the recorded process exits and its pid is reused between that
-  re-check and `kill`; this recovery path accepts that local residual risk
-  rather than granting a broader helper or privileged process-control surface.
-  The record is the app's own local supervision state, in its defaults and
-  nowhere the backend reads; it holds no secret and describes a process on the
-  operator's own Mac.
-  A backend the app did not start has no record, is never adopted, and is never
-  signalled — the app reports it as running outside itself and leaves it alone,
-  because the operator's own `pnpm dev` is not this app's to stop. The sidecar
-  also stops itself when its launcher goes away
-  (`AGENTROOM_EXIT_WITH_PARENT` plus the app's `AGENTROOM_PARENT_PID`, set by
-  the macOS app and nothing else), which is prevention rather than a bound: it
-  ends the app's own child, on the authority of having launched it. The backend
-  arms that check before asynchronous startup and compares once immediately, so
-  an app that dies before Node reaches the watchdog is still detected.
-- Published macOS updates have one signing authority and a closed compile-time
-  channel: `disabled`, `rc`, or `stable`. The project default stays `disabled`,
-  so source and unsigned smoke builds contain neither a Sparkle public key nor a
-  feed URL, never construct the updater, publish no appcast, and make no update
-  request. The signed stable workflow selects `stable` and uses the fixed
-  latest-stable feed. Exact `vX.Y.Z-rc.N` builds override it with `rc` and query
-  a moving prerelease that contains only the current RC appcast. GitHub excludes
-  that `rc` alias from latest-stable resolution. This stable choice is reviewed
-  source policy; no Actions variable can change the channel. The private
-  manual RC publisher accepts only a version and positive RC number. It finds
-  the fixed open Release Please PR, requires its synthetic merge to contain
-  current `main` and the current PR head, and admits only the six generated
-  release files. It also proves that both package files changed only their
-  versions and both annotated source files changed only their annotated
-  versions. It then stages the ordinary allowlisted mirror, runs gitleaks, and
-  pushes an immutable public RC tag without moving public `main`; arbitrary
-  branches, SHAs, tags, and executable package changes are not inputs. The
-  normal mirror and stable publisher share its concurrency group. Merging the
-  Release Please PR remains the only stable tag path. Sparkle checks
-  an enabled channel's HTTPS `appcast.xml` automatically but never installs
-  silently; the operator must accept the standard update prompt.
-  Every enclosure points at the exact immutable tagged release DMG. Before any
-  enabled build, the release job derives the public key from the release-only
-  Ed25519 private seed and refuses a mismatch with the configured public key.
-  Sparkle independently requires the embedded key to match before signing the
-  appcast, and the installed app verifies the archive before extraction. The
-  release job publishes the versioned RC before moving the alias, serializes
-  release jobs, and refuses to replace an existing versioned RC release. The
-  same DMG is
-  Developer ID signed, notarized, and stapled. After publishing a new stable
-  release, the job fetches the fixed latest-stable feed and requires an exact
-  byte match with the appcast it uploaded. A manual rebuild of an older stable
-  tag does not move or verify the latest release. Packaging refuses a disabled
-  bundle carrying a key or feed, refuses any enabled channel without a signing
-  identity, and refuses an enabled bundle missing its key or fixed channel feed.
-  Existing updater-disabled stable installations cannot discover the first
-  enabled stable release and require one manual install; later stable releases
-  update through the normal prompt.
-  Sparkle compares increasing `CFBundleVersion` values and refuses a downgrade.
-  The check itself is one HTTPS GET to github.com on Sparkle's default
-  `SUScheduledCheckInterval` of a day. What rides on it is Sparkle's own user
-  agent, naming the app and its version, and nothing else: `SUSendProfileInfo`
-  is pinned `false`, so no OS version, CPU, model, or usage counter is
-  appended, and no bearer token, backend address, workspace path, or session
-  content is reachable from that code path at all. What GitHub can infer is
-  that some copy of a public app asked for a public file.
-  On enabled channels, `SUEnableAutomaticChecks` is pinned `true`, which
-  answers Sparkle's first-launch "check for updates automatically?" question
-  on the operator's behalf instead of asking it. That is the one consent this
-  entry decides rather than requests, and it is decided that way because a
-  Mac-hosted bridge that quietly stops receiving fixes is the worse outcome.
-  The lever is the same key in user defaults
-  (`defaults write dev.agentroom.AgentRoomMac SUEnableAutomaticChecks -bool false`),
-  which leaves the Check for Updates actions in the Overview dashboard and
-  application menu as the manual paths.
-  Its relaunch follows the existing sidecar contract: the old app records one
-  local restart marker only if it has an app-owned backend running. AppKit then
-  holds application termination while a bounded SIGINT and SIGTERM sequence
-  waits for the backend to exit. If the process remains alive, the app refuses
-  termination and clears the marker, so Sparkle cannot replace the app while the
-  old backend owns the port. The newly installed relaunch consumes a successful
-  marker and starts the bundled backend. An intentionally stopped backend
-  remains stopped. The update path does not rewrite
-  `$AGENTROOM_HOME`, Keychain, workspaces, managed settings, or durable sessions.
-- Backend sidecar crash restarts are capped.
-- Backend compatibility has one local authority and one public advisory source.
-  `GET /health.release` contains only public product/API versions and client
-  floors; visionOS retains that exact response, blocks known-incompatible pairs
-  before authenticated reads or the event socket, and treats missing or invalid
-  metadata as unverified rather than as proof of compatibility. The optional
-  **Get AgentRoom for Mac** lookup goes directly to the public GitHub Releases
-  API with no token, sends no backend address or bearer token, caches only
-  public release metadata in device-local defaults for 24 hours, and uses ETag
-  revalidation. A DMG is offered only after a version-1 manifest agrees with
-  the stable release tag and an exact `arm64` asset in the same release. A
-  GitHub failure can fall back to that previously validated advisory cache, but
-  the client labels it as a failed refresh and keeps the stable releases link
-  visible. It can never change the connected-backend decision or install
-  anything.
-- Stopping an active turn records only that turn as cancelled. Restorable
-  runners return to idle for a follow-up steering turn; stopping DeepSeek kills
-  its non-restorable runtime and requires a new AgentRoom session.
+Settings resolve in this order: process environment, managed file, code
+default. An environment value locks its key. The API reports it as
+`source: "env"` and `editable: false`; a file value at that address is inert.
+Configuration is snapshotted at process startup. Every managed change requires
+a backend restart, and only the macOS app controls that restart.
 
-Future hardening before broader autonomous execution:
+Trust-tier settings are remotely editable only while the environment-only,
+default-off `REMOTE_SETTINGS_ADMIN` master switch is on. While it is off, a
+PATCH naming a tier-2 setting returns `403`, and metadata reports that setting
+as not editable. The switch is deliberately not a managed setting, so a bearer
+token cannot grant itself trust-posture administration.
 
-- Stronger process sandboxing and filesystem boundaries.
-- Per-workspace and per-runner secret isolation.
-- Structured runner protocol instead of stdout/stderr process bridging.
-- More explicit pause semantics.
+Global definitions live in `config/globalManagedSettings.ts`; runner-owned
+definitions live on `RunnerDescriptor`. Schemas, tiers, environment names,
+defaults, API metadata, and PATCH validation derive from those definitions.
+
+The current file format is schema version 2, with `global.<field>` and
+`runners.<runnerId>.<field>` addresses. A version-1 flat document is still read
+and is migrated as a whole on the next write. Reads never rewrite it. Unknown
+runner namespaces and fields are preserved but not applied. A malformed known
+value invalidates the whole file. A version-2 file containing a legacy top-level
+key is rejected. A newer schema version is reported separately as unsupported
+and is not reset automatically.
+
+During version-1 migration, known nested addresses that were previously inactive
+are dropped. Carrying them into version 2 could silently activate a trust value
+the operator's running backend had ignored; only unknown nested entries survive.
+
+Rollback conversion writes the flat, unversioned version-1 form. It refuses a
+default `runnerKind` unknown to the older release instead of substituting a
+runner. Writers accept only versions 1 and 2 and sort keys deterministically.
+
+An unreadable, invalid, or unusable settings file is dropped whole and the
+backend uses conservative defaults. A write refuses to merge into an invalid
+file, publishes atomically through an exclusive sibling temporary file, uses
+mode `0600`, and is serialized by a process-local mutex. Cross-process writes
+from the backend and macOS app are last-write-wins; adding an optimistic token
+is noted hardening.
+
+`GET /api/config` is LAN-readable and exposes posture, not secrets. Each managed
+setting appears at both its canonical version-2 address and its legacy flat
+address while compatibility requires it. A PATCH may use either address but
+may not name both for one setting. `valueKind` and `options` describe the schema.
+`config_reloaded` and its audit projection carry changed key names only, never
+values.
+
+### Runner catalog and readiness
+
+`GET /api/runners` exposes only runner id, display name, `registered`,
+`configured`, `enabled`, and optional observed `ready`. Descriptor policy and
+tier-3 bootstrap data never leave the backend. Unknown runner ids render as
+themselves and are never coerced to a built-in identity.
+
+Readiness has two authorities:
+
+- Backend readiness records whether the adapter's existing capability probe
+  spawned and handshook successfully. The runner read starts no probe. `ready`
+  is absent until observed, false after a failed probe, and in-memory only.
+- macOS bootstrap readiness checks local prerequisites while the backend may be
+  stopped. Bundled `RunnerBootstrapDescriptor` values define executable,
+  file-presence, and Keychain-presence probes. File and Keychain probes never
+  read or return credential content.
+
+The backend writes the same non-secret identity and availability projection to
+`$AGENTROOM_HOME/config/runners.json` for stopped-backend macOS use. It excludes
+runtime readiness and all bootstrap details. The backend never reads it.
+
+## Runner execution
+
+The built-in runners are `codex`, `claude_code`, `deepseek`, and `cursor`.
+Each runs on the backend behind `AgentRunner`. Sessions pin a runner kind at
+creation. Policy above the runner package cannot branch on runner identity.
+
+Restorable persistent children are idle-reaped after 30 minutes. Codex, Claude
+Code, and Cursor resume through native identifiers with the same explicit
+runtime settings used for a new child. DeepSeek declares restoration
+unsupported, is not idle-reaped, and cannot continue the same AgentRoom session
+after cancellation or child loss. `PersistentRunnerSessionHost` owns the shared
+lifecycle.
+
+### Session persistence
+
+Each session is written through to `STATE_DIR/sessions/<sessionId>.json`, in a
+directory created with mode `0700`. The record contains the session, turns,
+messages, and native resume id. It is intentionally not redacted because a
+redacted transcript would corrupt the conversation, and its reads require the
+bearer token when configured.
+
+Every mutation schedules a coalesced per-session write. Persistence does not
+depend on graceful shutdown. `SIGINT` and `SIGTERM` still close the backend
+under a two-second ceiling so runner, terminal, and store disposal can run; a
+second signal exits immediately. The expected-parent watchdog remains abrupt.
+
+A turn running at restart settles failed with `Backend restarted during this
+turn`. A recorded native id is seeded into its runner; the backend never reads
+provider transcript files to reconstruct the conversation. If the runner starts
+a different native conversation, AgentRoom appends a system message explaining
+that the new agent has not seen the preceding thread. A restored session whose
+descriptor has no restore strategy refuses its next turn with `409`.
+
+Deleting a session tears down its runner and attachments, prevents late writes
+from recreating the document, then removes the record before reporting success.
+Newer or invalid session documents are left untouched and not served. There is
+no retention cap on session count, age, or thread length.
+
+### Permission approval
+
+An interactive approval can exist only when the runner's tier-2 posture selects
+`ask`. Client connection never changes that posture. The bearer-authenticated
+permission route selects one option the agent offered for one outstanding
+request. It cannot name a tool, command, or path, invent an option, or answer a
+request in another session.
+
+The wait is five minutes. Timeout applies the configured conservative fallback.
+Pending requests are in memory, capped at 8 per session, and released on turn
+settlement, child loss, or session deletion. An accepted vocabulary has at most
+16 unique exact option ids, each at most 200 characters; malformed, duplicate,
+empty, or overlong options are not offered to clients. The resolved event
+records request id, option, result, and `human`, `policy`, or `timeout`
+authority. Durable audit never stores the proposed tool call.
+
+Runner postures remain distinct. Codex approval policy, Claude Code permission
+mode, Cursor's fixed SDK behavior, and each ACP adapter's permission policy are
+not collapsed into a universal enum.
+
+### Clarifying questions
+
+Questions are direction, not authorization. The bearer-authenticated answer
+route accepts only AgentRoom-minted request, set, and option ids, selects only
+offered options, and accepts free text only where invited. At least one set must
+be answered; a required set needs a nonblank discussion value. The pending read
+and session message history are bearer-gated.
+
+A batch waits for ten minutes, then tells the runner nobody answered. Timeout
+never chooses an option. Cancellation and child loss resolve without an
+authority. Pending batches are in memory, capped at 8 per session, with no more
+than 8 sets and 8 options per set. Text is bounded at every boundary. Invalid
+batches are refused rather than truncated into a changed vocabulary.
+
+Audit stores request id, status, authority, and selected option ids. Ordinary
+free text is appended to the bearer-gated session history as a user message.
+Text from a `sensitive` set is sent to the agent but omitted from events,
+history, audit, and logs. The model can later restate it, so this is a storage
+rule, not a model non-disclosure guarantee.
+
+Codex enables only its `request_user_input` path per thread and refuses every
+other unexpected server-to-client request. Claude Code handles
+`AskUserQuestion` in `canUseTool` and refuses any other tool reaching that
+callback. Cursor registers one `ask_user_question` custom tool and always
+disallows the SDK's `askQuestion`. DeepSeek accepts one line-start
+`<agentroom-question>` JSON block, capped at 64 KiB; malformed, inline,
+incomplete, oversized, or later blocks remain prose. A valid DeepSeek answer
+continues through a second Harness prompt while the same public turn remains
+open.
+
+`clarifyingQuestionsEnabled`, env `CLARIFYING_QUESTIONS_ENABLED`, is a tier-1
+preference and defaults on. When off, no runner receives a question channel and
+Codex's per-thread flags are pinned false.
+
+### Context compaction telemetry
+
+Compaction events report only start, completion, failure, and numeric occupancy
+facts supplied by the runner. Model-authored summaries and error text do not
+cross the adapter boundary. The channel cannot trigger compaction and adds no
+route, setting, gate, or write path.
+
+A compaction threshold is present only when the runner supplies it. A valid
+disabled response clears it; failed or malformed control reads preserve the
+last known value. Claude Code's bounded five-second control read is asynchronous,
+starts no child, and makes no model call. Occupancy updates use the existing
+token-usage path and persist with session metrics.
+
+## Built-in runner posture
+
+### Codex workspace configuration and network
+
+AgentRoom's Codex JSON-RPC sessions default to `workspace-write` with workspace
+network access off. The backend explicitly pins approval policy, sandbox mode,
+and `sandbox_workspace_write.network_access` on start and resume, so a workspace
+project config cannot override those values. Operators may enable network and a
+wider sandbox as tier-2 trust choices; Git metadata writes require an adequate
+sandbox.
+
+Codex itself loads the workspace `AGENTS.md`, `.codex/skills`,
+`.agents/skills`, and `.codex/config.toml`. Project config may register MCP
+servers and hooks that execute on the Mac. Starting a thread also records the
+workspace as trusted in the operator's Codex config. Other nested sandbox keys,
+MCP configuration, and hooks are not exhaustively shadowed by AgentRoom. There
+is no honest partial-isolation toggle. Do not register a workspace for Codex if
+its committed Codex configuration is untrusted. Capability discovery starts no
+thread and loads none of this project configuration.
+
+### Claude Code workspace configuration and billing
+
+Claude Code defaults to `bypassPermissions`, including the SDK's required
+dangerous-skip opt-in. It is not sandboxed or filesystem-bounded to the
+registered workspace. Stricter `acceptEdits`, `dontAsk`, and `default` modes are
+tier-2 managed alternatives.
+
+At `bypassPermissions`, `CLAUDE_CODE_LOAD_WORKSPACE_SKILLS` defaults true and
+loads the whole SDK `project` settings source: `.claude/skills`, `CLAUDE.md`,
+subagents, `.claude/settings.json` hooks and permission rules, `.mcp.json`
+servers, `env`, and `apiKeyHelper`. Hooks and stdio MCP servers can execute at
+session initialization before a model turn. Only trusted project configuration
+should be registered.
+
+Under a stricter permission mode, the runner forces `settingSources: []` so
+project hooks and permissions cannot widen the selected posture. Setting
+`CLAUDE_CODE_LOAD_WORKSPACE_SKILLS=false` also gives full SDK settings
+isolation. The discovery probe always uses `settingSources: []` in the backend
+working directory.
+
+The SDK project source excludes interactive `user` and `local` settings, but
+`CLAUDE.md` and skills discovery walks from the registered cwd into ancestors.
+A workspace registered inside a larger repository can therefore load files
+outside the registered subtree. Skill enablement is not a filesystem sandbox.
+
+The runner removes `ANTHROPIC_*` and `CLAUDE_CODE_OAUTH_TOKEN` so trusted
+workspaces bill the Mac user's `claude login` subscription. The tier-2
+`CLAUDE_CODE_INHERIT_PROVIDER_AUTH` opt-in preserves provider environment
+credentials instead. Loaded project settings can reintroduce an API key, auth
+token, or credential helper after the scrub, so deterministic billing requires
+a trusted workspace or project settings disabled.
+
+### DeepSeek Harness
+
+AgentRoom drives an operator-installed SDK JSON-RPC runtime, not the `dsh`
+launcher. It verifies the runtime identity during handshake. The runtime and
+Cordis composition are tier-3 environment choices and require both
+`DEEPSEEK_EXECUTABLE` and `DEEPSEEK_CORDIS_CONFIG`; argv is backend-built with
+no shell.
+
+AgentRoom cannot inspect the composition's sandbox. Upstream examples include
+both `danger-full-access` and workspace-write profiles, so DeepSeek is treated
+as `bypassPermissions`-class. The tier-2 `permissionMode` is passed through to
+the composition's own vocabulary and is not claimed as a backend-enforced enum.
+There is no protocol approval callback.
+
+The backend pins `DSH_CWD` to the registered workspace and
+`DSH_SESSION_ROOT` under `STATE_DIR`, preventing the common relative persistence
+default from dirtying the workspace. The Harness may start subagents and other
+processes that inherit its environment; AgentRoom does not separately observe
+or contain them. The runtime has no provable resume path, so it stays resident
+while idle and the session becomes uncontinuable after cancellation or loss.
+Shutdown, EOF, `SIGTERM`, and `SIGKILL` form a bounded teardown ladder;
+cancellation skips graceful drain so stopped work cannot finish in the
+background.
+
+### Cursor
+
+Cursor's tier-2 `sandbox` defaults true. Measured behavior, not the vendor
+description, is authoritative for this release: writes outside the workspace
+and network DNS failed, writes inside the workspace and `/private/tmp`
+succeeded, and reads from the operator's home directory succeeded. The sandbox
+bounds writes and egress, not reads. Workspace `.cursor/sandbox.json` can widen
+network egress and AgentRoom cannot pin it. With sandbox off, Cursor is
+`bypassPermissions`-class.
+
+Cursor has no interactive approval callback. Tier-2 `autoReview`, default
+false, can deny calls but does not widen permissions. Tier-2
+`loadWorkspaceSettings`, default true, loads workspace `AGENTS.md`, Cursor
+rules, hooks, MCP servers, and skills from `.cursor`, `.agents`, `.claude`, and
+`.codex`. Hooks and MCP servers execute within the turn. Off passes
+`settingSources: []`; capability discovery always does the same.
+
+The SDK runs in a backend-spawned Node host child. Its cwd is the registered
+workspace and its environment is the operator environment minus `AUTH_TOKEN`.
+The SDK's shell children inherit that environment. Agent state is pinned under
+`STATE_DIR/cursor/agents`.
+
+Billing uses `CURSOR_API_KEY` when supplied, otherwise the SDK sign-in file at
+`~/.cursor/sdk/auth.json`. The key, backend URL, and sign-in file are tier 3 and
+never returned or logged. The macOS readiness probe checks file existence only.
+SDK logout deletes the file but does not revoke the key. A paid Cursor plan is
+required. The SDK emits Cursor telemetry with no opt-out exposed by the bundled
+version; model inference leaves the Mac. Subagents run inside the host and are
+not independently bounded.
+
+Turn model, effort, and fast-mode values are mapped only from the selected
+model's declared vocabulary. No free client string is passed to the SDK. Other
+runner provider secrets remain visible in bundled runner environments; per-
+runner secret isolation is future hardening.
+
+### External ACP adapters
+
+External ACP v1 support is gated by default-off `ACP_ADAPTERS_ENABLED`.
+Definitions come from the tier-3 `ACP_ADAPTERS` JSON list. If the gate is off,
+nothing is parsed or registered. A malformed list is dropped whole.
+
+Each executable path must be absolute, non-symlink, regular, executable, and
+realpath-canonicalized before spawn. Arguments are fixed by the operator's
+definition; there is no shell. The child receives only `PATH`, `HOME`,
+`TMPDIR`, locale and user identity, plus explicitly granted credential names.
+`AUTH_TOKEN` cannot be granted.
+
+Adapter ids use `acp_*` and cannot shadow built-ins. Derived settings prefixes
+are compared explicitly against every built-in and configured adapter; any
+collision rejects the whole set before registration.
+
+The stdio client caps frames at 1 MiB, nesting depth at 64, stdout volume, and
+the retained stderr tail. Handshake, turn, cancel, and shutdown have deadlines.
+A transport breach kills the child with a bounded `SIGTERM` then `SIGKILL`
+ladder. Every message is schema-validated.
+
+Only agents advertising `session/resume` or `loadSession` are admitted. Replay
+updates from `loadSession` are suppressed because AgentRoom already holds the
+transcript. AgentRoom advertises no ACP filesystem or terminal capability and
+refuses those calls. ACP absolute-path writes lack the workspace API's path and
+optimistic-lock guarantees.
+
+Permission policy is a tier-2 per-adapter setting: default `reject`, `ask`, or
+`auto_allow`. Every result selects an option the agent offered. Agent
+`configOptions` in the `model` and `thought_level` categories may become bounded
+turn controls. `model_config` is not misrepresented as speed. `mode` is always
+dropped because it can widen the agent's sandbox outside tier-2 administration.
+
+Images are delivered only after that child explicitly advertises
+`promptCapabilities.image: true`. Unknown or inconsistent capability state does
+not let another child decide. Accepted images are inlined and capped at 16 MiB
+total decoded bytes per prompt, in addition to upload bounds.
+
+## Workspace files
+
+Registration accepts existing absolute directories and stores metadata under
+`STATE_DIR`, never inside a selected folder. Unregistering does not delete the
+folder.
+
+Reads and mutations accept workspace-relative paths. Paths reject NUL, absolute
+forms, and `..`; realpath containment is checked at the point of use. Symlink
+leaves and escaping intermediate symlinks are refused. Secret-named paths,
+generated directories, hidden metadata such as `.DS_Store`, and internal
+`.agentroom-tmp` staging names are excluded consistently.
+
+There are exactly seven workspace mutations:
+
+1. text-file PUT;
+2. regular-file DELETE;
+3. one-level directory POST;
+4. same-parent rename;
+5. same-workspace move;
+6. same-workspace copy;
+7. recursive directory DELETE.
+
+All are bearer-gated when configured. They use `node:fs`, not a shell or Git.
+Events carry relative paths, types, counts, and byte counts, never file content.
+Mutations intentionally dirty the working tree and can race a running agent
+turn; optimistic tokens narrow but do not eliminate filesystem races.
+
+Text PUT accepts UTF-8 without NUL, capped at 256 KiB. An overwrite requires a
+matching `baseModifiedAt`; no token means create-only. Stale or missing targets
+return `409`. Publication is an exclusive sibling temporary file followed by
+rename. File DELETE accepts a regular file only and always requires the token.
+
+Directory POST creates one empty directory under an existing parent. It is the
+only mutation without an optimistic token because it refuses any occupied name
+and replaces nothing. It is non-recursive. Entry names are trimmed single path
+components no longer than 255 UTF-8 bytes.
+
+Rename and move require `baseModifiedAt`, accept regular files and directories,
+and never overwrite. Rename cannot change the parent. Move stays within the
+registered workspace, refuses cross-filesystem moves and a directory moved
+into its own subtree, and uses the same no-overwrite implementation. A genuine
+same-entry or same-name request is an idempotent no-op; case-only rename is
+allowed only for the same inode.
+
+Copy inventories and rechecks the source, stages beside the destination, and
+publishes only a complete result. It requires `baseModifiedAt`, follows no
+symlinks, and caps every source at 20,000 entries and 1 GiB. Open file handles
+are checked for inode, size, and mtime stability. Collision policy defaults to
+`fail`; `keep_both` tries the bounded suffix ladder `-2` through `-5`.
+
+Recursive directory DELETE refuses the workspace root. It requires the selected
+directory's token and preflights the full tree before removal. Symlinks,
+protected names, sockets, devices, unsupported types, more than 20,000 entries,
+or more than 1 GiB of regular-file data fail before deletion. It is symlink-safe
+but not a transactional snapshot against concurrent regular-file changes.
+
+### File index, search, preview, and skills
+
+The file index and literal content search share one filtered enumeration. Git
+workspaces use fixed `git ls-files -z --cached --others --exclude-standard`;
+others use a bounded non-symlink-following walk. Every Git result is re-filtered
+and every indexed path is realpath-checked again before use.
+
+Search compiles no caller-supplied regular expression. Query is a literal
+substring with case and whole-word modifiers. Include globs use a linear
+matcher. Bounds are 20,000 indexed paths, 200 index results per request with a
+default of 50, 2,000 searched files, 20 matches per file, 500 total matches,
+256 KiB per file, 3 seconds wall time, and 200 characters per preview. Partial
+results set `truncated`. Fixed Git commands share a 16 MiB stdout ceiling.
+
+File preview and HEAD-baseline reads reject binary or NUL content and cap text
+at 256 KiB. An over-cap HEAD blob returns metadata without partial content.
+The baseline uses fixed `git cat-file` and scopes `HEAD:./<path>` to the
+registered directory.
+
+Skill discovery scans only descriptor-owned workspace directories. It follows
+no escaping symlink and reads only `SKILL.md` frontmatter name and description,
+never the body or executable content. Discovery mirrors the runner's workspace-
+settings gate and emits no event or audit entry.
+
+## Git operations
+
+Git status is read-only, bearer-gated when configured, and capped at 200 changed
+file summaries. Branch switch accepts an existing local branch only, uses fixed
+`git switch`, and refuses a dirty workspace.
+
+The only mutating Git operations are stage, unstage, discard, commit, fetch,
+fast-forward-only pull, push, and branch create. They are bearer-gated fixed argv
+calls through `execFile`, never a shell. Callers cannot supply flags, remotes,
+refs, or refspecs. Amend, reset, rebase, cherry-pick, tag, remote mutation, and
+forced push are not exposed.
+
+Every client path passes the workspace secret/generated filter. Explicit unsafe
+paths return `415`; stage-all enumerates the uncapped changed set, filters it,
+and sends literal pathspecs in bounded batches. It never runs `git add -A`.
+Explicit stage and unstage require exact changed-file entries, not directories.
+Commit validates the repository's complete staged set and refuses paths outside
+the registered workspace or inside protected names.
+
+Discard is destructive, names every path, and has no discard-all form. Remote
+operations disable terminal prompts and use SSH batch mode while retaining
+normal credential helpers. Their configurable default timeout is 120 seconds.
+Git error text has URL userinfo stripped and is secret-redacted. Commit hooks
+are intentionally allowed and run under the local command timeout, so committing
+trusts workspace hook configuration.
+
+Operation events and audit contain operation, ids, counts, result branch, and
+commit only. They contain no file content, path list, remote URL, or credential.
+Git index locking prevents corruption but cannot prevent a commit interleaving
+with a running unsandboxed agent turn.
+
+## Terminal
+
+The PTY is the only client-facing arbitrary shell surface. `TERMINAL_ENABLED`
+is tier 2, defaults false, and removes the WebSocket route entirely while off.
+When enabled, the socket authenticates before spawn and starts an unsandboxed
+login shell in the realpath of a registered workspace. The shell can `cd`
+elsewhere; the starting directory is not a sandbox.
+
+`TERMINAL_MAX_SESSIONS` defaults to 8 and is schema-bounded from 1 to 64 across
+the process. Creation reserves a slot before asynchronous lookup. Sessions are
+idle-reaped after 30 minutes, resize is clamped, inbound frames are capped, PTY
+output is flow-controlled, and socket close, idle reap, or backend shutdown
+sends `SIGTERM`.
+
+Input and output exist only on the live socket and are never logged or
+persisted. Lifecycle events and audit store ids, workspace identity, exit code,
+and duration only. The shell inherits the operator environment plus
+`TERM=xterm-256color`, minus `AUTH_TOKEN`. `TERMINAL_SHELL` remains tier 3.
+
+## Feedback harness
+
+The feedback harness is not a shell API. It exposes only fixed visionOS
+XcodeGen, build, and targeted-test templates declared by the backend profile.
+Every request names a registered AgentRoom workspace, session, and turn. The
+backend resolves the fixed project path inside that workspace and refuses an
+escape, unregistered root, unknown action, or caller-supplied command fragment.
+
+Output, duration, and exit state are bounded and stream as canonical tool
+activity attributed to the runner pinned to the supplied session. The caller
+cannot choose that attribution. Harness execution adds no general argv,
+environment, cwd, or filesystem surface.
+
+## Editor surfaces
+
+### Language catalog
+
+The editor catalog contains app-global data, never workspace files. It serves
+manifest-referenced `.json` and `.wasm` only, never `.js`. Reads are bearer-
+gated when configured. `LANGUAGE_CATALOG_ENABLED` gates the surface and defaults
+on. The root is an operator override from `EDITOR_CATALOG_DIR`, then the bundled
+catalog; an absent catalog returns 404 and clients use bundled assets.
+
+A generation is accepted only after all paths, hashes, sizes, language claims,
+grammar relationships, theme maps, and JSON depth validate. Required caps are
+256 languages, 4,096 claims with at most 64 per language, 256 primary and 512
+auxiliary grammars, dependency depth 8, 2 MiB per grammar or WASM, 64 KiB per
+language configuration, 32 MiB aggregate bytes, and JSON depth 32. Schema-2
+injection graphs must be acyclic; each grammar may name at most 128 external
+scopes. Accepted bytes are pinned in memory.
+
+Reload swaps only a complete valid snapshot. Failure preserves the last accepted
+generation, and invalid startup override falls back to bundled data. Status
+returns aggregates and bounded error location, not assets. Reload is bearer-
+gated and mutating but changes no workspace. `editor_catalog_changed` carries
+version and language count only.
+
+The macOS importer copies operator-selected `.json` and `.wasm` into AgentRoom
+app support through staging and same-volume rename, retaining the prior override
+until validation. It never writes a registered workspace. Maintainer grammar
+imports use pinned HTTPS sources, preserve provenance and licenses, validate
+data, execute nothing fetched, and sync one way into the backend catalog.
+
+### Language services
+
+`LANGUAGE_SERVICES_ENABLED` is tier 2, defaults false, and removes the workspace
+WebSocket while off. The always-present registry read is probe-free and exposes
+only identity, configuration, enablement, observed readiness, languages, and the
+supported subset of completion, hover, definition, symbols, and semantic tokens.
+
+Built-ins are SourceKit-LSP, pinned TypeScript Language Server 5.3.0 with
+TypeScript 5.9.3, pinned Pyright 1.1.413, optional rust-analyzer 2026-08-31,
+gopls 0.23.0, Eclipse JDT LS 1.61.0, Kotlin LSP 262.9593.0 alpha, and csharp-ls
+0.27.0. Optional executable overrides are tier 3, absolute, regular,
+executable, and non-symlink. AgentRoom does not search PATH for them. Arguments
+and initialization are descriptor-fixed. TypeScript automatic type acquisition
+is disabled. JDT data is backend-owned and removed when its process closes.
+
+External descriptors require both the general gate and default-off
+`EXTERNAL_LANGUAGE_SERVICES_ENABLED`. The tier-3
+`LANGUAGE_SERVICE_ADAPTERS` document is capped at 64 KiB and 8 descriptors,
+strictly validated, and dropped whole on any duplicate, conflict, or malformed
+field. IDs use `external_lsp_*`; language ids cannot shadow built-ins. Commands
+are admitted absolute non-symlink executables, argv is fixed, and the client
+cannot select a descriptor or raw LSP method.
+
+External children receive a small base environment plus at most 16 explicitly
+granted uppercase names. Credential-shaped names, provider prefixes,
+`AUTH_TOKEN`, and unset values are refused. Language services are not process
+sandboxes: project loading can run build tools, plugins, macros, analyzers, or
+networked dependency resolution. Only trusted projects should be opened.
+
+The authenticated socket accepts a strict version-1 open, change, request,
+cancel, and close protocol. It has no raw method, command, argv, environment,
+HTML, or arbitrary JSON escape. Paths use the workspace bounds. Project-root
+selection stops at the registered root, uses descriptor markers and priority,
+and reports ambiguity. One socket generation leases one canonical file path,
+including case aliases.
+
+Host caps are 8 processes globally, 4 per workspace, 32 shadows per process,
+256 KiB per shadow, and 32 MiB shadow text globally. LSP frames and queued child
+stdin are each capped at 4 MiB; stderr at 64 KiB. Socket frames are capped at
+384 KiB inbound and 2 MiB outbound, with 8-frame and 512 KiB operation/send
+queues. Outstanding requests are capped at 16 per socket and 64 per process.
+Initialize, feature, and shutdown deadlines are 20, 10, and 3 seconds. Changes
+coalesce for 150 ms; idle children close after 10 minutes.
+
+Client versions increase strictly. Backend LSP versions continue across replay.
+Non-monotonic input requires resync. Crash restart is capped at 3 in 5 minutes
+and clears after 10 healthy minutes. Replay uses the latest bounded in-memory
+draft, not disk. Stale, cancelled, or cross-generation results are dropped.
+
+Results are normalized and bounded. Definitions remain inside the same
+workspace. Completion commands, snippets, additional edits, and insert-replace
+edits do not cross the boundary. Plain insertion text is separate and capped at
+256 KiB. Documentation and diagnostics render as inert text. Servers may create
+bounded work-progress tokens and answer fixed null workspace configuration;
+apply-edit, commands, prompts, dynamic registration, and unknown requests get
+JSON-RPC `-32601`. Buffer and server payloads are never logged or persisted.
+
+### visionOS code editor
+
+The editor web view serves vendored Monaco only through the private
+`agentroom-editor://` bundle scheme. Its CSP uses `default-src 'none'`, limits
+scripts, styles, fonts, and images to bundled/data sources, permits bundled WASM,
+and sets `connect-src 'none'`. Navigation permits only the editor origin and
+hostless `about:blank`.
+
+The native-web bridge accepts a fixed message set. File text, HEAD baseline,
+and literal search query enter JavaScript as JSON-encoded string arguments,
+never HTML. Find is regex-off and capped at 1,000 matches; result messages carry
+counts and ordinals, not matched content. Edits save only through the bounded
+workspace PUT. The read-only side-by-side diff has no extra write or network
+path. TextMate grammars, language configurations, themes, and Oniguruma WASM are
+data injected by native code; missing assets fall back to bundled behavior.
+
+## Attachments and artifacts
+
+Turn context contains the original message, explicit bounded workspace paths,
+and session-scoped attachment ids. The backend does no automatic file selection,
+embedding, summarization, or arbitrary binary handoff.
+
+Uploads accept PNG, JPEG, and WebP only. The backend validates signature and
+type, hashes content, and stores it under `STATE_DIR`. Session deletion removes
+its attachment storage. ACP prompts add the separate 16 MiB aggregate bound
+described above.
+
+Live artifacts are line-start `<artifact kind="svg|mermaid">` regions in model
+text, gated by `ARTIFACTS_ENABLED`, which defaults on. Unknown, malformed, or
+inline tags remain ordinary text except an empty self-closing control tag. The
+store is in memory, per session, capped at 64 KiB UTF-8 per artifact, and marks
+code-point-safe truncation. Artifacts never enter the workspace.
+
+Clients must sandbox model markup. visionOS renders SVG without JavaScript and
+Mermaid with a bundled script in strict mode. Both use a hostless in-memory page,
+a CSP with no default network source, data-only images, and navigation denial.
+Mermaid source is passed as a JSON string, never interpolated into HTML. HTML
+with JavaScript and 3D artifact kinds are unsupported.
+
+## Spatial documents
+
+`SCENE_ENGINE_ENABLED`, default on, gates the composed read, Mermaid import,
+diagram edit, standing runner prompt contract, and per-turn diagram feedback.
+Off removes the routes and prompt additions.
+
+Scene and diagram bases plus sibling `*.human.json` layers are ordinary bounded
+workspace files. The backend composes on each read and keeps no watcher or open-
+scene registry. Human adjustments write through the existing optimistic file
+PUT. Unknown roles and kinds degrade to generic primitives with bounded
+warnings; strict schema and reference failures return bounded errors.
+
+Scene documents cap entities at 64. Diagrams cap nodes at 64, edges at 128,
+groups at 16, flows at 16 with 32 steps each, and optional version-3 descriptions
+at 500 characters. Older schema versions remain valid. Collapsed groups,
+hidden members, and stale overrides change only composed bounded data. Stale
+overrides are reported and never deleted automatically.
+
+Mermaid import is pure compute. It executes no Mermaid JavaScript, touches no
+filesystem, and compiles no caller input as regex. Source is capped at 64 KiB;
+line and schema caps apply, and losses produce bounded warnings. The response is
+canonical diagram text that a client may create through the existing PUT.
+
+Diagram edit is also pure compute. It accepts base text up to 256 KiB and at
+most 32 typed operations, applies all or none, has no id-renaming operation, and
+returns canonical text. The client writes with the base `modifiedAt`, so a
+concurrent regeneration returns the PUT's `409`. Deletes report bounded
+knock-on warnings.
+
+Human-edit summaries observe only existing human `workspace_file_written`
+events. They inspect at most 4 diagrams per turn, 8 ids per category, 16 tracked
+diagrams per workspace, and 1,200 output characters. They contain ids and change
+categories, not labels, descriptions, coordinates, or file text.
+
+Render feedback uses a settled turn's existing diff attribution, reads at most
+4 written diagrams, and stores bounded warnings or errors for the next accepted
+turn. Both feedback channels are per-session, ordered, in memory, one-shot, and
+released on session deletion. They add no route, event, audit, watcher, or
+workspace scan. Concurrent human writes can inherit the existing turn-diff
+attribution caveat.
+
+The visionOS volume and mixed immersive space render the same composed document
+through one native renderer. RealityKit `AnchorEntity` resolves surfaces;
+AgentRoom opens no `ARKitSession`, asks for no world-sensing permission, and
+receives no plane, mesh, hand, or room geometry. Fallback placement uses a
+one-time head-relative anchor.
+
+Scale preset and remembered document identity are device-local preferences.
+The physical placement is not stored. Relaunch performs a new surface search.
+No room data, preset, or memory reaches a workspace file, route, event, or
+backend contract.
+
+## macOS supervision and updates
+
+The app strips every AgentRoom-managed and descriptor-owned secret-tier variable
+from its inherited environment, then injects only its configured values. Export
+redaction checks all stored slot values, including values no current descriptor
+knows. Other developer credentials in the wider environment remain inherited by
+the backend and bundled runner children subject to their documented scrubs.
+
+The Claude Code login probe asks Keychain only whether service
+`Claude Code-credentials` exists. It requests no item data.
+
+A sidecar may be adopted only when its recorded pid, kernel start time,
+executable, port, and ownership of the listening TCP socket still match. An
+unrecorded external backend is never signalled. Identity is rechecked immediately
+before `SIGINT` or `SIGTERM`. Darwin cannot atomically bind that check to signal
+delivery, leaving a narrow pid-reuse race. The expected-parent watchdog is armed
+before asynchronous startup and exits an app-owned child if its launcher dies.
+Crash restarts are capped.
+
+Published updates use a compile-time `disabled`, `rc`, or `stable` channel.
+Source and unsigned builds default disabled and contain no public key or feed.
+Signed stable and exact RC builds use fixed feeds and a matched release-only
+Ed25519 key, plus Developer ID signing, notarization, and stapling. Packaging
+refuses inconsistent channel metadata.
+
+The private RC workflow accepts a version and positive RC number, verifies the
+fixed Release Please PR's current synthetic merge and generated-file-only diff,
+stages the allowlisted public mirror, scans it, and publishes an immutable RC tag
+without moving public `main`. Stable publication follows merging that PR.
+Versioned assets are immutable; only the moving RC appcast can be replaced.
+Release workflows share serialization. Stable publication verifies the uploaded
+fixed feed byte for byte.
+
+Sparkle uses its standard prompt and never installs silently. Enabled builds
+check daily by HTTPS with `SUSendProfileInfo` false. Automatic checks default on
+but can be disabled through Sparkle's user default; manual checks remain.
+Existing updater-disabled installations require one manual install of the first
+enabled stable build.
+
+Before update relaunch, an app-owned backend receives a bounded `SIGINT` then
+`SIGTERM` shutdown. If it remains alive, termination is cancelled and the
+restart marker is cleared. The new app consumes a marker only for a backend that
+was running; an intentionally stopped backend stays stopped. Updates do not
+rewrite app support, Keychain, workspaces, settings, or durable sessions.
+
+visionOS compatibility uses `GET /health.release` as the local authority and
+blocks known-incompatible clients before protected reads. Missing metadata is
+unverified, not compatible. Its optional public GitHub release lookup sends no
+token or backend address, caches validated public metadata for 24 hours with
+ETag revalidation, and cannot alter compatibility or install software.
+
+## Known limitations and future hardening
+
+- Authenticate the broadcast event WebSocket and consider the status/logs
+  exposure that accompanies it.
+- Add stronger per-runner process, filesystem, network, and secret isolation.
+- Consider an active-turn guard for concurrent workspace and Git mutations.
+- Add optimistic cross-process coordination for managed settings writes.
+- Preserve explicit refusal and recovery semantics as runner protocols evolve.

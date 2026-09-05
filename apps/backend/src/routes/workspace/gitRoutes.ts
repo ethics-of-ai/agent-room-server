@@ -25,7 +25,7 @@ const invalidatesFileIndex = new Set(["pull", "discard", "create_branch"]);
  * (no shell, no caller-supplied flags), publishes a sanitized
  * `workspace_git_operation` event, and returns the refreshed workspace plus Git
  * status so a client re-renders from one response.
- * See `docs/safety/TRUST_AND_SAFETY.md` (*Mutating Git operations*).
+ * See `docs/safety/TRUST_AND_SAFETY.md` (Git operations).
  */
 export async function registerWorkspaceGitRoutes(app: FastifyInstance, deps: WorkspaceRouteDeps): Promise<void> {
   const gitService = new WorkspaceGitService(deps.registry);

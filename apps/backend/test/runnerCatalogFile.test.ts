@@ -26,7 +26,7 @@ const config = (overrides: Partial<ServiceConfig> = {}): ServiceConfig =>
   }) as ServiceConfig;
 
 /**
- * The offline floor Phase 5 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md
+ * The offline floor in docs/engineering/RUNNERS.md
  * requires: the Mac's settings panes work with the backend stopped, and
  * `runnerKind` is a picker over runners only the backend knows.
  */
@@ -70,7 +70,7 @@ describe("offline runner catalog file", () => {
   });
 
   it("reports no runtime readiness, because a stopped backend has probed nothing", () => {
-    // The fourth state (Phase 6) is what a capability discovery *proved* in a
+    // The fourth state is what a capability discovery *proved* in a
     // running process. This file is written at startup, before anything has been
     // spawned, and is read when the backend is not running at all — so a `ready`
     // field here could only ever be a stale claim. Absent is the honest answer,

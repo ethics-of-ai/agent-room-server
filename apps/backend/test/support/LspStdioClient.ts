@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
-/// Phase 0-only LSP client. It records enough transport evidence to design the
+/// Evidence-only LSP client. It records enough transport behavior to maintain the
 /// production boundary without exposing a general JSON-RPC tunnel in AgentRoom.
 
 export type JsonRpcId = number | string;

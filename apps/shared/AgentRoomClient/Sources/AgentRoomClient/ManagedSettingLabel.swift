@@ -2,8 +2,7 @@ import Foundation
 
 /// How a managed setting is named when no client was built with a name for it.
 ///
-/// Both apps need this and neither owns it. Phase 1 of
-/// `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md` makes a registered
+/// Both apps need this and neither owns it. `docs/engineering/RUNNERS.md` makes a registered
 /// runner's settings renderable everywhere, which means the headset (drawing from
 /// `/api/config`'s metadata) and the Mac (reading the settings file's preserved
 /// sections) both have to turn `permissionPolicy` into words — and had better

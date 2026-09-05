@@ -8,7 +8,7 @@ export const DIAGRAM_ROW_PITCH_Z = 0.15;
 export const DIAGRAM_TIER_PITCH_Y = 0.28;
 export const DIAGRAM_PLATTER_MARGIN = 0.04;
 export const DIAGRAM_MAX_NODES_PER_ROW = 8;
-// Each group's z lane (Phase 4). Without it every ungrouped node sits at z = 0
+// Each group's z lane. Without it every ungrouped node sits at z = 0
 // and a group only leaves the plane when a row overflows, so a typical diagram
 // is a flat poster standing in a 3D container. Groups alternate ± this offset
 // by document order — deterministic, like everything else here — which

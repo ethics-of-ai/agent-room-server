@@ -11,7 +11,7 @@ import { arrayValue, booleanValue, objectValue, stringValue } from "../shared/js
  * capability descriptor is projected from.
  *
  * The primary path is the live `models/list` the host answers from
- * `Cursor.models.list()` (Step 6 of docs/engineering/CURSOR_SDK_RUNNER.md).
+ * `Cursor.models.list()` (docs/engineering/CURSOR_SDK_RUNNER.md).
  * Each model's depth parameter is `effort` (Anthropic, Grok, Gemini) or
  * `reasoning` (OpenAI, Kimi, GLM), and its speed parameter is `fast` (fact 5).
  * The capability descriptor flattens both onto `reasoningEfforts` and

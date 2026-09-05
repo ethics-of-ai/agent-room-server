@@ -3,7 +3,7 @@ import type { ZodTypeAny } from "zod";
 /**
  * What a *managed* setting is, in a module with no runtime imports.
  *
- * Phase 5 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md moves the per-runner
+ * docs/engineering/RUNNERS.md places the per-runner
  * managed keys onto the runner descriptors that own them, so adding a runner
  * stops meaning "and edit the settings schema, the env table, the defaults map,
  * the tier map, and both Swift mirrors". The declaration is this shape; the

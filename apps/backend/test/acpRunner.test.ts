@@ -351,7 +351,7 @@ describe("external runner registration", () => {
 });
 
 /**
- * Phase 4 of docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md.
+ * See docs/engineering/RUNNERS.md.
  *
  * ACP v1 has no model-*list* method, which is why the descriptor used to be
  * empty — but `session/new` carries `configOptions`, whose `model` and
@@ -397,11 +397,11 @@ describe("ACP session config discovery", () => {
     const capabilities = await runner.getCapabilities();
 
     // `ultra` is outside `CodingAgentReasoningEffort`, the closed vocabulary of
-    // the two runners AgentRoom ships. It survives because a turn's effort is
+    // the Codex and Claude Code managed settings. It survives because a turn's effort is
     // the advertising runner's vocabulary, bounded by shape rather than by enum.
     expect(capabilities.settings.models[0]?.reasoningEfforts.map((effort) => effort.id)).toContain("ultra");
     expect(codingAgentTurnSettingsSchema.safeParse({ reasoningEffort: "ultra" }).success).toBe(true);
-    // The managed settings for those two runners stay closed, because
+    // Those managed settings stay closed, because
     // `/api/config` reports that vocabulary as their `options`.
     expect(codingAgentReasoningEffortSchema.safeParse("ultra").success).toBe(false);
   });

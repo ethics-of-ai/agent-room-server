@@ -662,7 +662,7 @@ public struct APIClient {
         _ = try await requestData(["api", "agent-sessions", sessionId], method: "DELETE")
     }
 
-    /// Fetch the backend-served editor language catalog manifest (Phase C). The
+    /// Fetch the backend-served editor language catalog manifest. The
     /// editor injects these assets over its no-network bridge; when the backend has
     /// no catalog (404) the client falls back to its bundled editor assets.
     public func fetchEditorCatalog() async throws -> EditorCatalogManifest {
@@ -680,7 +680,7 @@ public struct APIClient {
         )
     }
 
-    /// Operator-facing catalog status (Phase C.5) for the macOS catalog pane:
+    /// Operator-facing catalog status for the macOS catalog pane:
     /// whether the catalog is enabled, which directory it is served from, and the
     /// live version + language count.
     public func fetchEditorCatalogStatus() async throws -> EditorCatalogStatus {
@@ -688,7 +688,7 @@ public struct APIClient {
     }
 
     /// Re-read the operator override (then bundled) catalog and swap in the new
-    /// snapshot (Phase C.5). When the version changes the backend broadcasts
+    /// snapshot. When the version changes the backend broadcasts
     /// `editor_catalog_changed` so paired visionOS editors re-hydrate live.
     @discardableResult
     public func reloadEditorCatalog() async throws -> EditorCatalogReloadResult {

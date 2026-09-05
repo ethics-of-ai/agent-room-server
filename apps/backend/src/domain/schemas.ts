@@ -21,7 +21,7 @@ import {
 
 // Which runner ids exist is the registry's answer (`runner/registry.ts`), so the
 // schema is imported and re-exported rather than declared here — a second
-// hand-maintained enum is the leak Phase 3 retires. Re-exported so every
+// hand-maintained enum would leak registry ownership. Re-exported so every
 // existing `domain/schemas` import site is unchanged.
 export { agentRunnerKindSchema };
 

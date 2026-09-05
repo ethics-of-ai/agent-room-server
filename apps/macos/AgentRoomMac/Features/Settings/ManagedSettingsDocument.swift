@@ -3,8 +3,8 @@ import Foundation
 /// The *shape* of `$AGENTROOM_HOME/config/settings.json`, kept separate from the
 /// store that reads and writes it.
 ///
-/// Two shapes exist and both are read. Version 2 (Phase 5 of
-/// `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`) nests every setting under the
+/// Two shapes exist and both are read. Version 2, described in
+/// `docs/engineering/RUNNERS.md`, nests every setting under the
 /// runner that owns it, so registering a runner is what gives its settings a
 /// home rather than editing a flat list in five places. Version 1 is the flat
 /// legacy document — still read, migrated whole by the next write, and still
@@ -17,7 +17,7 @@ import Foundation
 enum ManagedSettingsDocument {
     /// The shape this app writes.
     static let currentSchemaVersion = 2
-    /// The shape a pre-Phase-5 AgentRoom reads. An *absent* version is this one.
+    /// The shape a version-1 AgentRoom reads. An *absent* version is this one.
     static let legacySchemaVersion = 1
 
     /// Re-exported from the settings that live under them, so this file and the
@@ -240,7 +240,7 @@ enum ManagedSettingsDocument {
         return document
     }
 
-    /// The reverse serializer: the flat document a pre-Phase-5 AgentRoom reads.
+    /// The reverse serializer: the flat document a version-1 AgentRoom reads.
     /// `schemaVersion` is deliberately absent, because an absent version *is*
     /// version 1 — stamping it would produce a file the older reader calls
     /// malformed, which is the opposite of a rollback.
@@ -253,7 +253,7 @@ enum ManagedSettingsDocument {
             if let value = flat[key.rawValue] { document[key.rawValue] = value }
         }
         // A version-1 document has nowhere to *address* these, but it can still
-        // carry them: the pre-Phase-5 reader tolerates both names and writes them
+        // carry them: the version-1 reader tolerates both names and writes them
         // back untouched, which is what makes the downgrade reversible.
         if !preserved.global.isEmpty { document[globalSection] = .object(preserved.global) }
         if !preserved.runners.isEmpty {

@@ -361,7 +361,7 @@ describe("PATCH /api/config write behavior", () => {
 });
 
 /**
- * Phase 5 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md moves the canonical
+ * docs/engineering/RUNNERS.md defines the canonical
  * address of a managed setting to its version-2 path, and keeps the version-1
  * flat key working for the declared compatibility window. Both are served and
  * both are accepted, because a headset and a backend upgrade independently —
@@ -430,7 +430,7 @@ describe("PATCH /api/config addressing", () => {
   });
 
   /**
-   * Phase 1 of docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md. A runner the
+   * docs/engineering/RUNNERS.md requires this. A runner the
    * backend registers can bring a setting no client was built with, so the block
    * has to say enough about a key for a client to draw a control from the
    * metadata alone. Value *kind* is that minimum, and it is reported even for a
@@ -480,7 +480,7 @@ describe("PATCH /api/config addressing", () => {
   /**
    * The drift this pair of fields could introduce, closed at its source: an
    * option the block advertises but the patch refuses is a control that looks
-   * editable and is not — the exact failure Phase 1 exists to remove.
+   * editable and is not, which is the exact failure generic metadata prevents.
    */
   it("advertises only values PATCH accepts, at the kind it reports", async () => {
     await withSettingsHome(undefined, async () => {

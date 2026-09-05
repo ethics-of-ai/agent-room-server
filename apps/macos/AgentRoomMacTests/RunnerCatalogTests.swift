@@ -3,7 +3,7 @@ import XCTest
 
 /// What this Mac shows for a runner it has never heard of.
 ///
-/// Phase 4 of `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md` moves the list of
+/// `docs/engineering/RUNNERS.md` moves the list of
 /// runners onto `GET /api/runners`, which this app reads when the backend is up
 /// and falls back from when it is not — and it is stopped exactly when an
 /// operator is fixing why it would not start. The rule that matters here is the
@@ -59,7 +59,7 @@ final class RunnerCatalogTests: XCTestCase {
     }
 
     func testRuntimeReadinessDecodesAsUnknownUntilTheBackendHasProbed() throws {
-        // Phase 6's fourth state. A backend that has spawned nothing omits the
+        // The fourth state. A backend that has spawned nothing omits the
         // field, and the client must read that as *unprobed* — defaulting it to
         // `false` would report a runner as broken for the sole reason that
         // nobody had asked about it yet.
@@ -89,7 +89,7 @@ final class RunnerCatalogTests: XCTestCase {
         XCTAssertTrue(codex.blockingItems.contains { $0.contains("Codex executable") })
         // ...and must not fire for a runner that is not Codex. Silence is the
         // honest answer: this app cannot say whether that runner is ready, and
-        // asserting Codex's answer would be worse than saying nothing. Phase 6
+        // asserting Codex's answer would be worse than saying nothing. The contract
         // replaced the switch that decided this with the absence of a bundled
         // bootstrap descriptor for that runner.
         XCTAssertFalse(unknown.blockingItems.contains { $0.contains("Codex") })

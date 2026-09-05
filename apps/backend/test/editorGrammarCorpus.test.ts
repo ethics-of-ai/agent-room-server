@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { EditorCatalogStore } from "../src/editor/EditorCatalogStore";
 import type { EditorCatalogManifest } from "../src/editor/editorCatalogManifest";
 
@@ -98,10 +98,18 @@ function render(lines: TokenizedLine[]): string {
 
 describe.skipIf(!hasEngine)("editor grammar corpus", async () => {
   const corpus = JSON.parse(await readFile(corpusPath, "utf8")) as Corpus;
-  const store = await EditorCatalogStore.create(catalogAssetsDir);
-  const manifest = store.getManifest()!;
-  const engine = await loadEngine(store, manifest);
-  const byLanguage = new Map(manifest.grammars.map((grammar) => [grammar.languageId, grammar]));
+  let manifest: EditorCatalogManifest;
+  let engine: Engine;
+  let byLanguage: Map<string, EditorCatalogManifest["grammars"][number]>;
+
+  // Vitest collects skipped suites too. Load the private engine only when
+  // this suite actually runs; the public mirror intentionally omits it.
+  beforeAll(async () => {
+    const store = await EditorCatalogStore.create(catalogAssetsDir);
+    manifest = store.getManifest()!;
+    engine = await loadEngine(store, manifest);
+    byLanguage = new Map(manifest.grammars.map((grammar) => [grammar.languageId, grammar]));
+  });
 
   it("has a fixture for every TextMate language and no fixture for a language without a grammar", () => {
     const declared = manifest.languageMap.version === 3

@@ -47,8 +47,8 @@ import {
 } from "./protocol";
 
 /**
- * An `AgentRunner` over Agent Client Protocol v1 (Phase 7 of
- * docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md).
+ * An `AgentRunner` over Agent Client Protocol v1. See
+ * docs/engineering/RUNNERS.md.
  *
  * One adapter makes every ACP-speaking agent *configurable* rather than coded,
  * which is the whole point of the phase: a second ACP agent is tier-3 operator
@@ -174,8 +174,7 @@ export class AcpRunner implements AgentRunner {
   /**
    * The runtime-readiness probe, which is also ACP v1's discovery: spawn the
    * child, complete `initialize`, confirm a restore path, and read the session
-   * config selectors `session/new` reports (Phase 4 of
-   * docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md).
+   * config selectors `session/new` reports. See docs/engineering/RUNNERS.md.
    *
    * v1 has no model-*list* method, which is what made the descriptor empty
    * before — but it does carry `configOptions`, whose `model` and
@@ -217,8 +216,8 @@ export class AcpRunner implements AgentRunner {
 
   /**
    * ACP v1 carries images as prompt content blocks only when the agent
-   * advertises `promptCapabilities.image` (Phase 3 of
-   * docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md), so an attachment is
+   * advertises `promptCapabilities.image` under docs/engineering/RUNNERS.md,
+   * so an attachment is
    * negotiated per adapter rather than refused outright.
    *
    * This is the fast half of that negotiation: if every completed handshake in
@@ -656,7 +655,7 @@ export class AcpRunner implements AgentRunner {
         "initialize",
         {
           protocolVersion: ACP_PROTOCOL_VERSION,
-          // Declined, and the Phase 0b spike confirmed a conforming agent then
+          // Declined; conformance testing confirmed a conforming agent then
           // never calls them. AgentRoom's workspace writes go through the
           // bounded, optimistic-locked PUT; ACP's fs methods take absolute
           // paths, carry no conflict detection, and mandate create-on-write, so

@@ -10,13 +10,13 @@ const assetQuerySchema = z.object({
   path: z.string().min(1)
 });
 
-// Phase C: backend-served editor language catalog. App/global DATA (TextMate
+// Backend-served editor language catalog. App/global DATA (TextMate
 // grammars/themes/configs + the Oniguruma WASM), NOT workspace files — these
 // routes never touch a registered workspace or the workspace file API. The GET
 // reads expose project-independent catalog data; like other reads that leak
 // content, they require the bearer token when AUTH_TOKEN is configured.
 //
-// Phase C.5: the catalog directory is operator-managed and reloadable
+// The catalog directory is operator-managed and reloadable
 // (`EditorCatalogManager`). `POST /reload` re-reads it and broadcasts
 // `editor_catalog_changed` (so paired visionOS clients auto-rehydrate). It is a
 // mutating method, so the global preHandler (server.ts) already bearer-gates it

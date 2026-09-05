@@ -1,5 +1,5 @@
-// Phase 6 slice 1 of the spatial-solution-diagrams plan: the semantic edit-ops
-// engine behind `POST /api/spatial-scene/diagram-edit`.
+// Semantic edit operations for spatial solution diagrams, behind
+// `POST /api/spatial-scene/diagram-edit`.
 //
 // This is what lets a client author *structure* — nodes, edges, labels, roles,
 // groups — instead of only the placement its override layer already owns. It

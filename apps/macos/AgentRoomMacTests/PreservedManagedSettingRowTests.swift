@@ -3,7 +3,7 @@ import XCTest
 
 /// What the Mac shows for a setting it cannot address.
 ///
-/// Phase 1 of `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md`. These rows
+/// See `docs/engineering/RUNNERS.md`. These rows
 /// are the only place on this machine where a trust posture belonging to a
 /// runner this build does not know becomes visible, so what they say is worth
 /// asserting rather than eyeballing.

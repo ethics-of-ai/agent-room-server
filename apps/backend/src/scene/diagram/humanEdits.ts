@@ -1,12 +1,12 @@
-// Phase 5 slice 1 of the spatial-solution-diagrams plan, widened by Phase 6
-// slice 6: salience for what the human changed in a diagram between turns.
+// Human-edit context for spatial solution diagrams, including salience for
+// what the human changed in a diagram between turns.
 //
 // The standing contract (diagram/prompt.ts) already tells the agent to Read a
 // diagram's sibling `.human.json` before editing it — that is the capability, and
 // it stays the floor. What it cannot do is tell the agent that something *changed*,
 // so an agent editing a diagram it wrote earlier in the same session has no reason
 // to look again. This module supplies that: a bounded, per-session "since your last
-// turn" line composed into the turn prompt. Since Phase 6 the human is a semantic
+// turn" line composed into the turn prompt. The human is a semantic
 // author too (the diagram-edit route + bounded PUT), so the line covers both halves
 // of the two-file contract: placement adjustments in the override layer, structure
 // edits to the base document, and — the one thing only reading both files together

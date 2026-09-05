@@ -5,8 +5,8 @@ import { join } from "node:path";
 /**
  * A synthetic ACP v1 agent, written to disk and spawned like the real thing.
  *
- * The Phase 0b spike established that the maintained reference agent
- * (`@agentclientprotocol/codex-acp`) cannot reach some of the paths Phase 7 must
+ * The conformance spike established that the maintained reference agent
+ * (`@agentclientprotocol/codex-acp`) cannot reach some required paths
  * guarantee — it resolves permission requests internally, so
  * `session/request_permission` never arrives, and it will not emit a
  * protocol-limit breach on request. It also needs a provider credential and a

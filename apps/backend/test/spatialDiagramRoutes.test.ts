@@ -196,7 +196,7 @@ describe("spatial diagram walking skeleton", () => {
     await built.app.close();
   });
 
-  // Phase 5 slice 1: the standing contract tells the agent to read the sibling
+  // The standing contract tells the agent to read the sibling
   // override layer, but it cannot tell it that the layer *changed*. The bounded
   // PUT the client drags through already publishes `workspace_file_written`, so
   // the next turn in that session carries a summary — no watcher, no new event.
@@ -315,7 +315,7 @@ describe("spatial diagram walking skeleton", () => {
     await built.app.close();
   });
 
-  // Phase 5 slice 2, end to end: the human places a node, the agent's next
+  // End to end: the human places a node, the agent's next
   // revision renames it away, and the composed read is where they find out.
   // Adopting the new layout is the client rewriting the same override layer
   // through the same bounded PUT — there is no discard route.

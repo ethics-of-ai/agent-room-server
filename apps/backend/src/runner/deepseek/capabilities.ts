@@ -9,8 +9,7 @@ import { DEFAULT_DEEPSEEK_MODEL, DEFAULT_DEEPSEEK_PROVIDER } from "./settings";
 /**
  * DeepSeek Harness's model catalog.
  *
- * Unlike the other two runners this list is **static**, and that is a property
- * of the protocol rather than a shortcut: the SDK wire has no `model/list`
+ * This list is static because the SDK wire has no `model/list`
  * analog — `provider` and `model` are `initialize` parameters, and which models
  * a route serves is the composed profile's business. So the catalog is a
  * starting point and the model id stays an open bounded string
@@ -21,7 +20,7 @@ import { DEFAULT_DEEPSEEK_MODEL, DEFAULT_DEEPSEEK_PROVIDER } from "./settings";
  * Readiness is still proved rather than assumed: `getCapabilities()` spawns the
  * runtime, completes the handshake, and checks the server identity, so the
  * capabilities read remains the runtime-readiness probe (`runner/runtimeReadiness.ts`)
- * exactly as it is for Codex and Claude Code.
+ * exactly as it is for the other registered runners.
  *
  * `serviceTiers` is empty — DeepSeek Harness has no speed-tier analog, the same
  * as Claude Code. Reasoning effort is likewise absent: the runtime exposes no

@@ -25,7 +25,7 @@ const config = async (overrides: Partial<ServiceConfig> = {}): Promise<ServiceCo
   } as ServiceConfig;
 };
 
-// The request shape codex-cli 0.149 sends (Phase 0 spike), trimmed.
+// The request shape codex-cli 0.149 sends, trimmed.
 const REQUEST_PARAMS = {
   threadId: "codex-thread-1",
   turnId: "codex-turn-1",

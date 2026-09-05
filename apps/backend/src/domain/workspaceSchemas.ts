@@ -65,7 +65,7 @@ export const searchQuerySchema = z.object({
 
 export const skillsQuerySchema = z.object({
   // Registry-derived, so a registered runner is accepted here without editing
-  // this route (docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md, Phase 3).
+  // this route (docs/engineering/RUNNERS.md).
   runnerKind: agentRunnerKindSchema.optional()
 });
 

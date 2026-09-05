@@ -6,9 +6,9 @@ import { logger } from "../../logging/logger";
  * frame per `\n`-terminated line, a pending-request map, and notification
  * fan-out.
  *
- * It lives here rather than in one adapter because two runners speak this exact
- * framing to a child the operator installed — the Codex app-server and the
- * DeepSeek Harness SDK runtime — and two adapters arriving at the same shape is
+ * It lives here rather than in one adapter because the Codex app-server and the
+ * DeepSeek Harness SDK runtime speak this exact framing to an installed child.
+ * Two adapters arriving at the same shape is
  * what produced `runner/shared/PersistentRunnerSessionHost.ts` too. What it
  * deliberately is *not* is the transport for an arbitrary operator-supplied
  * binary: that is

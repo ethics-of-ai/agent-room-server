@@ -3,7 +3,7 @@ import Foundation
 /// The launch secrets this app holds for the backend: AgentRoom's own bearer
 /// token, plus one value per runner bootstrap slot.
 ///
-/// Phase 6 of `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md` replaced the typed
+/// `docs/engineering/RUNNERS.md` replaces the typed
 /// per-runner fields (`codexExecutable`, `codexArgs`, `claudeCodeExecutable`)
 /// with a dictionary keyed by runner id and slot id, so a runner that reuses an
 /// existing slot kind costs a bundled descriptor rather than three more fields
@@ -91,7 +91,7 @@ struct BackendSecretValues: Equatable, Codable {
     // MARK: - Persistence
 
     /// The blob is one Keychain item shared across app versions, so decoding
-    /// accepts the flat pre-Phase-6 shape and folds it into slots. Encoding emits
+    /// accepts the legacy flat shape and folds it into slots. Encoding emits
     /// only the current shape: the legacy keys disappear on the next save, and a
     /// value already migrated is never resurrected by a second read.
     private enum CodingKeys: String, CodingKey {

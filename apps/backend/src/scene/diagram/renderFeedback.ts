@@ -1,5 +1,4 @@
-// Phase 6 slice 1 of the spatial-diagram visual-refinement plan: close the
-// agent's feedback loop on its own diagram writes.
+// Closes the agent's visual-feedback loop on its own spatial-diagram writes.
 //
 // An agent that writes an unknown role, a validation error, or an over-cap
 // document never learns it — compose warnings surface only in the volume, and

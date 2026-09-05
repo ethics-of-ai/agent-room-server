@@ -64,7 +64,7 @@ pinned ref, validated as JSON data, and never executed. License texts are in
 ## Embedded scopes without a grammar
 
 Text under these scopes tokenizes as its enclosing scope until a grammar for it is
-added to the source table. This list is the Phase 2 dependency record, not a claim
+added to the source table. This list is the dependency record, not a claim
 that those languages highlight.
 
 - `source.mdx`: `source.c`, `source.c++`, `source.clojure`, `source.coffee`, `source.cpp`, `source.cs`, `source.css.less`, `source.css.scss`, `source.diff`, `source.dockerfile`, `source.elixir`, `source.elm`, `source.erlang`, `source.gfm`, `source.gitconfig`, `source.go`, `source.graphql`, `source.haskell`, `source.ini`, `source.java`, `source.julia`, `source.kotlin`, `source.lua`, `source.makefile`, `source.objc`, `source.perl`, `source.python`, `source.r`, `source.raku`, `source.ruby`, `source.rust`, `source.scala`, `source.sql`, `source.toml`, `source.vbnet`, `text.html.asciidoc`, `text.html.markdown.source.gfm.apib`, `text.html.php`, `text.md`, `text.python.console`, `text.shell-session`, `text.xml`, `text.xml.svg`

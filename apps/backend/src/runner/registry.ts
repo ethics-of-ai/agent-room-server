@@ -450,8 +450,8 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     turnDiffSource: "settle_time_git",
     // A real callback: the adapter registers one custom tool whose execute()
     // holds the SDK's tool call open on the shared question wait
-    // (docs/engineering/CURSOR_SDK_RUNNER.md, "Clarifying questions over a
-    // custom tool"). The model calls a tool and the adapter receives a
+    // (docs/engineering/CURSOR_SDK_RUNNER.md, "Questions and permissions").
+    // The model calls a tool and the adapter receives a
     // callback; that the callback rides AgentRoom's own wire to the host child
     // is adapter-internal.
     clarifyingQuestions: { mode: "native" },

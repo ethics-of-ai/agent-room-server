@@ -166,7 +166,7 @@ final class ManagedSettingsFileStoreTests: XCTestCase {
 
     // MARK: - The version-2 document
     //
-    // Phase 5 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md: the nested
+    // docs/engineering/RUNNERS.md: the nested
     // document is the shape this app writes, version 1 is still read and
     // migrated whole by the next write, and converting back is the deliberate
     // rollback path — an older AgentRoom cannot be taught to read the new shape,
@@ -329,7 +329,7 @@ final class ManagedSettingsFileStoreTests: XCTestCase {
 
         let written = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         // A version-1 document cannot *address* a runner namespace, but the
-        // pre-Phase-5 reader tolerates and preserves one — which is what makes
+        // version-1 reader tolerates and preserves one, which is what makes
         // the downgrade reversible.
         let runners = try XCTUnwrap(written["runners"] as? [String: Any])
         XCTAssertEqual((runners["acp_demo"] as? [String: Any])?["model"] as? String, "x")

@@ -26,10 +26,10 @@ const ENV_NAMES = [
 ];
 
 /**
- * `GET /api/runners` is Phase 4's answer to "which runners exist?" — the
+ * `GET /api/runners` is the answer to "which runners exist?"; the
  * question both clients used to answer from a compiled-in Swift enum. What it
  * must *not* answer is how a runner is bootstrapped or how the backend behaves
- * because of it. See docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md.
+ * because of it. See docs/engineering/RUNNERS.md.
  */
 describe("GET /api/runners", () => {
   it("serves one safe descriptor per registered runner, in registration order", async () => {
@@ -91,7 +91,7 @@ describe("GET /api/runners", () => {
   });
 
   /**
-   * Phase 6 splits readiness into two authorities. This route reports the
+   * Readiness has two authorities. This route reports the
    * backend's half — what the adapter's own capability discovery proved — and
    * the whole point is that it *reports* it rather than establishing it: a probe
    * per registered runner on a pollable read is the startup cost the plan's

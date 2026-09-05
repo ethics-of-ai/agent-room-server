@@ -33,8 +33,8 @@ export function effectiveClaudeCodeSettings(
  * Map a requested effort onto the four levels the Claude Code CLI accepts.
  *
  * The parameter is a bounded id rather than `CodingAgentReasoningEffort` because
- * a turn's effort is the *advertising runner's* vocabulary since Phase 4 of
- * `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md`, and another registered
+ * a turn's effort is the *advertising runner's* vocabulary under
+ * `docs/engineering/RUNNERS.md`, and another registered
  * runner may legitimately offer values this one has never heard of. An
  * unrecognized value is refused here rather than silently running at the CLI's
  * default. The shared turn schema bounds shape rather than vocabulary so an ACP

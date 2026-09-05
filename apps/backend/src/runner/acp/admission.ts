@@ -3,8 +3,7 @@ import { accessSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 /**
- * Process admission for external ACP adapters (Phase 7 of
- * docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md).
+ * Process admission for external ACP adapters. See docs/engineering/RUNNERS.md.
  *
  * Running an operator-supplied binary that receives workspace paths and drives
  * turns is a **new trust surface**, not a variation on the existing runners: the

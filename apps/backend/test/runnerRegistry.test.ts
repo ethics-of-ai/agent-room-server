@@ -35,10 +35,7 @@ const config = (overrides: Partial<ServiceConfig> = {}): ServiceConfig =>
 
 describe("runner registry", () => {
   it("registers exactly the runner ids this build ships", () => {
-    // The rollout gate from docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md, which
-    // opened for `deepseek` on 2026-08-18
-    // (docs/engineering/DEEPSEEK_HARNESS_RUNNER.md) and for `cursor` on
-    // 2026-08-26 (docs/engineering/CURSOR_SDK_RUNNER.md). It still guards
+    // The built-in admission list from docs/engineering/RUNNERS.md. It guards
     // something specific: a bundled id reaches `global.runnerKind`, which is a
     // *known* settings key, so an older AgentRoom that meets a file naming this
     // runner treats the whole file as unusable and drops the operator's trust
@@ -130,7 +127,7 @@ describe("runner registry", () => {
     expect([...cursor.skillSourceDirs]).toEqual([".cursor/skills", ".agents/skills", ".claude/skills", ".codex/skills"]);
     expect(cursor.skillInvocationPrefix).toBe("/");
     expect(cursor.restoreStrategy).toBe("native_resume");
-    // Step 5 of the plan: three preferences and three trust booleans, each
+    // Cursor exposes three preferences and three trust booleans, each
     // with its env name; the tier-2 defaults are the conservative direction
     // (sandboxed, no auto review) except the `project` source, which follows
     // Claude Code's documented default.
@@ -195,7 +192,7 @@ describe("runner registry", () => {
     it("treats Claude Code as configured without an executable path", () => {
       // The Agent SDK resolves its own bundled CLI, so there is no bootstrap
       // value the backend must hold. Whether the operator is signed in is Mac
-      // bootstrap readiness — a different authority, and Phase 6's problem.
+      // bootstrap readiness, which is a different authority.
       expect(runnerAvailability("claude_code", config()).configured).toBe(true);
     });
 
@@ -303,7 +300,7 @@ describe("runner registry", () => {
 
   describe("acceptance criterion", () => {
     /**
-     * The two compatibility shims are the documented exception from Phase 2:
+     * The two compatibility shims are the documented exception:
      * they rebuild the legacy per-runner wire blocks and are the only files in
      * the mapper allowed to spell a runner's name. They are deletable whole once
      * the advertised contract floor moves past 2.
@@ -332,7 +329,7 @@ describe("runner registry", () => {
     ]);
 
     /**
-     * AST-backed enforcement for the Phase 3 acceptance criterion:
+     * AST-backed enforcement for the registry acceptance criterion:
      * **no file outside `runner/` and the registry makes a behavioral decision
      * from runner identity.** A runner id used as a key, a default, a label, or
      * a value passed through is data; equality/switch decisions, membership

@@ -1,5 +1,4 @@
-// Phase 5 slice 3 of the spatial-solution-diagrams plan: the Mermaid →
-// solution-diagram import bridge.
+// The Mermaid-to-scene solution-diagram import bridge.
 //
 // Agents already stream 2D Mermaid sketches as in-band artifacts (flowcharts
 // and graphs, per artifactPrompt.ts); this module turns one into a first-class

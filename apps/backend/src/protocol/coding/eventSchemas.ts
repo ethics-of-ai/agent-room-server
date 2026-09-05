@@ -109,7 +109,7 @@ const baseCodingPayloadSchema = z.object({
   // A label, not an admission decision: the session pinned a validated runner
   // kind at creation, and the mapper no longer branches on this value. Keeping
   // it an open string is what lets a third adapter's events flow through the
-  // core mapper unchanged; `agentRunnerKindSchema` stays closed until Phase 3.
+  // core mapper unchanged; `agentRunnerKindSchema` remains the admission gate.
   runnerKind: z.string().min(1).max(64),
   runner: codingRunnerMetadataSchema.optional(),
   // Legacy per-runner blocks. Emitted only by the compatibility shim in

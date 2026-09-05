@@ -4,8 +4,8 @@ import type { CodingAgentCapabilities } from "../src/domain/models";
 import { RunnerRuntimeReadiness } from "../src/runner/runtimeReadiness";
 
 /**
- * The backend half of Phase 6's split readiness
- * (docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md): what the adapter's own
+ * The backend half of the split readiness contract
+ * (docs/engineering/RUNNERS.md): what the adapter's own
  * capability discovery proved, observed rather than probed for.
  */
 describe("runner runtime readiness", () => {

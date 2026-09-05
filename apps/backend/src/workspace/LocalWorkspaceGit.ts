@@ -212,7 +212,7 @@ export class LocalWorkspaceGit {
   // Commits whatever is staged. The workspace's own `pre-commit`/`commit-msg`
   // hooks run (this deliberately does not pass `--no-verify`), which is the same
   // committed-configuration trust the registered workspace already carries for
-  // both runners.
+  // runner sessions.
   async commit(workspacePath: string, message: string): Promise<GitCommitResult> {
     await this.runGit(workspacePath, ["commit", "-m", message], gitCommandEnv());
     const described = (await this.tryGit(workspacePath, ["log", "-1", "--format=%H%x00%s"]))?.trim() ?? "";

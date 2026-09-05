@@ -99,7 +99,7 @@ export interface DiagramConnector {
    */
   parallelIndex?: number;
   /**
-   * Waypoint bowing a long edge out of the tier plane (Phase 4). Layout has
+   * Waypoint bowing a long edge out of the tier plane. Layout has
    * no dummy vertices, so an edge spanning two or more tiers draws a straight
    * line through the tiers between — a chain A→B→C plus the skip edge A→C
    * skewers B outright when barycenter centres all three. Present only on
@@ -579,7 +579,7 @@ function nodeTreatment(
         material: { baseColor: "#4A7FD4", roughness: 0.5 }
       };
     case "datastore":
-      // The stacked-disk silhouette everyone reads as a database (Phase 5
+      // The stacked-disk silhouette everyone reads as a database
       // slice 2). Same radius and the same 0.09 m total height as the plain
       // cylinder it replaces (3 × 0.024 + 2 × 0.009), so layout spacing, fit
       // bounds, and connector insets are untouched by the re-map.
@@ -619,7 +619,7 @@ function nodeTreatment(
         geometry: { kind: "cone", radius: 0.05, height: 0.08 },
         material: { baseColor: "#C9C13F", roughness: 0.5 }
       };
-    // The Phase 5 slice 1 additions: the roles agents reach for that used to
+    // The roles agents reach for that used to
     // render as the gray warning box. Every treatment stays inside the two
     // composed-geometry envelopes the connector heuristics assume: no shape's
     // z half-extent exceeds CONNECTOR_VIA_NODE_HALF_DEPTH (0.07), and no

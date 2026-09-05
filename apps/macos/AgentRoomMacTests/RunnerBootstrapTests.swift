@@ -2,8 +2,8 @@ import XCTest
 import Security
 @testable import AgentRoomMac
 
-/// The Mac half of Phase 6's split readiness
-/// (`docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`): a bundled, trusted
+/// The Mac half of the split readiness contract
+/// (`docs/engineering/RUNNERS.md`): a bundled, trusted
 /// bootstrap contract, executed by one prober that knows probe *kinds* and never
 /// which runner it is looking at.
 final class RunnerBootstrapTests: XCTestCase {

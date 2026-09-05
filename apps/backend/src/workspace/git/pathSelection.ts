@@ -8,7 +8,7 @@ import type { GitStagedPath } from "../LocalWorkspaceGit";
  * passes `indexableRelativePath` — the same filter the tree read and the file
  * index use — because staging is the step before exfiltration: a secret-named
  * or generated path that cannot be listed must also be one AgentRoom cannot
- * commit. See `docs/safety/TRUST_AND_SAFETY.md` (*Mutating Git operations*).
+ * commit. See `docs/safety/TRUST_AND_SAFETY.md` (Git operations).
  */
 export interface ResolvedPaths {
   accepted: string[];

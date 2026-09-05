@@ -2,8 +2,7 @@ import Foundation
 
 /// The bundled tier-3 bootstrap descriptors.
 ///
-/// This table is the trusted half of Phase 6 of
-/// `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`, and it is **bundled on
+/// This table is the trusted half of `docs/engineering/RUNNERS.md`, and it is **bundled on
 /// purpose**. The backend's `/api/runners` says which runners exist; it may not
 /// say what starting one requires, because an environment name or an executable
 /// slot arriving over the network would make configuration into code execution.

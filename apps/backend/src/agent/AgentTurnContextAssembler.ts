@@ -45,11 +45,11 @@ export class AgentTurnContextAssembler {
       diagramHumanEdits?: {
         prepareSummaryForTurn(session: AgentSession): Promise<{ summary?: string; acknowledge(): void } | undefined>;
       };
-      // The other volatile diagram injection (visual-refinement Phase 6 slice
-      // 1): what the diagrams this session's last turn wrote actually rendered
-      // as — validation errors and compose warnings gathered at that turn's
+      // The other volatile diagram injection reports how diagrams written by
+      // this session's last turn actually rendered: validation errors and
+      // compose warnings gathered at that turn's
       // settlement. Same flag, same delivery rules as the human-edit summary:
-      // per turn, both runner kinds, consumed only when the turn is accepted.
+      // per turn, for any runner, consumed only when the turn is accepted.
       // Async because preparation waits out the session's in-flight settlement
       // reads (it never starts one), so an immediate follow-up turn still
       // carries the previous turn's feedback.

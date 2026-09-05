@@ -1,7 +1,7 @@
 import XCTest
 @testable import AgentRoomMac
 
-/// The Keychain blob is one item shared across app versions, so Phase 6's
+/// The Keychain blob is one item shared across app versions, so the
 /// reshaping — typed per-runner fields to slots keyed by runner and slot id —
 /// has to be readable both ways or an upgrade would silently lose the operator's
 /// executable paths.

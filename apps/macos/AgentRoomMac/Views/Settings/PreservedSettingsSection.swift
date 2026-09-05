@@ -3,7 +3,7 @@ import SwiftUI
 /// The settings in the backend's file that this build cannot address: a runner
 /// it does not know, or a field a newer AgentRoom added to one it does.
 ///
-/// Phase 1 of `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md`. Adding a
+/// See `docs/engineering/RUNNERS.md`. Adding a
 /// coding agent is a backend registration, so a registered runner brings its own
 /// managed settings — including trust-posture ones. Those have always survived a
 /// write here untouched, but they were *invisible*, which is the worse half of

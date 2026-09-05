@@ -4,8 +4,8 @@ import { publicRunnerDescriptors } from "../runner/registry";
 import type { RunnerRuntimeReadiness } from "../runner/runtimeReadiness";
 
 /**
- * `GET /api/runners` — the safe/public runner descriptor projection (Phase 4 of
- * docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md).
+ * `GET /api/runners` is the safe/public runner descriptor projection described
+ * by docs/engineering/RUNNERS.md.
  *
  * It exists so a client stops deciding *which runners exist* from a compiled-in
  * enum. Both apps used to render their runner pickers from a closed Swift
@@ -22,7 +22,7 @@ import type { RunnerRuntimeReadiness } from "../runner/runtimeReadiness";
  * all, so `configured` can say *that* the operator supplied what a runner needs
  * without saying what it is. See docs/safety/TRUST_AND_SAFETY.md.
  *
- * Phase 6 adds the fourth state, `ready`, from a different authority: what the
+ * The fourth state, `ready`, comes from a different authority: what the
  * adapter's own capability discovery proved at runtime. This handler reads that
  * observation and **never triggers one** — the route stays a cheap read a client
  * can poll, and a runner nothing has probed simply carries no `ready` field.

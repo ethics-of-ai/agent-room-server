@@ -5,8 +5,8 @@ import type { CodingArtifactKind } from "../protocol/coding/eventSchemas";
 //
 //   <artifact id="auth-flow" kind="svg" title="Auth flow"> ...svg... </artifact>
 //
-// This parser sits on the unified assistant-text stream (both runners funnel
-// through `agent_update`) and splits each delta into prose (passed through to
+// This parser sits on the unified assistant-text stream and splits each delta
+// into prose (passed through to
 // the chat transcript unchanged) and artifact body (republished as
 // `coding_artifact_*` events, kept out of the transcript). It is a pure,
 // dependency-free state machine so the streaming edge cases can be unit tested

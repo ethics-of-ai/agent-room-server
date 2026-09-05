@@ -1,5 +1,5 @@
-// Standing spatial-diagram contract for both runners (spatial-solution-diagrams
-// plan, "How the agent knows the format"). One stable, cache-friendly string:
+// Standing spatial-diagram contract shared by runner adapters. One stable,
+// cache-friendly string:
 // Codex receives it composed into each turn prompt by AgentTurnContextAssembler;
 // Claude Code receives the same string appended to the SDK session's system
 // prompt (runner/claudeCode/settings.ts). Phrased as a capability, not a mandate, so

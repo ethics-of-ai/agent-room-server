@@ -6,9 +6,8 @@ import { describe, expect, it } from "vitest";
 /**
  * Pins the public mirror (docs/operations/OPEN_SOURCE_MIRROR.md): what the
  * manifest admits and refuses, that the overlay the public repository depends
- * on is complete, and that no overlay document links to a file the public
- * tree will not hold. Links from mirrored shared documents to the stripped
- * visionOS documents are expected and are not checked here.
+ * on is complete, and that published documentation links only to files the
+ * public tree holds. Private references can remain plain text when needed.
  */
 
 const repoRoot = resolve(__dirname, "../../..");
@@ -125,7 +124,6 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       "apps/backend/scripts/editor-grammar-sources.json",
       "apps/backend/test/importEditorGrammars.test.ts",
       "docs/reference/apple-wwdc2023-spatial-video-manifest.json",
-      "docs/diagrams/phase1-check.diagram.json",
       "docs/README.md",
       "AGENTS.md",
       "CLAUDE.md",
@@ -161,8 +159,6 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
     expect(globToRegExp("docs/reference/**").test("docs/reference/a.json")).toBe(true);
     expect(globToRegExp("docs/reference/**").test("docs/reference/x/y.json")).toBe(true);
     expect(globToRegExp("docs/reference/**").test("docs/referenced.md")).toBe(false);
-    expect(matchesGlob("docs/diagrams/phase1-check.diagram.json", "docs/diagrams/*-check.diagram.json")).toBe(true);
-    expect(matchesGlob("docs/diagrams/agentroom.diagram.json", "docs/diagrams/*-check.diagram.json")).toBe(false);
     expect(matchesGlob("deep/inside/secret.p12", "*.p12")).toBe(true);
     expect(matchesGlob(".env.local", ".env.*")).toBe(true);
     expect(matchesGlob("apps/visionos/project.yml", "apps/visionos/**")).toBe(true);
@@ -174,17 +170,27 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
     for (const required of requiredOverlayFiles) {
       expect(files, `${required} is missing from mirror/overlay`).toContain(required);
     }
-    // Decided 2026-08-23: the public tree carries no agent guidance file; the
-    // docs are the rules there, and the private AGENTS.md/CLAUDE.md stay here.
+    // The public tree carries no agent guidance file. Its docs are the rules,
+    // while the private AGENTS.md and CLAUDE.md stay in the source repository.
     expect(files).not.toContain("AGENTS.md");
     expect(files).not.toContain("CLAUDE.md");
     expect(readFileSync(resolve(overlayRoot, "LICENSE"), "utf8").startsWith("MIT License")).toBe(true);
   });
 
-  it("keeps every relative link in the overlay resolvable inside the public tree", async () => {
+  it("keeps relative links in overlay and shared documentation inside the public tree", async () => {
     const { readManifest, publicPathAdmitted } = await loadScript();
     const manifest = readManifest();
     const overlayFiles = new Set(walk(overlayRoot));
+    const documents = new Map(
+      [...overlayFiles].filter((file) => file.endsWith(".md"))
+        .map((file) => [file, resolve(overlayRoot, file)])
+    );
+    for (const file of walk(resolve(repoRoot, "docs"))) {
+      const path = `docs/${file}`;
+      if (file.endsWith(".md") && !overlayFiles.has(path) && publicPathAdmitted(path, manifest)) {
+        documents.set(path, resolve(repoRoot, path));
+      }
+    }
     const dangling: string[] = [];
 
     const resolvesInPublicTree = (target: string, fromFile: string): boolean => {
@@ -198,9 +204,8 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       return existsSync(resolve(repoRoot, normalized)) && publicPathAdmitted(normalized, manifest);
     };
 
-    for (const file of overlayFiles) {
-      if (!file.endsWith(".md")) continue;
-      const source = readFileSync(resolve(overlayRoot, file), "utf8");
+    for (const [file, sourcePath] of documents) {
+      const source = readFileSync(sourcePath, "utf8");
       for (const target of markdownLinkTargets(source)) {
         if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
         if (!resolvesInPublicTree(target, file)) dangling.push(`${file} -> ${target}`);
@@ -224,9 +229,11 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
     expect(message.trimEnd().endsWith(`Source-Commit: ${sha}`)).toBe(true);
   });
 
-  it("keeps the docs index and the agent guidance pointing at the mirror", () => {
+  it("keeps the docs index and shared agent guidance pointing at the mirror", () => {
     expect(readFileSync(resolve(repoRoot, "docs/README.md"), "utf8")).toContain("operations/OPEN_SOURCE_MIRROR.md");
-    expect(readFileSync(resolve(repoRoot, "AGENTS.md"), "utf8")).toContain("mirror/manifest.json");
-    expect(readFileSync(resolve(repoRoot, "CLAUDE.md"), "utf8")).toContain("mirror/manifest.json");
+    const sharedGuidance = readFileSync(resolve(repoRoot, "AGENTS.md"), "utf8");
+    const claudeGuidance = readFileSync(resolve(repoRoot, "CLAUDE.md"), "utf8");
+    expect(sharedGuidance).toContain("mirror/manifest.json");
+    expect(claudeGuidance).toContain("AGENTS.md");
   });
 });

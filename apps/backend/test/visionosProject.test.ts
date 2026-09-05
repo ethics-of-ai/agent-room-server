@@ -295,7 +295,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(workspaceThreadColumn).toContain('Label("New Thread", systemImage: "plus.circle")');
     // Enumerated from the backend's own descriptor catalog rather than a Swift
     // enum, so a runner the backend registers is offered without shipping the
-    // app again (docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md, Phase 4), and
+    // app again (docs/engineering/RUNNERS.md), and
     // through the one shared view that also renders a runner this backend
     // reports as unstartable as disabled rather than as ready.
     expect(workspaceThreadColumn).toContain("NewThreadMenuItems(runners: runners, createSession: createSession)");

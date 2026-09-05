@@ -115,7 +115,7 @@ SDK. The conditions AgentRoom binds itself to:
 The SDK stays governed by Cursor's terms wherever it is accessed from,
 including from inside this bundle. Whether shipping the unmodified package
 inside an installer is covered has not yet been confirmed in writing by Cursor;
-[Open source mirror](docs/operations/OPEN_SOURCE_MIRROR.md) (Decision 10)
+[Open-source mirror](docs/operations/OPEN_SOURCE_MIRROR.md#runner-redistribution-decisions)
 records that as the one open licensing item.
 
 ## Editor language catalog

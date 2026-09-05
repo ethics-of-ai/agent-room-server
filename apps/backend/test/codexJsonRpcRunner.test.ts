@@ -24,7 +24,7 @@ const config = async (overrides: Partial<ServiceConfig> = {}): Promise<ServiceCo
 };
 
 /**
- * Phase 6 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md moves the app-server
+ * docs/engineering/RUNNERS.md keeps the app-server
  * bootstrap decision behind the adapter that owns the protocol. The macOS app
  * used to make it in generic launch assembly, by force-writing
  * `CODEX_RUNNER_PROTOCOL` and `CODEX_ARGS` whenever the Codex network toggle was

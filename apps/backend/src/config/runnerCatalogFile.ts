@@ -9,7 +9,7 @@ import { logger } from "../logging/logger";
  * `$AGENTROOM_HOME/config/runners.json` — the runner catalog the macOS app reads
  * when the backend is **not running**.
  *
- * Phase 5 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md requires an offline
+ * docs/engineering/RUNNERS.md requires an offline
  * floor, because the Mac's settings panes deliberately work with the backend
  * stopped — that is exactly when an operator is fixing why it would not start —
  * and `runnerKind` is a picker over runners only the backend knows. The app

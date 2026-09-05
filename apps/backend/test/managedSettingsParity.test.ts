@@ -70,7 +70,7 @@ describe("managed settings parity", () => {
   });
 
   /**
-   * Phase 5 gives every managed setting a canonical version-2 address, and both
+   * Every managed setting has a canonical version-2 address, and both
    * apps have to know it: the Mac writes the settings file directly (its panes
    * must work while the backend is stopped, which is exactly when it cannot ask)
    * and the headset patches with it. A wrong address is a `400` on a control
@@ -114,7 +114,7 @@ describe("managed settings parity", () => {
   });
 
   /**
-   * Phase 4 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md moves "which runners
+   * docs/engineering/RUNNERS.md moves "which runners
    * exist" off a compiled-in Swift enum and onto `GET /api/runners`. The enum
    * survives for bespoke presentation and deliberately drops `CaseIterable`, so
    * the compiler already refuses `allCases` — this scan is what catches someone

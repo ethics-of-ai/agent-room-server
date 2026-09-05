@@ -4,8 +4,8 @@ import Foundation
 /// badge, a model-suggestion field. The wire representation stays a plain
 /// `String` on the DTOs.
 ///
-/// It is deliberately **not** `CaseIterable`, and that is the Phase 4 rule of
-/// `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md` made structural: which runners
+/// It is deliberately **not** `CaseIterable`, making the rule in
+/// `docs/engineering/RUNNERS.md` structural: which runners
 /// exist is `RunnerCatalog`'s answer, hydrated from `GET /api/runners`, so a
 /// runner the backend registers is offered without shipping the apps again. An
 /// `allCases` picker here would silently re-close that list, so the conformance

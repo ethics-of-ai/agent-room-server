@@ -5,10 +5,10 @@ import { z } from "zod";
  * import is zod.
  *
  * They moved out of `domain/schemas.ts` for the same reason
- * `domain/runnerDefaults.ts` did: since Phase 3 the runner registry is *upstream*
+ * `domain/runnerDefaults.ts` did: the runner registry is *upstream*
  * of `domain/schemas.ts` (which imports `agentRunnerKindSchema` from it), and
- * since Phase 5 each `RunnerDescriptor` declares its own managed settings —
- * including the schema each one validates against. Reaching back into
+ * each `RunnerDescriptor` declares its own managed settings, including
+ * the schema each one validates against. Reaching back into
  * `domain/schemas.ts` for those schemas would close the loop
  * (`schemas` → `registry` → `schemas`) and leave initialization order deciding
  * whether a documented trust vocabulary is `undefined` at module load. A leaf
@@ -18,9 +18,8 @@ import { z } from "zod";
  */
 
 /**
- * The reasoning-effort vocabulary of the two runners AgentRoom *ships*, and the
- * one a managed setting (`codexReasoningEffort`, `claudeCodeReasoningEffort`) is
- * bounded to. It stays closed precisely because `/api/config` reports it as that
+ * The reasoning-effort vocabulary used by the Codex and Claude Code managed
+ * settings. It stays closed precisely because `/api/config` reports it as that
  * setting's `options`, and a client must not be offered a value the runner it
  * belongs to would reject.
  */

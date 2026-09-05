@@ -2,8 +2,7 @@ import Foundation
 
 /// One coding-agent runner as `GET /api/runners` reports it.
 ///
-/// This is the client half of Phase 4 of
-/// `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`. Both apps used to decide
+/// This is the client half of `docs/engineering/RUNNERS.md`. Both apps used to decide
 /// *which runners exist* from a compiled-in `AgentRunnerKind`, which meant a
 /// runner the backend registered stayed invisible until the apps shipped again.
 /// The backend's registry is the admission list; this is its safe/public

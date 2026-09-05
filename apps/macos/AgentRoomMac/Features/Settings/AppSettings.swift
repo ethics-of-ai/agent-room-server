@@ -49,7 +49,7 @@ struct AppSettings: Equatable {
             .path
     }
 
-    /// Operator-managed editor language catalog override directory (Phase C.5).
+    /// Operator-managed editor language catalog override directory.
     /// The Languages pane imports catalog data here; the backend reads the same
     /// path from `EDITOR_CATALOG_DIR` and prefers it over the bundled catalog.
     static func editorCatalogPath(for agentRoomHomePath: String) -> String {

@@ -15,7 +15,7 @@ export interface CodingAgentRoutesInput {
   /**
    * Discovery runs through the readiness observer rather than straight at the
    * adapter, because this route *is* the backend's runtime readiness probe
-   * (Phase 6): spawning the child, handshaking, and reading the model list is
+   * Spawning the child, handshaking, and reading the model list is
    * exactly the question `GET /api/runners` reports the answer to. Recording it
    * here is what keeps that route free of probes of its own.
    */

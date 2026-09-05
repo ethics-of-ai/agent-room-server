@@ -2,7 +2,7 @@ import Foundation
 
 /// One tier-3 launch value this app holds on a runner's behalf.
 ///
-/// Phase 6 of `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md` makes the
+/// `docs/engineering/RUNNERS.md` makes the
 /// bootstrap surface a **bundled, trusted contract** rather than typed fields
 /// per runner. A slot names the environment variable its value is injected as,
 /// and that name is the allowlist: `BackendLaunchConfiguration` iterates the

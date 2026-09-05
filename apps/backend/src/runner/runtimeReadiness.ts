@@ -2,8 +2,7 @@ import type { AgentRunnerKind, CodingAgentCapabilities } from "../domain/models"
 import type { AgentRunner } from "./AgentRunner";
 
 /**
- * Backend runtime readiness (Phase 6 of
- * docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md).
+ * Backend runtime readiness, as defined by docs/engineering/RUNNERS.md.
  *
  * Readiness has **two authorities**, and the phase exists because collapsing
  * them lets a runner read "ready" in a client while the backend cannot spawn it:

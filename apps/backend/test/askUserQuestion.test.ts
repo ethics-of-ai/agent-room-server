@@ -8,7 +8,7 @@ import {
 import { MAX_QUESTION_PROMPT_LENGTH } from "../src/runner/shared/PendingQuestionRequests";
 
 // The shape the bundled CLI (2.1.172) hands the SDK `canUseTool` callback for
-// AskUserQuestion, as observed in the Phase 0 spike.
+// AskUserQuestion, as observed in the compatibility probe.
 const toolInput = {
   questions: [
     {

@@ -1,7 +1,6 @@
-// Concise, backend-owned instruction that teaches both runners the in-band
-// artifact convention. Injected into the assembled turn prompt when artifacts
-// are enabled, so it reaches Codex and Claude Code uniformly without
-// runner-specific plumbing, independent of whatever a workspace's own
+// Concise, backend-owned instruction that teaches runners the in-band artifact
+// convention. Injected through descriptor-owned prompt delivery when artifacts
+// are enabled, independent of whatever a workspace's own
 // CLAUDE.md may or may not say.
 
 export const ARTIFACT_PROMPT_INSTRUCTION = [

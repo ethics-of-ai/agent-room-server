@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Editor language catalog (Phase C)
+// MARK: - Editor language catalog
 
 /// A backend catalog blob referenced by content hash. Large assets (TextMate
 /// grammars, the Oniguruma WASM) are fetched from the bounded asset route and

@@ -50,7 +50,7 @@ export function getServiceConfig(): ServiceConfig {
     ?? (agentRoomHome ? resolve(agentRoomHome, "workspaces") : resolve(process.cwd(), ".agentroom", "workspaces"));
   const stateDir = optionalEnv("STATE_DIR")
     ?? (agentRoomHome ? resolve(agentRoomHome, "state") : resolve(process.cwd(), ".agentroom", "state"));
-  // Operator-managed editor language catalog override dir (Phase C.5). The macOS
+  // Operator-managed editor language catalog override dir. The macOS
   // app imports curated catalog data here; the backend prefers it over the bundled
   // catalog when it holds a manifest. AGENTROOM_HOME-relative default, like stateDir.
   const editorCatalogDir = optionalEnv("EDITOR_CATALOG_DIR")
@@ -67,8 +67,8 @@ export function getServiceConfig(): ServiceConfig {
   // exist, so the registry (`runner/registry.ts`) is built first and
   // `serviceConfigSchema` validates against the id schema derived from it.
   // Stage 1 is the built-in descriptor table today; externally configured
-  // (tier-3) adapters join it in Phase 7, which is the phase that introduces an
-  // executable path to read. See docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md.
+  // (tier-3) adapters can join it only through an admitted executable path.
+  // See docs/engineering/RUNNERS.md.
   const managedSettingsPath = resolveManagedSettingsPath(agentRoomHome);
   const settingsFile = readManagedSettingsFileSync(managedSettingsPath);
   if (settingsFile.issue) {
@@ -91,7 +91,7 @@ export function getServiceConfig(): ServiceConfig {
     // Every managed setting's version-1 flat key is the `ServiceConfig` field of
     // the same name, so the resolved values spread straight in. Listing them
     // again here would be a fourth place to remember a runner's settings, which
-    // is the leak Phase 5 retires — and `serviceConfigSchema` drops what it does
+    // would leak ownership, and `serviceConfigSchema` drops what it does
     // not declare, so a runner registering a setting this schema has no field
     // for reaches its adapter through `settingsValues` below instead.
     ...settings,

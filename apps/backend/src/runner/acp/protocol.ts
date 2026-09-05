@@ -28,8 +28,7 @@ import {
  *
  * Conformance reference: the SDK's published `schema/schema.json` for v1
  * (`@agentclientprotocol/sdk`). The dependency itself is deliberately not taken
- * — see the Phase 0b findings in
- * docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md.
+ * See the conformance findings in docs/engineering/ACP_CONFORMANCE.md.
  */
 
 /** The protocol version this adapter speaks. v2 is still draft and is not used. */
@@ -59,7 +58,7 @@ function textOf(content: unknown): string | undefined {
  * Agent capabilities from `initialize`.
  *
  * The two restore capabilities are advertised with **different shapes**, which
- * the Phase 0b spike confirmed against the reference agent: `loadSession` is a
+ * conformance testing confirmed against the reference agent: `loadSession` is a
  * boolean, while `sessionCapabilities.resume` is an object (`{}`) whose mere
  * presence is the claim. A `=== true` check would therefore silently reject an
  * agent that supports the *preferred* restore path, so both are read as
@@ -511,7 +510,7 @@ export const permissionRequestSchema = z
 export type AcpPermissionOption = z.infer<typeof permissionOptionSchema>;
 
 /**
- * The conservative default from the Phase 0 spike, kept for production: select
+ * The conservative default from the conformance spike, kept for production: select
  * a rejection option the agent offered, else cancel.
  *
  * It never invents `allow_always`, and it never selects an allow option — an

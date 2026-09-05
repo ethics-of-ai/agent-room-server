@@ -1,7 +1,7 @@
 # Vendored TextMate highlighting assets — provenance
 
 These assets implement the editor's data-driven TextMate highlighting engine
-(language-support Phase B). They are
+(TextMate language support). They are
 vendored — there is **no in-repo build/vendoring script** — so this file records
 exactly where each asset came from, so it can be re-fetched and updated.
 
@@ -24,7 +24,7 @@ Both engine files are UMD bundles whose AMD branch calls an **anonymous**
 these must be loaded **through the AMD loader** (`require(['vscode-textmate', …])`)
 or **before** `loader.js` (their global branch sets `window.vscodetextmate` /
 `window.onig`). They must not be dropped in as plain `<script>` tags *after*
-`loader.js` — that hits the anonymous-define path. (Wiring is Phase B step 2.)
+`loader.js` hits the anonymous-define path.
 
 Re-fetch:
 

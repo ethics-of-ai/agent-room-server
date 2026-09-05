@@ -45,7 +45,7 @@ export interface StatusSnapshotPayload {
 }
 
 // Emitted when an operator reload changes the served editor language catalog
-// (Phase C.5). Carries only the new aggregate version + language count — never
+// after an operator-managed reload. Carries only the new aggregate version and language count, never
 // asset content. visionOS clients re-hydrate the catalog on receipt and verify
 // every fetched blob's sha256 before use.
 export interface EditorCatalogChangedPayload {

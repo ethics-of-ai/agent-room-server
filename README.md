@@ -85,7 +85,7 @@ bundles its own Node.js runtime and the compiled backend, so nothing else has to
 be installed to start the backend. You still need at least one runner: Codex
 (set its executable path in the app), Claude Code (sign in with `claude login`
 as the Mac user), Cursor (run the sign-in command in
-[Signing in to Cursor](docs/clients/MACOS.md#signing-in-to-cursor); a Cursor
+[Signing in to Cursor](docs/engineering/CURSOR_SDK_RUNNER.md#credentials-and-billing); a Cursor
 Pro plan or better is required), or DeepSeek Harness (see the
 [DeepSeek runner guide](docs/engineering/DEEPSEEK_HARNESS_RUNNER.md)).
 
@@ -279,7 +279,7 @@ Start with the [documentation index](docs/README.md), or go directly to:
 - [API](docs/api/API.md)
 - [macOS client](docs/clients/MACOS.md)
 - [Trust and safety](docs/safety/TRUST_AND_SAFETY.md)
-- [Runner capability matrix](docs/engineering/RUNNER_CAPABILITY_MATRIX.md)
+- [Runner architecture and maintenance](docs/engineering/RUNNERS.md)
 
 There is no separate agent guidance file in this tree; the documents above,
 starting with [Trust and safety](docs/safety/TRUST_AND_SAFETY.md), are the

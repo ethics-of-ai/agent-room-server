@@ -1,49 +1,50 @@
 # Documentation
 
-## Start here
+Use the smallest reference that owns the work.
 
-- [Architecture](architecture/ARCHITECTURE.md) explains the backend and client
-  boundaries.
-- [Moving parts](architecture/MOVING_PARTS.md) maps responsibilities to source
-  directories and files.
-- [API](api/API.md) defines the REST and WebSocket contracts.
-- [Local Mac server](operations/LOCAL_MAC_SERVER.md) covers setup, packaging,
-  configuration, and smoke checks.
-- [Open source mirror](operations/OPEN_SOURCE_MIRROR.md) records how this
-  repository is produced from the private monorepo and how releases are built.
-- [Trust and safety](safety/TRUST_AND_SAFETY.md) records defaults, gates,
-  bounds, and known risks.
+## Backend and contracts
 
-## Client guides
+- [Architecture](architecture/ARCHITECTURE.md) maps responsibilities and source
+  entry points.
+- [API](api/API.md) defines REST and WebSocket behavior.
+- [Trust and safety](safety/TRUST_AND_SAFETY.md) owns gates, bounds, trust
+  decisions, and known limitations.
+- [Local Mac server](operations/LOCAL_MAC_SERVER.md) covers setup, recovery, and
+  smoke checks.
 
-- [macOS client](clients/MACOS.md) covers backend setup and supervision.
-- [SwiftUI standards](engineering/SWIFTUI_STANDARDS.md) defines the structure
-  and quality bar for the Apple clients.
+For a focused change, start with the matching sections:
 
-The visionOS client guide, the visionOS design principles, and the Apple
-reference indexes stay in the private repository with the visionOS app. Some
-documents here link to them; those links do not resolve in this tree.
+| Task | API contract | Trust contract |
+| --- | --- | --- |
+| Managed settings | [Config](api/API.md#config) | [Settings and migration](safety/TRUST_AND_SAFETY.md#managed-settings) |
+| Runner discovery | [Capabilities](api/API.md#coding-agent-capabilities) | [Catalog and readiness](safety/TRUST_AND_SAFETY.md#runner-catalog-and-readiness) |
+| Sessions and turns | [Agent sessions](api/API.md#agent-sessions) | [Persistence](safety/TRUST_AND_SAFETY.md#session-persistence) |
+| Files and search | [Workspaces](api/API.md#workspaces) | [Workspace files](safety/TRUST_AND_SAFETY.md#workspace-files) |
+| Git mutations | [Git operations](api/API.md#mutating-git-operations) | [Git safety](safety/TRUST_AND_SAFETY.md#git-operations) |
+| Permission input | [Permission answers](api/API.md#permission-answers) | [Approval](safety/TRUST_AND_SAFETY.md#permission-approval) |
+| Question input | [Question answers](api/API.md#clarifying-question-answers) | [Questions and storage](safety/TRUST_AND_SAFETY.md#clarifying-questions) |
+| Language services | [Semantic protocol](api/API.md#editor-language-services) | [Execution](safety/TRUST_AND_SAFETY.md#language-services) |
 
-## Runner and agent engineering
+## Runners
 
-- [Harness engineering](engineering/HARNESS_ENGINEERING.md) defines the
-  agent-facing runtime profile.
-- [Runner capability matrix](engineering/RUNNER_CAPABILITY_MATRIX.md) maps
-  runner-specific decisions to registry fields.
-- [DeepSeek Harness runner](engineering/DEEPSEEK_HARNESS_RUNNER.md) documents
-  the built-in DeepSeek adapter and its remaining real-runtime checks.
-- [Cursor SDK runner](engineering/CURSOR_SDK_RUNNER.md) is the plan and
-  record for the fourth built-in runner, driven through `@cursor/sdk` in a host
-  child.
-- [ACP real-agent conformance](engineering/ACP_CONFORMANCE.md) describes the
-  attended checks that CI cannot perform without a provider credential.
+- [Runner architecture](engineering/RUNNERS.md) defines registry ownership,
+  canonical events, lifecycle, settings, permissions, and questions.
+- [DeepSeek Harness](engineering/DEEPSEEK_HARNESS_RUNNER.md) covers its runtime
+  and composition.
+- [Cursor SDK](engineering/CURSOR_SDK_RUNNER.md) covers SDK integration,
+  credentials, packaging, and open checks.
+- [ACP conformance](engineering/ACP_CONFORMANCE.md) is the attended verification
+  procedure for a real external agent.
 
-## Implementation records
+## Apple client and operations
 
-These documents explain how the current runner design was introduced. They are
-useful when changing the contracts, but they are not setup guides.
+- [macOS client](clients/MACOS.md) covers backend supervision, settings,
+  bootstrap, diagnostics, and updates.
+- [SwiftUI standards](engineering/SWIFTUI_STANDARDS.md) defines shared Apple
+  source structure and quality rules.
+- [Open-source mirror](operations/OPEN_SOURCE_MIRROR.md) defines publication,
+  release, and private/public boundaries.
 
-- [Universal runner boundary](engineering/UNIVERSAL_RUNNER_BOUNDARY.md)
-- [Registered runner completeness](engineering/REGISTERED_RUNNER_COMPLETENESS.md)
-- [Clarifying questions](engineering/CLARIFYING_QUESTIONS.md) — the channel
-  through which an agent pauses a turn to ask for direction
+The visionOS client and its Apple evidence stay in the private repository.
+Some shared references may describe those contracts without publishing the
+private app source.

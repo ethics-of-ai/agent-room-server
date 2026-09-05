@@ -12,8 +12,8 @@ final class BackendSupervisor {
     /// The settings-file sections this build cannot address — a runner it does
     /// not know, or a field a newer AgentRoom added to one it does.
     ///
-    /// They have always been carried back out untouched on every write; Phase 1
-    /// of `docs/engineering/REGISTERED_RUNNER_COMPLETENESS.md` is what makes them
+    /// They are carried back out untouched on every write; `docs/engineering/RUNNERS.md`
+    /// is what makes them
     /// *visible*, because a registered runner brings its own settings and a trust
     /// posture set from a paired client was previously invisible on the machine
     /// that posture is about.
@@ -25,7 +25,7 @@ final class BackendSupervisor {
     /// The schema version the settings file on disk declares, when it is one this
     /// app can apply. `nil` for a missing or unusable file. The Advanced pane
     /// reads it to say whether the file is already in the older format a
-    /// pre-Phase-5 backend can read.
+    /// version-1 backend can read.
     private(set) var managedSettingsSchemaVersion: Int?
     /// Per-key provenance from the running backend's `/api/config`. `nil` while
     /// the backend is unreachable — the panes then say so instead of guessing
@@ -34,7 +34,7 @@ final class BackendSupervisor {
     /// The runners the backend registers (`GET /api/runners`), or the offline
     /// catalog while the backend is stopped — which is exactly when an operator
     /// is fixing why it would not start, so the panes cannot depend on asking it.
-    /// See `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`.
+    /// See `docs/engineering/RUNNERS.md`.
     private(set) var runnerCatalog: RunnerCatalog = .builtIn
     private(set) var secrets: BackendSecretValues
     private(set) var serverState: BackendServerState = .stopped
@@ -49,10 +49,10 @@ final class BackendSupervisor {
     private(set) var auditTrailDiagnostics: String?
     private(set) var diagnosticsExportMessage: String?
     /// Mac bootstrap readiness, keyed by `runnerKind/probeID` — the local half of
-    /// Phase 6's split readiness. It answers "is the prerequisite on *this*
+    /// The split readiness contract answers "is the prerequisite on *this*
     /// machine satisfied", which must work with the backend stopped, and is a
     /// different authority from the `ready` a running backend reports on
-    /// `GET /api/runners`. See `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`.
+    /// `GET /api/runners`. See `docs/engineering/RUNNERS.md`.
     private(set) var bootstrapStatuses: [String: RunnerBootstrapCheckStatus] = [:]
     /// Keyed by runner kind: one source-checkout walk per runner, unlike probe
     /// statuses, which are per probe.
@@ -421,8 +421,8 @@ final class BackendSupervisor {
 
     /// The configured default runner that a rollback cannot carry, or `nil`.
     ///
-    /// An older AgentRoom knows only the two runners that predate the rollout
-    /// gate, and `runnerKind` is a *known* key there — so a value it does not
+    /// A version-1 settings reader knows only `codex` and `claude_code`, and
+    /// `runnerKind` is a *known* key there, so a value it does not
     /// know is not preserved-and-ignored the way an unknown runner's settings
     /// namespace is, it makes the whole file unusable. The pane reads this to
     /// say so before the button is pressed; the store refuses independently,
@@ -441,7 +441,7 @@ final class BackendSupervisor {
             && runnerKindBlockingLegacyManagedSettingsFile == nil
     }
 
-    /// Converts the settings file back to the flat document a pre-Phase-5
+    /// Converts the settings file back to the flat document a version-1
     /// AgentRoom reads, so running an older build is a supported step rather than
     /// a one-way upgrade.
     ///
@@ -450,8 +450,8 @@ final class BackendSupervisor {
     /// the operator's whole trust posture onto defaults — so the way back is to
     /// convert, not to hope. Every setting this release knows survives the round
     /// trip in both directions; a section only a newer release understands rides
-    /// along unaddressed, exactly as Phase 4 taught the older reader to preserve
-    /// it. See `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`.
+    /// along unaddressed, as the older reader preserves it. See
+    /// `docs/engineering/RUNNERS.md`.
     func writeLegacyManagedSettingsFile() {
         do {
             try managedSettingsStore.writeLegacyDocument(at: settings.managedSettingsFileURL)

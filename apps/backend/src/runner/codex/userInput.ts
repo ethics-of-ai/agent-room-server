@@ -18,7 +18,7 @@ import {
  * "Other" of its own, which is why every set here invites free text. The
  * response maps question ids to answer strings — labels for chosen options,
  * the typed text for "Other" — and an id the response omits reads to the model
- * as unanswered. Verified against codex-cli 0.149 (Phase 0 spike); the runner
+ * as unanswered. Verified against codex-cli 0.149; the runner
  * owns the wait and the thread flags that make the tool available.
  */
 export const CODEX_REQUEST_USER_INPUT_METHOD = "item/tool/requestUserInput";

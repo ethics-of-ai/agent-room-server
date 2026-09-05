@@ -2,6 +2,10 @@
 
 Base URL defaults to `http://<mac-host>:8787`.
 
+Use [the documentation index](../README.md) to find the owning design or
+operational guide. This document owns consumer-visible wire behavior: routes,
+authentication, request and response shapes, status codes, and compatibility.
+
 If `AUTH_TOKEN` is set, mutating requests require:
 
 ```http
@@ -287,7 +291,7 @@ The other authority is the Mac's, and it is deliberately not here: whether the
 local prerequisite is satisfied (an installed CLI, a `claude login` credential)
 must be answerable while the backend is **stopped**, which is exactly when this
 route cannot be reached, so the macOS app answers that one locally. See
-`docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md` and `docs/clients/MACOS.md`.
+`docs/engineering/RUNNERS.md` and `docs/clients/MACOS.md`.
 
 Deliberately absent: every descriptor field the backend decides behavior from
 (prompt delivery, turn-diff source, workspace-skill policy, restore strategy),
@@ -323,7 +327,7 @@ cannot ask. That file is a cache the backend never reads, and the Mac falls back
 to its bundle for an absent, unreadable, empty, or newer-versioned one. Clients
 must render a runner id they have no descriptor for as itself —
 never resolved to a known runner. See `docs/safety/TRUST_AND_SAFETY.md` and
-`docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`.
+`docs/engineering/RUNNERS.md`.
 
 ## Coding Agent Capabilities
 
@@ -430,8 +434,8 @@ returns the static fallback catalog with a bounded error and is not cached.
 
 Note that `reasoningEffort` on a turn is an **open id bounded by shape**, not a
 closed vocabulary: the list a client renders comes from the model's own
-`reasoningEfforts`, and a registered runner may advertise values the two built-in
-runners do not have (a configured ACP adapter can offer `max` or `ultra`; Cursor
+`reasoningEfforts`, and a registered runner may advertise values outside the
+Codex and Claude Code managed-setting vocabulary (a configured ACP adapter can offer `max` or `ultra`; Cursor
 offers `extra-high` and `max`). The closed `none|minimal|low|medium|high|xhigh`
 vocabulary still bounds the `codexReasoningEffort` and
 `claudeCodeReasoningEffort` *managed settings*, which `GET /api/config` reports
@@ -818,6 +822,8 @@ The complete execution posture is in
 
 ## Workspaces
 
+### Registration and listing
+
 `GET /api/workspaces` returns registered local workspaces.
 For Git repositories, each workspace snapshot includes the current branch,
 local branches, whether a local branch is current, `hasRemote` (true for any
@@ -845,6 +851,8 @@ the branch list, so the snapshot costs no extra Git invocation.
 
 The path must be an existing absolute directory. Registration stores metadata
 under `STATE_DIR` and does not write files inside the selected workspace.
+
+### Tree and file preview
 
 `GET /api/workspaces/:workspaceId/tree?path=&depth=3` returns a bounded,
 read-only folder tree for a registered workspace. Generated and local-state
@@ -886,6 +894,8 @@ write cap comes back with `truncated: false` and stays editable instead of
 read-only. When `AUTH_TOKEN` is configured, workspace tree and file-preview
 reads require the bearer token because they expose project structure and file
 contents.
+
+### File index and content search
 
 `GET /api/workspaces/:workspaceId/files?query=app&limit=50` returns a bounded,
 ranked index of a registered workspace's files, backing quick-open and the
@@ -1008,6 +1018,8 @@ a non-boolean flag token, a `limit` outside 1–500), `401` when `AUTH_TOKEN` is
 configured and the bearer token is missing (the search returns file content), and
 `404` for an unknown workspace. It emits no events and no audit entries.
 
+### Workspace skills
+
 `GET /api/workspaces/:workspaceId/skills?runnerKind=claude_code` lists the
 skills a runner kind would natively load from a registered workspace, so client
 composers can offer a `/` slash picker. The optional `runnerKind` query accepts
@@ -1045,6 +1057,8 @@ descriptions expose project structure.
   ]
 }
 ```
+
+### File and directory mutations
 
 `PUT /api/workspaces/:workspaceId/file` writes a bounded UTF-8 text file to a
 registered workspace. The backend performs the write behind the same path
@@ -1354,6 +1368,8 @@ unknown workspace/directory/parent; `409` for a stale or concurrently changed
 selected directory; `413` when an inventory cap is exceeded; and `415` for a
 file target, symlink, protected subtree, or unsupported entry type.
 
+### Git status and file baseline
+
 `GET /api/workspaces/:workspaceId/git/status` returns canonical file-level Git
 dirty status for a registered workspace. The route uses fixed read-only Git
 invocations, not a shell or client-supplied command arguments. When
@@ -1531,6 +1547,8 @@ rejecting hook) or an explicit stage/unstage path that is not an exact eligible
 changed file, carrying git's own message with URL credentials and labelled
 secrets redacted; `415` for an explicitly named secret-named, generated-directory,
 or out-of-bounds path.
+
+### Branch switching and workspace removal
 
 `POST /api/workspaces/:workspaceId/git/branch` switches a registered Git
 workspace to an existing clean local branch:
@@ -1851,7 +1869,7 @@ pending report, a deletion or rename (the diff entry's `oldPath`) drops the
 stale one, and a read failure is skipped silently. Validations are serialized
 per session — the next prompt assembly waits out the in-flight chain rather
 than starting reads of its own — and the feedback is in-memory per session,
-delivered once to both runner kinds (only lines that fit the summary's
+delivered once on the session's next accepted turn (only lines that fit the summary's
 character cap are consumed; the rest stay pending), and released when the
 session is deleted. `workspace_file_written` is deliberately not involved:
 that event remains the human-edit summary's authorship signal.
@@ -2077,6 +2095,8 @@ contain secrets.
 
 ## Agent Sessions
 
+### Session reads
+
 `GET /api/agent-sessions` lists sessions. Sessions are persisted under
 `STATE_DIR/sessions/` and restored at startup, so the list survives a backend
 restart; a restored session is served through the same code path as a live
@@ -2161,6 +2181,8 @@ Returns `404` for an unknown session. Like `/messages`, this read requires the
 bearer token when `AUTH_TOKEN` is configured, because it exposes model-authored
 content.
 
+### Session lifecycle
+
 `DELETE /api/agent-sessions/:sessionId` deletes a thread from the backend
 session list, removes its message history and its persisted record, and emits
 `agent_session_deleted`. This is the only way a thread's record goes away; a
@@ -2204,7 +2226,7 @@ from the prompt's enqueue receipt to the runtime's own `turn/end` (or, failing
 that, its whole-agent `running` → `idle` transition) rather than being causally
 assigned to the prompt, so steering or injected work arriving inside that
 interval contributes to the turn that is settling. Its permission route reports
-`404` like the other two built-ins: the SDK wire carries no server-to-client
+`404` like the other built-ins: the SDK wire carries no server-to-client
 requests, so there is no outstanding request to answer.
 
 Once a session's runner reports its native session start,
@@ -2220,6 +2242,8 @@ described under turns below.
 current branch when the session is created. Existing sessions keep that branch
 association, and turn execution switches the registered workspace back to the
 session branch before invoking the runner when needed.
+
+### Turns and token usage
 
 `POST /api/agent-sessions/:sessionId/turns`
 
@@ -2316,6 +2340,8 @@ it reported earlier. Omission carries no new threshold knowledge. These are the
 terms described under Coding Agent Capabilities above; the other fields are
 unchanged.
 
+### Image attachments
+
 `POST /api/agent-sessions/:sessionId/attachments` stores a session-scoped image
 attachment uploaded with `multipart/form-data` field `file`. The first supported
 slice accepts PNG, JPEG, and WebP images. The backend validates the content
@@ -2348,10 +2374,12 @@ Response:
 When `AUTH_TOKEN` is configured, this upload route requires bearer auth like
 other mutating routes.
 
+### Permission answers
+
 `POST /api/agent-sessions/:sessionId/permissions/:requestId` answers a permission
 request a runner raised mid-turn — the interactive third answer beside the two a
 runner's configured posture can give on its own (refuse, or the unattended
-allow). It is available only for a runner that asks; the two built-in runners
+allow). It is available only for a runner that asks; the built-in runners
 answer from their own postures and expose no outstanding request.
 
 ```json
@@ -2379,6 +2407,8 @@ an unknown session or a request that is not outstanding (which is also what a
 runner with no approval channel reports). The decision is recorded durably as
 `agent_permission_resolved` — which option, on whose authority, never the tool
 call it was about. See `docs/safety/TRUST_AND_SAFETY.md`.
+
+### Clarifying-question answers
 
 `POST /api/agent-sessions/:sessionId/questions/:requestId` answers a
 clarifying-question batch a runner raised mid-turn. Where a permission request

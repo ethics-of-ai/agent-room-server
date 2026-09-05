@@ -194,7 +194,7 @@ describe("layoutDiagram", () => {
     expect(x("solo")).toBeLessThan(x("a"));
   });
 
-  // Phase 4: groups take alternating ± z lanes by document order, so a
+  // Groups take alternating ± z lanes by document order, so a
   // grouped document has depth to walk around instead of standing as a flat
   // poster. Ungrouped atoms stay on the z = 0 plane the palette drop and the
   // rest of the layout reason about.

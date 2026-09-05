@@ -16,7 +16,7 @@ import {
  * opts into `authorizedForRead`. Each one bounds and locks inside
  * `WorkspaceExplorer`; what lives here is the event and the response shape, plus
  * dropping the cached file index whenever the set of paths changed.
- * See `docs/safety/TRUST_AND_SAFETY.md` (*Workspace file mutation*).
+ * See `docs/safety/TRUST_AND_SAFETY.md` (Workspace files).
  */
 export async function registerWorkspaceFileMutationRoutes(
   app: FastifyInstance,

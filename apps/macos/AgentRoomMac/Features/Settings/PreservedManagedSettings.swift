@@ -4,9 +4,8 @@ import Foundation
 /// write: an unregistered runner's namespace, and a field a newer AgentRoom adds
 /// to a runner this one knows.
 ///
-/// This is the macOS half of the forward-compatibility rule Phase 4 of
-/// `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md` introduced and Phase 5 turns
-/// into the document's actual shape. Before Phase 4 this app's whole-file
+/// This is the macOS half of the forward-compatibility rule in
+/// `docs/engineering/RUNNERS.md` and the document's actual shape. Previously this app's whole-file
 /// preflight declared *any* unrecognized top-level key malformed — so a `runners`
 /// section from a newer AgentRoom would not have been ignored, it would have
 /// broken settings loading entirely and dropped the operator's trust posture to

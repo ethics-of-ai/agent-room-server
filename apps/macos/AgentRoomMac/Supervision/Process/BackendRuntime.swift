@@ -34,8 +34,8 @@ struct BackendLaunchConfiguration: Equatable {
     /// Deliberately takes **no** managed settings. Everything managed lives in
     /// the backend's own `settings.json`, and a launch that read one would be
     /// generic Swift interpreting a particular runner's configuration — the
-    /// coupling Phase 6 of `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`
-    /// removes. Omitting the parameter is what keeps it removed.
+    /// coupling `docs/engineering/RUNNERS.md` removes. Omitting the parameter
+    /// is what keeps it removed.
     init(
         runtime: BackendRuntime,
         settings: AppSettings,
@@ -56,14 +56,14 @@ struct BackendLaunchConfiguration: Equatable {
         if !settings.usesDefaultStatePath {
             environment["STATE_DIR"] = settings.statePath
         }
-        // The operator-managed editor catalog override dir (Phase C.5). Injected
+        // The operator-managed editor catalog override dir. Injected
         // explicitly so the macOS import target and the backend read path are one
         // source of truth (the backend default resolves the same AGENTROOM_HOME
         // path, but being explicit makes the contract testable).
         environment["EDITOR_CATALOG_DIR"] = settings.editorCatalogPath
         // Tier-3 launch values, injected only under the environment names the
-        // bundled bootstrap descriptors declare (Phase 6 of
-        // docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md). Assembly here is
+        // bundled bootstrap descriptors declare (docs/engineering/RUNNERS.md).
+        // Assembly here is
         // generic: it iterates the allowlist and never interprets what a
         // particular runner's value means.
         environment.merge(secrets.environment()) { _, secretValue in secretValue }

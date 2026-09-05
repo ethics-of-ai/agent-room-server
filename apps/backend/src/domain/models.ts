@@ -97,7 +97,7 @@ export interface ServiceConfig extends LanguageServiceExecutableConfig {
   // When false, runners cannot pause a turn for clarification. Tier 1: answering
   // a question authorizes nothing. See docs/safety/TRUST_AND_SAFETY.md.
   clarifyingQuestionsEnabled?: boolean;
-  // When false, the backend-served editor language catalog (Phase C) is disabled:
+  // When false, the backend-served editor language catalog is disabled:
   // the catalog routes are not registered and clients fall back to bundled assets.
   languageCatalogEnabled?: boolean;
   sceneEngineEnabled?: boolean;
@@ -459,7 +459,7 @@ export interface AgentTurnContext {
  * (`runner/registry.ts`), not a second hand-maintained union here — adding a
  * built-in runner is adding a row there.
  *
- * It is a `string` rather than the built-in union because Phase 7 admits
+ * It is a `string` rather than the built-in union because startup can admit
  * externally configured (tier-3) adapters, whose ids exist only once an operator
  * has named them: a compile-time union cannot describe a set that startup
  * decides. Admission is therefore a *runtime* check —
@@ -502,8 +502,7 @@ export interface CodingAgentModelOption {
  * All three are open ids rather than closed unions: the vocabulary belongs to
  * the runner that advertised it through `GET /api/coding-agent/capabilities`, and
  * a registered runner brings its own. `CodingAgentReasoningEffort` remains the
- * closed vocabulary of the two runners AgentRoom ships, which is what the
- * managed settings for those runners are bounded to.
+ * closed vocabulary used by the Codex and Claude Code managed settings.
  */
 export interface CodingAgentTurnSettings {
   model?: string;

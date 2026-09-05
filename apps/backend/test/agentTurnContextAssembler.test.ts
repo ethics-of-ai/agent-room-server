@@ -120,7 +120,7 @@ describe("agent turn context assembler", () => {
     const assembled = await assembler.assemble({ session, message: "Update the diagram." });
 
     // The stable contract stays in the SDK system prompt; the volatile summary
-    // cannot live there, so it arrives with the turn for both runner kinds.
+    // cannot live there, so it arrives with the next accepted turn.
     expect(assembled.prompt).toBe("human moved orders\n\nUpdate the diagram.");
   });
 

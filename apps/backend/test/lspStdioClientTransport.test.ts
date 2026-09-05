@@ -54,7 +54,7 @@ process.stdin.on('data', (chunk) => {
   return { root, path };
 }
 
-describe("LspStdioClient Phase 0 transport evidence", () => {
+describe("LspStdioClient transport evidence", () => {
   it("frames traffic, bounds stderr, answers admitted server requests, and cancels", async () => {
     const server = fakeServer();
     const client = new LspStdioClient(process.execPath, [server.path], server.root, {

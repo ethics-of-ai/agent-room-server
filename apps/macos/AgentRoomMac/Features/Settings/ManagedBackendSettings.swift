@@ -134,7 +134,7 @@ struct ManagedBackendSettings: Codable, Equatable {
     func backendSchemaIssue() -> String? {
         // `runnerKind` is deliberately not checked against a compiled-in list.
         // The backend registry is the authority on membership, and a Mac at the
-        // Phase 4 compatibility floor must be able to preserve a runner id a
+        // The compatibility floor must be able to preserve a runner id a
         // newer backend registered. JSON decoding above still enforces that the
         // value is a non-null string; the remaining fields have stable value
         // vocabularies this release can validate locally.

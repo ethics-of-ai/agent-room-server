@@ -216,7 +216,7 @@ describe("managed settings file tolerance", () => {
 });
 
 /**
- * Phase 5 of docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md: the version-2
+ * docs/engineering/RUNNERS.md: the version-2
  * document is now the one this backend applies and writes. Version 1 is still
  * read — and migrated whole by the next write that changes anything — and is
  * still what the reverse serializer emits for the deliberate rollback path,
@@ -435,7 +435,7 @@ describe("version-2 settings document", () => {
   });
 
   describe("legacy rollback serializer", () => {
-    it("converts back to the flat document a pre-Phase-5 backend reads", async () => {
+    it("converts back to the flat document a version-1 backend reads", async () => {
       const path = await writeSettingsText(JSON.stringify(versionTwoFixture));
       const read = await readManagedSettingsFile(path);
 
@@ -493,8 +493,8 @@ describe("version-2 settings document", () => {
       );
 
       // A version-1 document cannot *address* a runner namespace, but the
-      // pre-Phase-5 reader tolerates and preserves one — which is exactly what
-      // Phase 4 taught it to do, and what makes the downgrade reversible.
+      // version-1 reader tolerates and preserves one, which is exactly what
+      // the compatibility contract requires, making the downgrade reversible.
       expect(legacy).toEqual({ runnerKind: "codex", runners: { acp_demo: { executableSlot: "acp" } } });
     });
   });

@@ -209,7 +209,7 @@ function typescriptFixture(): Fixture {
   };
 }
 
-describe("LspStdioClient live Phase 0 compatibility", () => {
+describe("LspStdioClient live compatibility", () => {
   it.skipIf(sourcekitLspPath === null)("exercises the frozen feature set against SourceKit-LSP", async () => {
     const fixture = swiftFixture();
     try {

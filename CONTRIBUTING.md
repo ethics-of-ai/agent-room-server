@@ -45,8 +45,8 @@ then build the `AgentRoomMac` scheme in Xcode or with `xcodebuild`. Edit
 [`apps/macos/project.yml`](apps/macos/project.yml), never the generated
 `.xcodeproj`, which is not committed.
 
-Read [Architecture](docs/architecture/ARCHITECTURE.md),
-[Moving parts](docs/architecture/MOVING_PARTS.md), and
+Read [Architecture](docs/architecture/ARCHITECTURE.md), [API](docs/api/API.md),
+and
 [Trust and safety](docs/safety/TRUST_AND_SAFETY.md) before touching the
 backend, the runners, the configuration layer, or the workspace routes. Most
 documented defaults are pinned by a test. A PR that relaxes a documented trust

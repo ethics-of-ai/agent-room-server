@@ -16,8 +16,8 @@ let warnedAboutIncompatibleArgs = false;
  * timeout rather than as the configuration problem it is, so the adapter drops
  * that one incompatible case onto its own default argv.
  *
- * This is the Codex half of Phase 6's tier-3 bootstrap rule
- * (docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md): the *adapter* decides what
+ * This is the Codex half of the tier-3 bootstrap rule
+ * (docs/engineering/RUNNERS.md): the *adapter* decides what
  * launching its own protocol requires. The macOS app used to paper over it by
  * force-writing `CODEX_RUNNER_PROTOCOL` and `CODEX_ARGS` whenever the Codex
  * network toggle was on — a Codex-shaped reading of a managed setting performed

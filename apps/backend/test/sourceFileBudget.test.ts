@@ -68,8 +68,8 @@ const allowlist: Readonly<Record<string, number>> = {
   // `AgentTurnEventApplier` and the two trackers beside it. The split would
   // have landed near 675 lines, still over the ceiling, in exchange for a
   // wide callback seam across the hydration path
-  // `docs/safety/TRUST_AND_SAFETY.md` pins under *Agent session records are
-  // persisted*. Recorded here rather than attempted.
+  // `docs/safety/TRUST_AND_SAFETY.md` pins under *Session persistence*.
+  // Recorded here rather than attempted.
   "apps/backend/src/agent/AgentSessionService.ts": 894,
   "apps/backend/src/scene/diagram/compose.ts": 866,
   "apps/backend/src/runner/codex/CodexAppServerRunner.ts": 849,

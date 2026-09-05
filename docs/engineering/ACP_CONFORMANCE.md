@@ -1,12 +1,13 @@
 # ACP Real-Agent Conformance
 
-Phase 5 of [Registered Runner Completeness](REGISTERED_RUNNER_COMPLETENESS.md).
+This procedure verifies the external-adapter contract in
+[Runner architecture and maintenance](RUNNERS.md#external-acp-adapters).
 
 The ACP adapter (`apps/backend/src/runner/acp`) is covered in CI by a synthetic
 agent fixture (`apps/backend/test/acpRunner.test.ts`), which is deterministic and
 needs neither network nor a provider credential. What that fixture cannot do is
 prove the adapter's reading of a *real* agent is right: every mapping decision in
-Phase 4 rests on the shapes `@agentclientprotocol/codex-acp` actually sends, and
+The adapter rests on the shapes `@agentclientprotocol/codex-acp` actually sends, and
 a fixture asserts the shapes we transcribed rather than the ones it emits today.
 
 This is the procedure that closes that gap. It is deliberately **not in CI** — it
@@ -25,7 +26,7 @@ version, or before trusting a new external agent with real work.
 | C2 | Capability discovery works, and readiness is observed rather than probed |
 | C3 | The `session/new` response is captured — the record every mapping rests on |
 | C4 | A turn round-trips and maps onto the canonical event union |
-| C5 | **A selected model is applied and honored** — the observation Phase 4 owed |
+| C5 | **A selected model is applied and honored** |
 | C6 | Cancellation settles the in-flight prompt rather than orphaning it |
 | C7 | A lost child is restored by `session/resume`, not silently restarted |
 | C8 | Declined `fs`/`terminal` capabilities are honored by the real agent |
@@ -209,7 +210,7 @@ curl -sS "$BASE/api/agent-sessions/$SESSION" | jq '.session.runner'
 
 ### C5 — A selected model is applied and honored
 
-The observation Phase 4 owed: the mapping and ordering are covered against the
+The model mapping and ordering are covered against the
 synthetic agent, but no live run had driven `session/set_config_option` against
 the real agent and seen the next turn use the selection.
 
@@ -348,5 +349,5 @@ curl -sS -X DELETE "$BASE/api/agent-sessions/$SESSION"
   decides whether it can be exercised at all; the negotiation and the bounded
   per-prompt image budget are covered synthetically. Add a check here if a
   reference agent advertises image support.
-- **Anything about the built-in runners.** Codex and Claude Code have their own
-  postures and their own coverage; this is about an arbitrary configured agent.
+- **Anything about the built-in runners.** Their postures and coverage are
+  maintained separately; this procedure is about an arbitrary configured agent.

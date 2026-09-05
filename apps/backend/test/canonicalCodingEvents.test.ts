@@ -16,13 +16,13 @@ import {
   MAX_QUESTION_SETS
 } from "../src/runner/shared/PendingQuestionRequests";
 
-/// Phase 2 of the universal runner boundary: the core mapper dispatches on the
+/// The core mapper dispatches on the
 /// adapter-produced canonical payload and never on which runner produced it.
 ///
 /// "acp_demo" here stands in for a third adapter. It is deliberately a runner
 /// id no file in `protocol/coding` mentions — if any of these need a change in
 /// the mapper to pass, the boundary has leaked again. Session *creation* still
-/// rejects an unregistered runner id (that gate is Phase 3's `agentRunnerKind`
+/// rejects an unregistered runner id (that gate is `agentRunnerKind`
 /// schema), so this exercises the mapper directly rather than through a turn.
 const THIRD_RUNNER = "acp_demo";
 

@@ -239,7 +239,7 @@ describe("composeDiagram", () => {
       ]
     }), undefined);
 
-    // Phase 3 slice 3: the kinds pass through untouched with a single
+    // The kinds pass through untouched with a single
     // arrowhead — fan-out delivery and replication both point one way — and
     // raise none of the unknown-vocabulary warnings they used to.
     expect(composed.connectors[0]).toMatchObject({ kind: "event", arrowheads: "to" });
@@ -247,7 +247,7 @@ describe("composeDiagram", () => {
     expect(composed.warnings).toEqual([]);
   });
 
-  // The unknown example was `ml_model` until Phase 5 promoted it — which is
+  // The unknown example remains distinct from registered roles, which is
   // the plan's own evidence that the warning channel surfaces the roles worth
   // adding next.
   it("falls back for unknown vocabulary and reports warnings", () => {
@@ -420,7 +420,7 @@ describe("composeDiagram", () => {
     expect(composed.connectors.map((connector) => connector.parallelIndex ?? 0)).toEqual([0, 1, 2, 3]);
   });
 
-  // Phase 4: an edge spanning two or more tiers draws a straight line through
+  // An edge spanning two or more tiers draws a straight line through
   // the tiers between — a chain plus its skip edge skewers the middle node
   // outright once barycenter centres all three. Such an edge bows toward the
   // viewer through a `via` waypoint; adjacent-tier edges stay straight and
@@ -491,7 +491,7 @@ describe("composeDiagram", () => {
 
   // Review finding: the lane slice moved a grouped intermediate node to
   // z = 0.12 and the original fixed 0.08 bow then landed *inside* its body —
-  // the two Phase 4 slices undoing each other. The bow now clears what the
+  // the tier and bow calculations undoing each other. The bow now clears what the
   // crossed tiers actually hold.
   it("bows past an intermediate node a group lane moved into the bow's path", () => {
     const laned = base({
@@ -589,7 +589,7 @@ describe("composeDiagram", () => {
   });
 
   // A platter that moved without its nodes was the pre-existing rough edge
-  // Phase 3 carried: dragging a group used to slide the backdrop out from under
+  // Dragging a group used to slide the backdrop out from under
   // the components standing on it.
   it("carries a moved group's members with it, and leaves individually placed ones alone", () => {
     const laidOut = composeDiagram(grouped(), undefined);
@@ -867,7 +867,7 @@ describe("composeDiagram", () => {
   });
 });
 
-// Phase 5 slice 2: the report of an adjustment the agent's own edit orphaned.
+// The report of an adjustment the agent's own edit orphaned.
 // Compose has always skipped an unresolvable override silently — these are the
 // rules for saying so without ever calling a live adjustment stale.
 describe("composeDiagram stale overrides", () => {

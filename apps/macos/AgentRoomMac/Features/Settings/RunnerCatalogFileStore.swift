@@ -3,8 +3,7 @@ import Foundation
 /// Reads `$AGENTROOM_HOME/config/runners.json` — the runner catalog a backend
 /// that started successfully leaves beside its settings file.
 ///
-/// This is the offline half of Phase 5 of
-/// `docs/engineering/UNIVERSAL_RUNNER_BOUNDARY.md`. The settings panes edit
+/// This is the offline half of `docs/engineering/RUNNERS.md`. The settings panes edit
 /// `settings.json` **while the backend is stopped**, which is exactly when an
 /// operator is fixing why it would not start — and `runnerKind` is a picker over
 /// runners only the backend knows. So the app carries a build-time floor

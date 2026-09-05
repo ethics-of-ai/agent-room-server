@@ -1,6 +1,6 @@
 import Foundation
 
-/// The backend-served editor language catalog (Phase C). `version` is an aggregate
+/// The backend-served editor language catalog. `version` is an aggregate
 /// content hash, so it changes iff any asset changes — the client uses it plus the
 /// per-asset `sha256` values to fetch only what changed into a content-addressed
 /// cache. The inline maps (`languageMap`, `themes`, `textMateThemes`) reproduce the

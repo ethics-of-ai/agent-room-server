@@ -134,7 +134,7 @@ export async function registerSpatialSceneRoutes(
     };
   });
 
-  // The semantic edit route (Phase 6 slice 1): the import bridge's sibling,
+  // The semantic edit route is the import bridge's sibling,
   // with the identical posture — pure, deterministic compute that converts a
   // base document plus a bounded op list into new canonical `.diagram.json`
   // *text*, which the client writes itself through the existing bounded

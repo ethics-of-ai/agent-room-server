@@ -16,7 +16,7 @@ import {
  * `annotations[question].notes` for free text beside a choice; a top-level
  * `response` for free text instead of one). This module turns the tool's input
  * into minted-id sets and a batch outcome back into that shape; the runner
- * owns the wait. Verified against SDK 0.3.172 / CLI 2.1.172 (Phase 0 spike):
+ * owns the wait. Verified against SDK 0.3.172 / CLI 2.1.172:
  * the model sees `"Q"="Label" notes: …` per answered question, an omitted
  * question as absent, and `response` as `The user responded: …`.
  */

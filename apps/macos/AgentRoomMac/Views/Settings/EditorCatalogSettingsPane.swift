@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Operator surface for pushing editor language updates to connected Vision Pro
-/// editors without an app update (Phase C.5). Import copies a catalog folder's
+/// editors without an app update. Import copies a catalog folder's
 /// data into this Mac's `$AGENTROOM_HOME/catalog-assets`; the backend reloads and
 /// broadcasts the change so visionOS re-hydrates live.
 struct EditorCatalogSettingsPane: View {

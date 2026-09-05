@@ -106,7 +106,7 @@ struct ManagedSettingsFileStore {
     /// `0o600` the backend writes with.
     ///
     /// `schemaVersion` defaults to the shape this release applies. Passing the
-    /// legacy version is the **rollback** path — the file a pre-Phase-5 backend
+    /// legacy version is the rollback path: the file a version-1 backend
     /// can still read — and is deliberately explicit rather than a fallback.
     func write(
         _ settings: ManagedBackendSettings,
@@ -173,7 +173,7 @@ struct ManagedSettingsFileStore {
         return settings
     }
 
-    /// Converts the file to the flat document a pre-Phase-5 AgentRoom reads,
+    /// Converts the file to the flat document a version-1 AgentRoom reads,
     /// which is what makes running an older build a supported step rather than a
     /// one-way upgrade. Refuses a file it could not read for the same reason
     /// `update` does: it would be writing over settings it cannot see.
