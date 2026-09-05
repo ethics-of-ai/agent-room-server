@@ -382,7 +382,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(workspaceRow).toContain("dirtyBadgeText");
     expect(workspaceRow).toContain("Workspace has uncommitted changes");
     expect(sidebarRow).toContain("DashboardDesign.sidebarItemHeight");
-    expect(sidebarRow).toContain(".hoverEffect(.highlight)");
+    expect(sidebarRow).toContain(".listRowHoverEffect(.highlight)");
     expect(workspaceRow).toContain(".accessibilityLabel(Text(accessibilityLabel))");
     expect(workspaceRow).not.toContain("sessions: [AgentSession]");
     expect(workspaceRow).not.toContain("workspace.path");
