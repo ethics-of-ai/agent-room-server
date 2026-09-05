@@ -10,6 +10,8 @@
 // DATA ONLY: the backend serves `.json` + `.wasm`. The TextMate engine JS
 // (`vscode-textmate.js`, `vscode-oniguruma.js`) stays bundled in the app and is
 // never copied here, so the catalog can never serve executable language packs.
+// Grammars themselves enter the app source through the maintainer importer
+// (`import-editor-grammars.mjs`), which runs this sync as its last step.
 import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +35,11 @@ const catalogSpecs = [
   { kind: "file", src: `${appResources}/EditorThemes.json`, dest: "EditorThemes.json" },
   { kind: "file", src: `${appResources}/EditorTextMateThemes.json`, dest: "EditorTextMateThemes.json" },
   { kind: "dir", src: `${appResources}/Monaco/grammars`, dest: "grammars", onlyExts: [".json"] },
+  // Provenance and license texts travel with the grammars they cover. Neither is
+  // servable (the asset route admits only manifest-referenced .json/.wasm); they exist
+  // so the committed catalog, and the public mirror that ships it, carry attribution.
+  { kind: "file", src: `${appResources}/Monaco/grammars/PROVENANCE.md`, dest: "grammars/PROVENANCE.md" },
+  { kind: "dir", src: `${appResources}/Monaco/grammars/LICENSES`, dest: "grammars/LICENSES", onlyExts: [".txt"] },
   { kind: "dir", src: `${appResources}/Monaco/language-configs`, dest: "language-configs", onlyExts: [".json"] },
   { kind: "dir", src: `${appResources}/Monaco/vs-textmate`, dest: "vs-textmate", excludeExts: [".js"] }
 ];
@@ -87,6 +94,13 @@ export async function syncCatalogAssets({ repoRoot = defaultRepoRoot, log = () =
       "curated editor assets (`apps/visionos/AgentRoom/Resources`). Do not edit by hand —",
       "edit the app source and re-run the sync script. The backend serves these as DATA",
       "(`.json` + `.wasm`) over the flag-gated, bearer-auth'd `/api/editor/catalog` routes.",
+      "",
+      "This is the **bundled fallback** catalog (Phase C.5). At runtime the backend prefers",
+      "the operator-managed override directory (`EDITOR_CATALOG_DIR`, default",
+      "`$AGENTROOM_HOME/catalog-assets`) when it holds a manifest, and only serves this",
+      "committed directory when the override is absent/empty. The macOS Languages pane",
+      "imports into the override dir and triggers `POST /api/editor/catalog/reload`, so",
+      "operators never edit this directory directly.",
       ""
     ].join("\n")
   );

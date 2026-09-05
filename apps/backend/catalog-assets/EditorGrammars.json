@@ -1,12 +1,360 @@
 {
-  "version": 2,
+  "version": 3,
+  "schemaVersion": 2,
   "grammars": [
-    { "languageId": "swift", "scopeName": "source.swift", "grammar": "grammars/swift.tmLanguage.json", "languageConfig": "language-configs/swift.json" },
-    { "languageId": "typescript", "scopeName": "source.tsx", "grammar": "grammars/typescriptreact.tmLanguage.json", "languageConfig": "language-configs/typescript.json" },
-    { "languageId": "javascript", "scopeName": "source.js", "grammar": "grammars/javascript.tmLanguage.json", "languageConfig": "language-configs/javascript.json" },
-    { "languageId": "json", "scopeName": "source.json", "grammar": "grammars/json.tmLanguage.json", "languageConfig": "language-configs/json.json" },
-    { "languageId": "markdown", "scopeName": "text.html.markdown", "grammar": "grammars/markdown.tmLanguage.json", "languageConfig": "language-configs/markdown.json" },
-    { "languageId": "yaml", "scopeName": "source.yaml", "grammar": "grammars/yaml.tmLanguage.json", "languageConfig": "language-configs/yaml.json" },
-    { "languageId": "shell", "scopeName": "source.shell", "grammar": "grammars/shell.tmLanguage.json", "languageConfig": "language-configs/shell.json" }
+    {
+      "languageId": "swift",
+      "scopeName": "source.swift",
+      "grammar": "grammars/swift.tmLanguage.json",
+      "languageConfig": "language-configs/swift.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/swift/syntaxes/swift.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "typescript",
+      "scopeName": "source.ts",
+      "grammar": "grammars/typescript.tmLanguage.json",
+      "languageConfig": "language-configs/typescript.json",
+      "injectionScopes": [
+        "documentation.injection.ts"
+      ],
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/typescript-basics/syntaxes/TypeScript.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "typescriptreact",
+      "scopeName": "source.tsx",
+      "grammar": "grammars/typescriptreact.tmLanguage.json",
+      "languageConfig": "language-configs/typescript.json",
+      "injectionScopes": [
+        "documentation.injection.ts"
+      ],
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/typescript-basics/syntaxes/TypeScriptReact.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "javascript",
+      "scopeName": "source.js",
+      "grammar": "grammars/javascript.tmLanguage.json",
+      "languageConfig": "language-configs/javascript.json",
+      "injectionScopes": [
+        "documentation.injection.js.jsx"
+      ],
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/javascript/syntaxes/JavaScript.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "json",
+      "scopeName": "source.json",
+      "grammar": "grammars/json.tmLanguage.json",
+      "languageConfig": "language-configs/json.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/json/syntaxes/JSON.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "markdown",
+      "scopeName": "text.html.markdown",
+      "grammar": "grammars/markdown.tmLanguage.json",
+      "languageConfig": "language-configs/markdown.json",
+      "embeddedLanguages": {
+        "meta.embedded.block.html": "html",
+        "meta.embedded.block.css": "css",
+        "meta.embedded.block.javascript": "javascript",
+        "meta.embedded.block.typescript": "typescript",
+        "meta.embedded.block.typescriptreact": "typescriptreact",
+        "meta.embedded.block.json": "json",
+        "meta.embedded.block.yaml": "yaml",
+        "meta.embedded.block.frontmatter": "yaml",
+        "meta.embedded.block.shellscript": "shell",
+        "meta.embedded.block.vue": "vue",
+        "source.js": "javascript",
+        "source.css": "css"
+      },
+      "injectionScopes": [
+        "markdown.vue.codeblock",
+        "vue.directives",
+        "vue.interpolations"
+      ],
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/markdown-basics/syntaxes/markdown.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "yaml",
+      "scopeName": "source.yaml",
+      "grammar": "grammars/yaml.tmLanguage.json",
+      "languageConfig": "language-configs/yaml.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/yaml/syntaxes/yaml.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "shell",
+      "scopeName": "source.shell",
+      "grammar": "grammars/shell.tmLanguage.json",
+      "languageConfig": "language-configs/shell.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/shellscript/syntaxes/shell-unix-bash.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "html",
+      "scopeName": "text.html.derivative",
+      "grammar": "grammars/html-derivative.tmLanguage.json",
+      "languageConfig": "language-configs/html.json",
+      "embeddedLanguages": {
+        "source.css": "css",
+        "source.js": "javascript"
+      },
+      "injectionScopes": [
+        "vue.directives",
+        "vue.interpolations"
+      ],
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/html/syntaxes/html-derivative.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "css",
+      "scopeName": "source.css",
+      "grammar": "grammars/css.tmLanguage.json",
+      "languageConfig": "language-configs/css.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/css/syntaxes/css.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "vue",
+      "scopeName": "text.html.vue",
+      "grammar": "grammars/vue.tmLanguage.json",
+      "languageConfig": "language-configs/vue.json",
+      "embeddedLanguages": {
+        "text.html.derivative": "html",
+        "text.html.markdown": "markdown",
+        "source.css": "css",
+        "source.js": "javascript",
+        "source.ts": "typescript",
+        "source.tsx": "typescriptreact",
+        "source.json": "json",
+        "source.yaml": "yaml"
+      },
+      "injectionScopes": [
+        "vue.directives",
+        "vue.interpolations",
+        "vue.sfc.script.leading-operator-fix",
+        "vue.sfc.style.variable.injection"
+      ],
+      "provenance": {
+        "family": "vue",
+        "source": "github.com/vuejs/language-tools@v3.3.11/extensions/vscode/syntaxes/vue.tmLanguage.json",
+        "version": "v3.3.11",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "mdx",
+      "scopeName": "source.mdx",
+      "grammar": "grammars/mdx.tmLanguage.json",
+      "languageConfig": "language-configs/mdx.json",
+      "embeddedLanguages": {
+        "meta.embedded.js": "javascript",
+        "meta.embedded.ts": "typescript",
+        "meta.embedded.tsx": "typescriptreact",
+        "meta.embedded.css": "css",
+        "meta.embedded.html": "html",
+        "meta.embedded.json": "json",
+        "meta.embedded.yaml": "yaml",
+        "meta.embedded.md": "markdown",
+        "meta.embedded.shell": "shell",
+        "meta.embedded.swift": "swift",
+        "mdx.embedded.vue": "vue"
+      },
+      "injectionScopes": [
+        "mdx.vue.codeblock"
+      ],
+      "provenance": {
+        "family": "mdx",
+        "source": "github.com/shikijs/textmate-grammars-themes@9cb89363457c4009bbacb5208198112901b63b10/packages/tm-grammars/grammars/mdx.json",
+        "version": "9cb89363457c4009bbacb5208198112901b63b10",
+        "license": "MIT"
+      }
+    }
+  ],
+  "scopeGrammars": [
+    {
+      "scopeName": "documentation.injection.ts",
+      "grammar": "grammars/jsdoc-ts-injection.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/typescript-basics/syntaxes/jsdoc.ts.injection.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "documentation.injection.js.jsx",
+      "grammar": "grammars/jsdoc-js-injection.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/typescript-basics/syntaxes/jsdoc.js.injection.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.yaml.1.0",
+      "grammar": "grammars/yaml-1.0.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/yaml/syntaxes/yaml-1.0.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.yaml.1.1",
+      "grammar": "grammars/yaml-1.1.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/yaml/syntaxes/yaml-1.1.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.yaml.1.2",
+      "grammar": "grammars/yaml-1.2.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/yaml/syntaxes/yaml-1.2.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.yaml.1.3",
+      "grammar": "grammars/yaml-1.3.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/yaml/syntaxes/yaml-1.3.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.yaml.embedded",
+      "grammar": "grammars/yaml-embedded.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/yaml/syntaxes/yaml-embedded.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "text.html.basic",
+      "grammar": "grammars/html.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/html/syntaxes/html.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "vue.directives",
+      "grammar": "grammars/vue-directives.tmLanguage.json",
+      "provenance": {
+        "family": "vue",
+        "source": "github.com/vuejs/language-tools@v3.3.11/extensions/vscode/syntaxes/vue-directives.json",
+        "version": "v3.3.11",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "vue.interpolations",
+      "grammar": "grammars/vue-interpolations.tmLanguage.json",
+      "provenance": {
+        "family": "vue",
+        "source": "github.com/vuejs/language-tools@v3.3.11/extensions/vscode/syntaxes/vue-interpolations.json",
+        "version": "v3.3.11",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "vue.sfc.script.leading-operator-fix",
+      "grammar": "grammars/vue-sfc-script-leading-operator-fix.tmLanguage.json",
+      "provenance": {
+        "family": "vue",
+        "source": "github.com/vuejs/language-tools@v3.3.11/extensions/vscode/syntaxes/vue-sfc-script-leading-operator-fix.json",
+        "version": "v3.3.11",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "vue.sfc.style.variable.injection",
+      "grammar": "grammars/vue-sfc-style-variable-injection.tmLanguage.json",
+      "provenance": {
+        "family": "vue",
+        "source": "github.com/vuejs/language-tools@v3.3.11/extensions/vscode/syntaxes/vue-sfc-style-variable-injection.json",
+        "version": "v3.3.11",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "markdown.vue.codeblock",
+      "grammar": "grammars/markdown-vue.tmLanguage.json",
+      "provenance": {
+        "family": "vue",
+        "source": "github.com/vuejs/language-tools@v3.3.11/extensions/vscode/syntaxes/markdown-vue.json",
+        "version": "v3.3.11",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "mdx.vue.codeblock",
+      "grammar": "grammars/mdx-vue.tmLanguage.json",
+      "provenance": {
+        "family": "vue",
+        "source": "github.com/vuejs/language-tools@v3.3.11/extensions/vscode/syntaxes/mdx-vue.json",
+        "version": "v3.3.11",
+        "license": "MIT"
+      }
+    }
   ]
 }

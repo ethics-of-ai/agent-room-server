@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "paths": {
+      "next/server": ["types/next-server.d.ts"]
+    },
+    "strict": true
+  },
+  "include": ["src", "types"]
+}

@@ -1,17 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { LspStdioClient } from "./support/LspStdioClient";
-
-/// SPIKE (2026-06-19) D0 — LSP feasibility. Proves the AgentRoom backend can host a
-/// real language server (sourcekit-lsp, dogfooding this repo's Swift) and round-trip
-/// LSP requests bounded to a workspace root, over the minimal stdio transport.
-///
-/// Skipped automatically where sourcekit-lsp is unavailable (no Xcode toolchain), so
-/// `pnpm test` stays green on machines without it.
 
 function resolveSourcekitLsp(): string | null {
   try {
@@ -23,84 +16,215 @@ function resolveSourcekitLsp(): string | null {
 }
 
 const sourcekitLspPath = resolveSourcekitLsp();
+const typescriptLspPath = resolve(__dirname, "../node_modules/.bin/typescript-language-server");
 
-describe("LspStdioClient (D0 sourcekit-lsp feasibility)", () => {
-  it.skipIf(sourcekitLspPath === null)(
-    "initializes sourcekit-lsp and round-trips a request bounded to a workspace root",
-    async () => {
-      const root = mkdtempSync(join(tmpdir(), "agentroom-lsp-d0-"));
-      const filePath = join(root, "Sample.swift");
-      writeFileSync(
-        filePath,
-        [
-          "struct Sample {",
-          "    let id: Int = 1",
-          "    func greet() -> String { \"hi \\(id)\" }",
-          "}",
-          ""
-        ].join("\n"),
-        "utf8"
-      );
+const capabilities = {
+  general: { positionEncodings: ["utf-16"] },
+  workspace: { configuration: true, workspaceFolders: true },
+  window: { workDoneProgress: true },
+  textDocument: {
+    publishDiagnostics: { relatedInformation: true, versionSupport: true },
+    completion: { dynamicRegistration: false },
+    hover: { dynamicRegistration: false, contentFormat: ["markdown", "plaintext"] },
+    definition: { dynamicRegistration: false },
+    documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
+    semanticTokens: {
+      dynamicRegistration: false,
+      requests: { full: true, range: false },
+      tokenTypes: [
+        "namespace", "type", "class", "enum", "interface", "struct", "typeParameter",
+        "parameter", "variable", "property", "enumMember", "event", "function", "method",
+        "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator",
+        "decorator"
+      ],
+      tokenModifiers: [
+        "declaration", "definition", "readonly", "static", "deprecated", "abstract", "async",
+        "modification", "documentation", "defaultLibrary"
+      ],
+      formats: ["relative"]
+    }
+  }
+};
 
-      const client = new LspStdioClient(sourcekitLspPath as string, [], root);
-      const diagnosticsNotifications: unknown[] = [];
-      client.onNotification((method, params) => {
-        if (method === "textDocument/publishDiagnostics") diagnosticsNotifications.push(params);
-      });
+interface Fixture {
+  root: string;
+  filePath: string;
+  languageId: string;
+  text: string;
+  positions: Record<"completion" | "hover" | "definition", { line: number; character: number }>;
+}
 
-      try {
-        // 1) initialize handshake bounded to the workspace root (the production
-        //    rootUri is the registered workspace).
-        const initResult = (await client.request(
-          "initialize",
-          {
-            processId: process.pid,
-            rootUri: pathToFileURL(root).toString(),
-            capabilities: {},
-            workspaceFolders: null
-          },
-          20_000
-        )) as { capabilities?: Record<string, unknown> } | null;
+function diagnosticsAfterOpen(client: LspStdioClient, timeoutMs = 10_000): Promise<unknown> {
+  return new Promise((resolveValue, reject) => {
+    const timer = setTimeout(() => {
+      remove();
+      reject(new Error("publishDiagnostics timed out"));
+    }, timeoutMs);
+    timer.unref();
+    const remove = client.onNotification((method, params) => {
+      if (method !== "textDocument/publishDiagnostics") return;
+      clearTimeout(timer);
+      remove();
+      resolveValue(params);
+    });
+  });
+}
 
-        expect(initResult).toBeTruthy();
-        expect(initResult?.capabilities).toBeTruthy();
-
-        client.notify("initialized", {});
-
-        // 2) open the document; its text is the buffer the editor would hold.
-        const uri = pathToFileURL(filePath).toString();
-        client.notify("textDocument/didOpen", {
-          textDocument: { uri, languageId: "swift", version: 1, text: readFileSync(filePath, "utf8") }
-        });
-
-        // 3) request/response round-trip. documentSymbol is syntactic, so it works
-        //    without a full SwiftPM build context. Resolving within the timeout
-        //    (vs. throwing) is itself the proof that framing + id-correlation work.
-        const symbols = await client.request(
-          "textDocument/documentSymbol",
-          { textDocument: { uri } },
-          20_000
-        );
-        expect(symbols === null || Array.isArray(symbols)).toBe(true);
-
-        // Evidence in the run output (not asserted: standalone-file semantics vary).
-        const symbolCount = Array.isArray(symbols) ? symbols.length : 0;
-        // eslint-disable-next-line no-console
-        console.info(
-          `[D0] sourcekit-lsp round-trip OK — documentSymbol=${symbolCount}, ` +
-            `publishDiagnostics notifications=${diagnosticsNotifications.length}`
-        );
-      } finally {
-        try {
-          await client.request("shutdown", null, 3_000);
-        } catch {
-          // best-effort; we SIGKILL below regardless
-        }
-        client.notify("exit", null);
-        client.dispose();
-        rmSync(root, { recursive: true, force: true });
+async function exerciseServer(command: string, args: string[], fixture: Fixture): Promise<void> {
+  const client = new LspStdioClient(command, args, fixture.root, {
+    serverRequestHandler: (method, params) => {
+      if (method === "window/workDoneProgress/create") return null;
+      if (method === "workspace/configuration") {
+        return ((params as { items?: unknown[] })?.items ?? []).map(() => null);
       }
-    },
-    40_000
-  );
+      throw new Error("unadmitted server request");
+    }
+  });
+  const uri = pathToFileURL(fixture.filePath).toString();
+
+  try {
+    const initialized = (await client.request("initialize", {
+      processId: process.pid,
+      rootUri: pathToFileURL(fixture.root).toString(),
+      workspaceFolders: [{ uri: pathToFileURL(fixture.root).toString(), name: "fixture" }],
+      capabilities
+    }, 20_000)) as { capabilities?: Record<string, unknown> };
+    expect(initialized.capabilities).toBeTruthy();
+    expect(initialized.capabilities?.completionProvider).toBeTruthy();
+    expect(initialized.capabilities?.definitionProvider).toBeTruthy();
+    expect(initialized.capabilities?.semanticTokensProvider).toBeTruthy();
+
+    client.notify("initialized", {});
+    const diagnostics = diagnosticsAfterOpen(client);
+    client.notify("textDocument/didOpen", {
+      textDocument: {
+        uri,
+        languageId: fixture.languageId,
+        version: 1,
+        text: readFileSync(fixture.filePath, "utf8")
+      }
+    });
+    const textDocument = { uri };
+    const completion = await client.request("textDocument/completion", {
+      textDocument,
+      position: fixture.positions.completion,
+      context: { triggerKind: 1 }
+    }, 20_000);
+    const hover = await client.request("textDocument/hover", {
+      textDocument,
+      position: fixture.positions.hover
+    }, 20_000);
+    const definition = await client.request("textDocument/definition", {
+      textDocument,
+      position: fixture.positions.definition
+    }, 20_000);
+    const symbols = await client.request("textDocument/documentSymbol", { textDocument }, 20_000);
+    const tokens = await client.request("textDocument/semanticTokens/full", { textDocument }, 20_000);
+
+    expect(completion).toBeTruthy();
+    expect(hover).toBeTruthy();
+    expect(Array.isArray(definition) ? definition.length : definition).toBeTruthy();
+    expect(Array.isArray(symbols)).toBe(true);
+    expect(tokens).toBeTruthy();
+    expect(await diagnostics).toBeTruthy();
+
+    const cancelled = client.requestWithHandle("workspace/symbol", { query: "Greeter" }, 5_000);
+    client.cancelRequest(cancelled.id);
+    await cancelled.promise.catch(() => null);
+    expect(client.wireStats.inboundFrames).toBeGreaterThan(0);
+    expect(client.wireStats.largestInboundPayloadBytes).toBeGreaterThan(0);
+    expect(client.observedServerRequestMethods.every((method) => [
+      "window/workDoneProgress/create",
+      "workspace/configuration"
+    ].includes(method))).toBe(true);
+
+    client.notify("textDocument/didClose", { textDocument });
+    await client.request("shutdown", null, 3_000);
+    client.notify("exit", null);
+    await expect(client.waitForExit(3_000)).resolves.toMatchObject({ code: 0 });
+  } finally {
+    client.dispose();
+  }
+}
+
+function swiftFixture(): Fixture {
+  const root = mkdtempSync(join(tmpdir(), "agentroom-sourcekit-project-"));
+  const filePath = join(root, "Sources", "Fixture", "Greeter.swift");
+  const text = [
+    "public struct Greeter {",
+    "    public let message: String",
+    "    public init(message: String) { self.message = message }",
+    "    public func greet() -> String { message.uppercased() }",
+    "}",
+    "public func sample() {",
+    "    let value = Greeter(message: \"hello\")",
+    "    value.",
+    "}",
+    ""
+  ].join("\n");
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(join(root, "Package.swift"), [
+    "// swift-tools-version: 6.0",
+    "import PackageDescription",
+    "let package = Package(name: \"Fixture\", targets: [.target(name: \"Fixture\")])",
+    ""
+  ].join("\n"));
+  writeFileSync(filePath, text);
+  return {
+    root,
+    filePath,
+    languageId: "swift",
+    text,
+    positions: {
+      completion: { line: 7, character: 10 },
+      hover: { line: 6, character: 18 },
+      definition: { line: 6, character: 18 }
+    }
+  };
+}
+
+function typescriptFixture(): Fixture {
+  const root = mkdtempSync(join(tmpdir(), "agentroom-typescript-project-"));
+  const filePath = join(root, "src", "index.ts");
+  const text = [
+    "export function greet(name: string): string { return `Hello ${name}`; }",
+    "const message = greet(\"World\");",
+    "const broken: number = \"wrong\";",
+    "message.",
+    ""
+  ].join("\n");
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(join(root, "tsconfig.json"), "{\"compilerOptions\":{\"strict\":true},\"include\":[\"src\"]}\n");
+  writeFileSync(filePath, text);
+  return {
+    root,
+    filePath,
+    languageId: "typescript",
+    text,
+    positions: {
+      completion: { line: 3, character: 8 },
+      hover: { line: 1, character: 18 },
+      definition: { line: 1, character: 18 }
+    }
+  };
+}
+
+describe("LspStdioClient live Phase 0 compatibility", () => {
+  it.skipIf(sourcekitLspPath === null)("exercises the frozen feature set against SourceKit-LSP", async () => {
+    const fixture = swiftFixture();
+    try {
+      await exerciseServer(sourcekitLspPath as string, [], fixture);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }, 40_000);
+
+  it("exercises the same feature set against the pinned TypeScript service", async () => {
+    const fixture = typescriptFixture();
+    try {
+      await exerciseServer(typescriptLspPath, ["--stdio"], fixture);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }, 40_000);
 });

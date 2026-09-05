@@ -39,7 +39,7 @@ flowchart TB
 
 | Path | Contents |
 | --- | --- |
-| `apps/backend` | Fastify API, workspace registry, sessions and turns, runner adapters, events, audit, file access, Git operations, terminal sessions, spatial document composition |
+| `apps/backend` | Fastify API, workspace registry, sessions and turns, runner adapters, opt-in editor language services, events, audit, file access, Git operations, terminal sessions, spatial document composition |
 | `apps/macos` | SwiftUI operator app: backend supervision, runner setup, Keychain storage, workspace registration, managed settings, diagnostics |
 | `apps/shared/AgentRoomClient` | Swift API contracts and REST client code compiled into the Apple apps |
 | `scripts` | DMG packaging and local install |
@@ -55,7 +55,11 @@ entry move and copy, and bounded
 file/folder deletion; Git status, branches,
 staging, discard, commit, fetch, fast-forward pull, push, and branch creation
 through fixed operations; an optional terminal that opens a real shell on the
-Mac (off by default); live SVG and Mermaid sketches; and composition of
+Mac (off by default); an optional closed backend protocol for Mac-hosted
+SourceKit-LSP, bundled TypeScript/JavaScript and Python, and operator-installed
+Rust, Go, Java, Kotlin, and C# semantics, plus separately gated external LSP
+descriptors (off by default); live SVG and Mermaid
+sketches; and composition of
 `*.diagram.json` and `*.scene.json` spatial documents with their human override
 layers.
 
@@ -217,8 +221,16 @@ repository you did not write:
   unless `CURSOR_LOAD_WORKSPACE_SETTINGS` is off.
 - The optional terminal is off by default. On, it is a real shell on the Mac,
   unsandboxed after launch.
+- Editor language services are off by default. Their processes may inspect SDKs,
+  language environments, project state, or plugins and may invoke ecosystem
+  build tools, so enable them only for trusted registered projects. Optional
+  Rust, Go, Java, Kotlin, and C# servers require absolute environment-only
+  executable paths; the backend never searches `PATH` for them. External LSP
+  descriptors require a second default-off gate, use fixed argv, and cannot
+  shadow a built-in language id. A stalled language server cannot retain
+  unbounded editor updates: queued input is capped at 4 MiB per child.
 - The backend binds to the LAN by default. Set `AUTH_TOKEN` before connecting a
-  second device or enabling the terminal.
+  second device or enabling the terminal or editor language services.
 
 Workspace reads stay registered-folder-only, bounded, symlink-checked, and
 secret-name filtered. The one client write is a bounded UTF-8 file endpoint with

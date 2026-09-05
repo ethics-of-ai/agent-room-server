@@ -33,8 +33,8 @@ each package carrying its own license file in its directory:
 
 | License | Packages |
 | --- | --- |
-| MIT | 143 packages, including `fastify` and the `@fastify/*` plugins, `@anthropic-ai/sdk`, `node-pty`, `pino`, `zod`, `@babel/runtime` |
-| Apache-2.0 | `@connectrpc/connect`, `@connectrpc/connect-node`, `@connectrpc/connect-web` (the Cursor SDK's RPC client) |
+| MIT | 148 packages, including `fastify` and the `@fastify/*` plugins, `@anthropic-ai/sdk`, `node-pty`, `pino`, `pyright`, `zod`, `@babel/runtime` |
+| Apache-2.0 | `@connectrpc/connect`, `@connectrpc/connect-node`, `@connectrpc/connect-web` (the Cursor SDK's RPC client), `typescript`, `typescript-language-server` |
 | Apache-2.0 AND BSD-3-Clause | `@bufbuild/protobuf` |
 | BSD-2-Clause | `dotenv`, `json-schema-typed` |
 | BSD-3-Clause | `fast-uri`, `light-my-request`, `qs`, `secure-json-parse` |
@@ -47,6 +47,22 @@ each package carrying its own license file in its directory:
 The package step copies the pnpm virtual store as installed, so a build may
 also carry development tooling alongside the production set. Those packages
 keep their license files in their own directories too.
+
+## TypeScript language service
+
+The optional editor language-service process uses
+`typescript-language-server` 5.3.0 and TypeScript 5.9.3. Both are distributed
+under Apache-2.0, remain unmodified, and retain their package license files in
+the application bundle. AgentRoom pins them as production dependencies so the
+packaged server uses the same tested implementation as development and CI.
+
+## Pyright language service
+
+The optional Python editor language-service process uses Pyright 1.1.413.
+Pyright is distributed under MIT, remains unmodified, and retains its package
+license file in the application bundle. AgentRoom pins it as a production
+dependency so the packaged server uses the same tested implementation as
+development and CI.
 
 ## Claude Agent SDK and Claude Code
 
@@ -106,13 +122,33 @@ records that as the one open licensing item.
 
 `AgentRoom.app/Contents/Resources/backend/catalog-assets` holds the TextMate
 grammars, language configurations, themes, and the Oniguruma WebAssembly module
-the backend serves to editor clients. The grammars and language configurations
-are redistributed from `microsoft/vscode` (MIT), each pointing at its canonical
-upstream grammar repository; `onig.wasm` comes from `vscode-oniguruma` (MIT,
-built on Oniguruma, BSD). The exact versions, source paths, and license texts
-are in
-[`apps/backend/catalog-assets/vs-textmate/PROVENANCE.md`](apps/backend/catalog-assets/vs-textmate/PROVENANCE.md)
-and the `*.LICENSE.*` files beside it; see also
+the backend serves to editor clients. The bundled third-party syntax data is:
+
+- grammars and language configurations from `microsoft/vscode`, under MIT;
+- Vue grammars and its language configuration from `vuejs/language-tools`,
+  under MIT;
+- the MDX grammar copied as JSON from `shikijs/textmate-grammars-themes`, with
+  the grammar's MIT terms from `wooorm/markdown-tm-language`; and
+- the MDX language configuration from `mdx-js/mdx-analyzer`, under MIT.
+
+The exact refs and source paths are in
+[`apps/backend/catalog-assets/grammars/PROVENANCE.md`](apps/backend/catalog-assets/grammars/PROVENANCE.md).
+The complete terms travel with the catalog as
+[`vscode.txt`](apps/backend/catalog-assets/grammars/LICENSES/vscode.txt),
+[`vue.txt`](apps/backend/catalog-assets/grammars/LICENSES/vue.txt),
+[`mdx.txt`](apps/backend/catalog-assets/grammars/LICENSES/mdx.txt), and
+[`mdx-analyzer.txt`](apps/backend/catalog-assets/grammars/LICENSES/mdx-analyzer.txt).
+
+`onig.wasm` comes from `vscode-oniguruma` and is used by `vscode-textmate`.
+Their versions and source paths are in
+[`apps/backend/catalog-assets/vs-textmate/PROVENANCE.md`](apps/backend/catalog-assets/vs-textmate/PROVENANCE.md),
+with the complete
+[`vscode-oniguruma` license](apps/backend/catalog-assets/vs-textmate/vscode-oniguruma.LICENSE.txt)
+and
+[`vscode-textmate` license](apps/backend/catalog-assets/vs-textmate/vscode-textmate.LICENSE.md)
+beside it. `vscode-oniguruma` is MIT and retains the BSD terms of the Oniguruma
+project it builds on. The AgentRoom themes are part of this repository and use
+its MIT license. See also
 [`apps/backend/catalog-assets/README.md`](apps/backend/catalog-assets/README.md).
 
 ## Everything else

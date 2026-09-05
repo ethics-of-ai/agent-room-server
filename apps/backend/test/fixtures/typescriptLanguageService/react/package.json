@@ -1,0 +1,7 @@
+{
+  "name": "agentroom-react-fixture",
+  "private": true,
+  "dependencies": {
+    "react": "fixture"
+  }
+}

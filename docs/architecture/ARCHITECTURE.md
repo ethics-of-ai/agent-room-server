@@ -205,6 +205,19 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime / Cursor
   `EDITOR_CATALOG_DIR` (operator override) else the bundled `catalog-assets`;
   clients verify each blob's `sha256` and fall back to bundled assets. The channel
   is gated by `LANGUAGE_CATALOG_ENABLED`.
+- Mac-hosted editor semantics use a separate `EditorLanguageService` boundary,
+  not `AgentRunner` or the syntax catalog. A descriptor registry selects the
+  fixed SourceKit-LSP, bundled TypeScript or Pyright, or optional configured
+  rust-analyzer, gopls, Eclipse JDT LS, Kotlin LSP, or csharp-ls adapter from the
+  document language and a deterministic, workspace-bounded project root. A
+  second default-off gate may add whole-list-validated `external_lsp_*`
+  descriptors for language ids no built-in claims; they use the same adapter,
+  host, and closed client protocol. The
+  host owns process instances, in-memory
+  document shadows and path leases, UTF-16/version mapping, cancellation, idle
+  close, and bounded crash replay. Its probe-free registry read is always
+  present; the closed, bearer-authenticated workspace WebSocket and child
+  execution exist only when `LANGUAGE_SERVICES_ENABLED` is on (default off).
 - The spatial render engine (gated by `SCENE_ENGINE_ENABLED`, default on) is a
   **scene-as-data** channel for human-in-the-loop 3D co-editing. Geometry-first
   scenes use `<name>.scene.json`; semantic solution diagrams use
@@ -377,6 +390,10 @@ local Codex app-server / Claude Code session / DeepSeek Harness runtime / Cursor
   on socket close / idle / shutdown. It is **unsandboxed once running** — the
   client-driven analog of the Claude Code `bypassPermissions` posture — and never
   logs shell I/O. See `docs/safety/TRUST_AND_SAFETY.md`.
+- The editor language-service WebSocket is the other workspace-scoped execution
+  protocol. It accepts only bounded document synchronization and five named
+  semantic features; it is not a raw LSP tunnel. `/api/events` remains the only
+  broadcast event socket.
 
 ## Runtime Flow
 

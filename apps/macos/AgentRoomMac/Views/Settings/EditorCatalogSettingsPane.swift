@@ -17,20 +17,12 @@ struct EditorCatalogSettingsPane: View {
                 )
             }
 
-            Section("Status") {
-                if let status = supervisor.editorCatalogStatus {
-                    LabeledContent("Serving", value: sourceLabel(status.source))
-                    LabeledContent("Languages", value: "\(status.languageCount)")
-                    if let version = status.version {
-                        LabeledContent("Version", value: String(version.prefix(12)))
-                    }
-                } else {
-                    SettingsCaption(text: "Start the backend to load editor catalog status.", systemImage: "questionmark.circle")
-                }
-                if let action = supervisor.editorCatalogActionStatus {
-                    StatusMessageRow(message: action.message, style: action.style)
-                }
-            }
+            EditorCatalogStatusSection(
+                status: supervisor.editorCatalogStatus,
+                actionStatus: supervisor.editorCatalogActionStatus
+            )
+
+            LanguageServiceStatusSection()
 
             Section("Actions") {
                 Button("Import Catalog Folder…", systemImage: "square.and.arrow.down", action: importCatalog)
@@ -49,17 +41,10 @@ struct EditorCatalogSettingsPane: View {
                     systemImage: "folder"
                 )
             }
+            .disabled(supervisor.isEditorCatalogActionRunning)
         }
         .formStyle(.grouped)
-        .task { await supervisor.refreshEditorCatalogStatus() }
-    }
-
-    private func sourceLabel(_ source: EditorCatalogSource) -> String {
-        switch source {
-        case .overrideDir: "Imported catalog (this Mac)"
-        case .bundled: "Bundled catalog (built-in)"
-        case .none: "No catalog"
-        }
+        .task { await supervisor.refreshEditorLanguageStatus() }
     }
 
     private func importCatalog() {

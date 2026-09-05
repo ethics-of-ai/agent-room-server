@@ -1,0 +1,671 @@
+{
+  "$comment": "Representative corpus for every TextMate language the editor catalog ships. The backend suite tokenizes each fixture through the served catalog with the vendored engine; the visionOS render suite pushes the same catalog into the real editor page and reads the same tokens back. An `expect` entry names a 0-based line, the exact text of one token on it, and scope names that token's scope list must contain. An `expectLanguage` entry names the Monaco language id the token's encoded metadata must carry, which only the page can check.",
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "languageId": "swift",
+      "title": "Swift struct with a documented method",
+      "text": "import Foundation\n/// Doc\nstruct Greeter {\n    let message: String = \"hi\"\n    func greet(times: Int) -> String { return message }\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "import",
+          "scopes": [
+            "keyword.control.import.swift"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "///",
+          "scopes": [
+            "comment.line.triple-slash.documentation.swift"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "struct",
+          "scopes": [
+            "storage.type.struct.swift"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Greeter",
+          "scopes": [
+            "entity.name.type.struct.swift"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.single-line.swift"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "func",
+          "scopes": [
+            "storage.type.function.swift"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "greet",
+          "scopes": [
+            "entity.name.function.swift"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "return",
+          "scopes": [
+            "keyword.control.transfer.swift"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "typescript",
+      "title": "TypeScript with a JSDoc block that the documentation injection tokenizes",
+      "text": "/** @param value the value */\nexport function f(value: number): void {}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "param",
+          "scopes": [
+            "comment.block.documentation.ts",
+            "storage.type.class.jsdoc"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "value",
+          "scopes": [
+            "variable.other.jsdoc"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "export",
+          "scopes": [
+            "keyword.control.export.ts"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "f",
+          "scopes": [
+            "entity.name.function.ts"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "number",
+          "scopes": [
+            "support.type.primitive.ts"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "typescriptreact",
+      "title": "TSX mixing JSX tags, embedded expressions, JSDoc, and a template literal",
+      "text": "const App = () => <div className=\"x\">{value}</div>;\n/** @param x the value */\nfunction f(x: number): string { return `${x}`; }\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "div",
+          "scopes": [
+            "meta.tag.tsx",
+            "entity.name.tag.tsx"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "className",
+          "scopes": [
+            "meta.tag.attributes.tsx",
+            "entity.other.attribute-name.tsx"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "value",
+          "scopes": [
+            "meta.jsx.children.tsx",
+            "meta.embedded.expression.tsx",
+            "variable.other.readwrite.tsx"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "param",
+          "scopes": [
+            "comment.block.documentation.tsx",
+            "storage.type.class.jsdoc"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "return",
+          "scopes": [
+            "keyword.control.flow.tsx"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "${",
+          "scopes": [
+            "string.template.tsx",
+            "punctuation.definition.template-expression.begin.tsx"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "javascript",
+      "title": "JavaScript with JSDoc, an async function, and JSX",
+      "text": "/** @param value the value */\nexport async function f(value) { return `${value}`; }\nconst el = <div className=\"x\">{value}</div>;\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "param",
+          "scopes": [
+            "comment.block.documentation.js",
+            "storage.type.class.jsdoc"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "async",
+          "scopes": [
+            "storage.modifier.async.js"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "f",
+          "scopes": [
+            "entity.name.function.js"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "div",
+          "scopes": [
+            "meta.tag.js",
+            "entity.name.tag.js"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "className",
+          "scopes": [
+            "entity.other.attribute-name.js"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "json",
+      "title": "JSON object with a boolean, a number, and a string",
+      "text": "{\n  \"enabled\": true,\n  \"count\": 2,\n  \"name\": \"demo\"\n}\n",
+      "expect": [
+        {
+          "line": 1,
+          "token": "enabled",
+          "scopes": [
+            "support.type.property-name.json"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "true",
+          "scopes": [
+            "constant.language.json"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "2",
+          "scopes": [
+            "constant.numeric.json"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "demo",
+          "scopes": [
+            "string.quoted.double.json"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "markdown",
+      "title": "Markdown with a JavaScript fence and a Vue fence supplied by the injected grammar",
+      "text": "# H\n\n```js\nconst x = 1;\n```\n\n```vue\n<template><div v-if=\"ok\"></div></template>\n```\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "H",
+          "scopes": [
+            "heading.1.markdown",
+            "entity.name.section.markdown"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "js",
+          "scopes": [
+            "fenced_code.block.language.markdown"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "const",
+          "scopes": [
+            "meta.embedded.block.javascript",
+            "storage.type.js"
+          ]
+        },
+        {
+          "line": 7,
+          "token": "template",
+          "scopes": [
+            "markup.fenced_code.block.markdown",
+            "entity.name.tag.template.html.vue"
+          ]
+        },
+        {
+          "line": 7,
+          "token": "v-if",
+          "scopes": [
+            "keyword.control.conditional.vue"
+          ]
+        }
+      ],
+      "expectLanguage": [
+        {
+          "line": 3,
+          "token": "const",
+          "languageId": "javascript"
+        },
+        {
+          "line": 0,
+          "token": "H",
+          "languageId": "markdown"
+        }
+      ]
+    },
+    {
+      "languageId": "mdx",
+      "title": "MDX with an ESM import, a heading, inline JSX, and a JavaScript fence",
+      "text": "import Chart from './chart'\n\n# Title\n\nSome *text* with <Chart data={[1, 2]} />\n\n```js\nconst x = 1\n```\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "import",
+          "scopes": [
+            "meta.embedded.tsx",
+            "keyword.control.import.tsx"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Title",
+          "scopes": [
+            "markup.heading.atx.1.mdx",
+            "entity.name.section.mdx"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "Chart",
+          "scopes": [
+            "support.class.component.jsx"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "data",
+          "scopes": [
+            "entity.other.attribute-name.tsx"
+          ]
+        },
+        {
+          "line": 7,
+          "token": "const",
+          "scopes": [
+            "meta.embedded.js",
+            "storage.type.js"
+          ]
+        }
+      ],
+      "expectLanguage": [
+        {
+          "line": 0,
+          "token": "import",
+          "languageId": "typescriptreact"
+        },
+        {
+          "line": 7,
+          "token": "const",
+          "languageId": "javascript"
+        }
+      ]
+    },
+    {
+      "languageId": "html",
+      "title": "HTML with embedded CSS and JavaScript plus an injected Vue directive and interpolation",
+      "text": "<!doctype html>\n<div class=\"a\" v-if=\"ok\">{{ name }}</div>\n<style>.a { color: red; }</style>\n<script>const x = 1;</script>\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "doctype",
+          "scopes": [
+            "entity.name.tag.html"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "class",
+          "scopes": [
+            "entity.other.attribute-name.html"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "v-if",
+          "scopes": [
+            "meta.attribute.directive.control.vue",
+            "keyword.control.conditional.vue"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "{{",
+          "scopes": [
+            "expression.embedded.vue",
+            "punctuation.definition.interpolation.begin.html.vue"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "color",
+          "scopes": [
+            "source.css",
+            "support.type.property-name.css"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "red",
+          "scopes": [
+            "support.constant.color.w3c-standard-color-name.css"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "const",
+          "scopes": [
+            "source.js",
+            "storage.type.js"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "1",
+          "scopes": [
+            "constant.numeric.decimal.js"
+          ]
+        }
+      ],
+      "expectLanguage": [
+        {
+          "line": 1,
+          "token": "div",
+          "languageId": "html"
+        },
+        {
+          "line": 2,
+          "token": "color",
+          "languageId": "css"
+        },
+        {
+          "line": 3,
+          "token": "const",
+          "languageId": "javascript"
+        }
+      ]
+    },
+    {
+      "languageId": "vue",
+      "title": "Vue single-file component with template directives, a TypeScript script block, and a style block",
+      "text": "<template>\n  <div v-if=\"ok\" :title=\"t\" @click=\"go\">{{ message }}</div>\n</template>\n<script setup lang=\"ts\">\nconst message: string = 'hi'\n</script>\n<style scoped>\n.a { color: red; }\n</style>\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "template",
+          "scopes": [
+            "entity.name.tag.template.html.vue"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "v-if",
+          "scopes": [
+            "keyword.control.conditional.vue"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "title",
+          "scopes": [
+            "meta.attribute.directive.vue",
+            "entity.other.attribute-name.html.vue"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "message",
+          "scopes": [
+            "expression.embedded.vue",
+            "source.ts.embedded.html.vue",
+            "variable.other.readwrite.ts"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "const",
+          "scopes": [
+            "source.ts",
+            "storage.type.ts"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "string",
+          "scopes": [
+            "support.type.primitive.ts"
+          ]
+        },
+        {
+          "line": 7,
+          "token": "color",
+          "scopes": [
+            "source.css",
+            "support.type.property-name.css"
+          ]
+        }
+      ],
+      "expectLanguage": [
+        {
+          "line": 1,
+          "token": "div",
+          "languageId": "html"
+        },
+        {
+          "line": 4,
+          "token": "const",
+          "languageId": "typescript"
+        },
+        {
+          "line": 7,
+          "token": "color",
+          "languageId": "css"
+        }
+      ]
+    },
+    {
+      "languageId": "css",
+      "title": "CSS rule with a pseudo-class, a hex color, units, and a media query",
+      "text": ".a:hover { color: #fff; margin: 1px 2px; }\n@media (min-width: 10px) { .b { display: none } }\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "a",
+          "scopes": [
+            "entity.other.attribute-name.class.css"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "hover",
+          "scopes": [
+            "entity.other.attribute-name.pseudo-class.css"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "color",
+          "scopes": [
+            "support.type.property-name.css"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "fff",
+          "scopes": [
+            "constant.other.color.rgb-value.hex.css"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "px",
+          "scopes": [
+            "keyword.other.unit.px.css"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "display",
+          "scopes": [
+            "support.type.property-name.css"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "shell",
+      "title": "POSIX shell with a shebang, builtins, a variable, and an if block",
+      "text": "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$PATH\"\nif [ -d \"$HOME\" ]; then echo ok; fi\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "#!",
+          "scopes": [
+            "punctuation.definition.comment.shebang.shell"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "set",
+          "scopes": [
+            "support.function.builtin.shell"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "PATH",
+          "scopes": [
+            "variable.other.normal.shell"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "if",
+          "scopes": [
+            "keyword.control.if.shell"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "then",
+          "scopes": [
+            "keyword.control.then.shell"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "fi",
+          "scopes": [
+            "keyword.control.fi.shell"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "yaml",
+      "title": "YAML mapping with a boolean, an integer, a quoted string with a comment, and a flow sequence",
+      "text": "service:\n  enabled: true\n  count: 2\n  name: \"demo\" # trailing\n  tags: [a, b]\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "service",
+          "scopes": [
+            "meta.map.key.yaml",
+            "entity.name.tag.yaml"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "true",
+          "scopes": [
+            "constant.language.boolean.yaml"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "2",
+          "scopes": [
+            "constant.numeric.integer.decimal.yaml"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "demo",
+          "scopes": [
+            "string.quoted.double.yaml"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "trailing",
+          "scopes": [
+            "comment.line.number-sign.yaml"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "[",
+          "scopes": [
+            "meta.flow.sequence.yaml",
+            "punctuation.definition.sequence.begin.yaml"
+          ]
+        }
+      ]
+    }
+  ]
+}

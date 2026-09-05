@@ -1,88 +1,840 @@
 {
-  "version": 2,
+  "version": 3,
   "languages": [
-    { "id": "swift", "extensions": ["swift"] },
-    { "id": "typescript", "extensions": ["ts", "tsx", "mts", "cts"] },
-    { "id": "javascript", "extensions": ["js", "jsx", "mjs", "cjs", "es6"] },
-    { "id": "json", "extensions": ["json", "jsonc", "json5"] },
-    { "id": "markdown", "extensions": ["md", "markdown", "mdown", "mkd"] },
-    { "id": "mdx", "extensions": ["mdx"] },
-    { "id": "yaml", "extensions": ["yml", "yaml"] },
-    { "id": "html", "extensions": ["html", "htm", "xhtml"] },
-    { "id": "css", "extensions": ["css"] },
-    { "id": "scss", "extensions": ["scss"] },
-    { "id": "less", "extensions": ["less"] },
+    {
+      "id": "swift",
+      "displayName": "Swift",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "swift"
+      ],
+      "shebangInterpreters": [
+        "swift"
+      ],
+      "modelineIds": [
+        "swift"
+      ]
+    },
+    {
+      "id": "typescript",
+      "displayName": "TypeScript",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "ts",
+        "mts",
+        "cts"
+      ],
+      "compoundSuffixes": [
+        "d.ts",
+        "d.mts",
+        "d.cts"
+      ],
+      "shebangInterpreters": [
+        "deno"
+      ],
+      "modelineIds": [
+        "typescript"
+      ],
+      "aliases": [
+        "ts"
+      ]
+    },
+    {
+      "id": "typescriptreact",
+      "displayName": "TypeScript React",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "tsx"
+      ],
+      "modelineIds": [
+        "typescriptreact"
+      ],
+      "aliases": [
+        "tsx",
+        "TypeScript JSX"
+      ]
+    },
+    {
+      "id": "javascript",
+      "displayName": "JavaScript",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "js",
+        "jsx",
+        "mjs",
+        "cjs",
+        "es6"
+      ],
+      "shebangInterpreters": [
+        "node",
+        "nodejs"
+      ],
+      "modelineIds": [
+        "javascript",
+        "javascriptreact"
+      ],
+      "aliases": [
+        "js",
+        "jsx"
+      ]
+    },
+    {
+      "id": "json",
+      "displayName": "JSON",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "json",
+        "jsonc",
+        "json5"
+      ],
+      "modelineIds": [
+        "json",
+        "jsonc"
+      ],
+      "aliases": [
+        "json5"
+      ]
+    },
+    {
+      "id": "markdown",
+      "displayName": "Markdown",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "md",
+        "markdown",
+        "mdown",
+        "mkd"
+      ],
+      "modelineIds": [
+        "markdown"
+      ],
+      "aliases": [
+        "md"
+      ]
+    },
+    {
+      "id": "mdx",
+      "displayName": "MDX",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "mdx"
+      ]
+    },
+    {
+      "id": "yaml",
+      "displayName": "YAML",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "yml",
+        "yaml"
+      ],
+      "modelineIds": [
+        "yaml"
+      ],
+      "aliases": [
+        "yml"
+      ]
+    },
+    {
+      "id": "html",
+      "displayName": "HTML",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "html",
+        "htm",
+        "xhtml"
+      ],
+      "modelineIds": [
+        "html"
+      ]
+    },
+    {
+      "id": "vue",
+      "displayName": "Vue",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "vue"
+      ],
+      "modelineIds": [
+        "vue"
+      ]
+    },
+    {
+      "id": "css",
+      "displayName": "CSS",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "css"
+      ],
+      "modelineIds": [
+        "css"
+      ]
+    },
+    {
+      "id": "scss",
+      "displayName": "SCSS",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "scss"
+      ],
+      "modelineIds": [
+        "scss"
+      ]
+    },
+    {
+      "id": "less",
+      "displayName": "Less",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "less"
+      ],
+      "modelineIds": [
+        "less"
+      ]
+    },
     {
       "id": "shell",
-      "extensions": ["sh", "bash", "zsh", "ksh"],
-      "filenames": [".bashrc", ".zshrc", ".bash_profile", ".zprofile", ".profile"]
+      "displayName": "Shell",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "sh",
+        "bash",
+        "zsh",
+        "ksh"
+      ],
+      "filenames": [
+        ".bashrc",
+        ".zshrc",
+        ".bash_profile",
+        ".zprofile",
+        ".profile"
+      ],
+      "filenameGlobs": [
+        ".env.*"
+      ],
+      "shebangInterpreters": [
+        "sh",
+        "bash",
+        "zsh",
+        "ksh",
+        "fish"
+      ],
+      "modelineIds": [
+        "sh",
+        "bash",
+        "zsh"
+      ],
+      "aliases": [
+        "shellscript"
+      ]
     },
-    { "id": "python", "extensions": ["py", "pyw", "pyi"] },
-    { "id": "ruby", "extensions": ["rb", "gemspec"], "filenames": ["Gemfile", "Rakefile"] },
-    { "id": "go", "extensions": ["go"] },
-    { "id": "rust", "extensions": ["rs", "rlib"] },
-    { "id": "c", "extensions": ["c", "h"] },
-    { "id": "cpp", "extensions": ["cpp", "cc", "cxx", "hpp", "hh", "hxx"] },
-    { "id": "objective-c", "extensions": ["m", "mm"] },
-    { "id": "java", "extensions": ["java", "jav"] },
-    { "id": "kotlin", "extensions": ["kt", "kts"] },
-    { "id": "csharp", "extensions": ["cs", "csx"] },
-    { "id": "php", "extensions": ["php", "php4", "php5", "phtml"] },
-    { "id": "perl", "extensions": ["pl", "pm"] },
-    { "id": "lua", "extensions": ["lua"] },
-    { "id": "r", "extensions": ["r"] },
-    { "id": "dart", "extensions": ["dart"] },
-    { "id": "scala", "extensions": ["scala", "sc", "sbt"] },
-    { "id": "clojure", "extensions": ["clj", "cljs", "cljc", "edn"] },
-    { "id": "elixir", "extensions": ["ex", "exs"] },
-    { "id": "fsharp", "extensions": ["fs", "fsi", "fsx"] },
-    { "id": "julia", "extensions": ["jl"] },
-    { "id": "vb", "extensions": ["vb"] },
-    { "id": "sql", "extensions": ["sql"] },
-    { "id": "graphql", "extensions": ["graphql", "gql"] },
-    { "id": "proto", "extensions": ["proto"] },
-    { "id": "hcl", "extensions": ["tf", "tfvars", "hcl"] },
-    { "id": "xml", "extensions": ["xml", "xsd", "xsl", "xslt", "svg", "xaml", "csproj", "plist"] },
+    {
+      "id": "python",
+      "displayName": "Python",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "py",
+        "pyw",
+        "pyi"
+      ],
+      "shebangInterpreters": [
+        "python",
+        "python3",
+        "pypy",
+        "pypy3"
+      ],
+      "modelineIds": [
+        "python"
+      ],
+      "aliases": [
+        "py"
+      ]
+    },
+    {
+      "id": "ruby",
+      "displayName": "Ruby",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "rb",
+        "gemspec"
+      ],
+      "filenames": [
+        "Gemfile",
+        "Rakefile"
+      ],
+      "shebangInterpreters": [
+        "ruby"
+      ],
+      "modelineIds": [
+        "ruby"
+      ]
+    },
+    {
+      "id": "go",
+      "displayName": "Go",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "go"
+      ]
+    },
+    {
+      "id": "rust",
+      "displayName": "Rust",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "rs",
+        "rlib"
+      ]
+    },
+    {
+      "id": "c",
+      "displayName": "C",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "c",
+        "h"
+      ]
+    },
+    {
+      "id": "cpp",
+      "displayName": "C++",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "cpp",
+        "cc",
+        "cxx",
+        "hpp",
+        "hh",
+        "hxx"
+      ]
+    },
+    {
+      "id": "objective-c",
+      "displayName": "Objective-C",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "m",
+        "mm"
+      ]
+    },
+    {
+      "id": "java",
+      "displayName": "Java",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "java",
+        "jav"
+      ]
+    },
+    {
+      "id": "kotlin",
+      "displayName": "Kotlin",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "kt",
+        "kts"
+      ]
+    },
+    {
+      "id": "csharp",
+      "displayName": "C#",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "cs",
+        "csx"
+      ]
+    },
+    {
+      "id": "php",
+      "displayName": "PHP",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "php",
+        "php4",
+        "php5",
+        "phtml"
+      ],
+      "compoundSuffixes": [
+        "blade.php"
+      ],
+      "shebangInterpreters": [
+        "php"
+      ],
+      "modelineIds": [
+        "php"
+      ]
+    },
+    {
+      "id": "perl",
+      "displayName": "Perl",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "pl",
+        "pm"
+      ],
+      "shebangInterpreters": [
+        "perl"
+      ],
+      "modelineIds": [
+        "perl"
+      ]
+    },
+    {
+      "id": "lua",
+      "displayName": "Lua",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "lua"
+      ],
+      "shebangInterpreters": [
+        "lua"
+      ],
+      "modelineIds": [
+        "lua"
+      ]
+    },
+    {
+      "id": "r",
+      "displayName": "R",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "r"
+      ]
+    },
+    {
+      "id": "dart",
+      "displayName": "Dart",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "dart"
+      ]
+    },
+    {
+      "id": "scala",
+      "displayName": "Scala",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "scala",
+        "sc",
+        "sbt"
+      ]
+    },
+    {
+      "id": "clojure",
+      "displayName": "Clojure",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "clj",
+        "cljs",
+        "cljc",
+        "edn"
+      ]
+    },
+    {
+      "id": "elixir",
+      "displayName": "Elixir",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "ex",
+        "exs"
+      ]
+    },
+    {
+      "id": "fsharp",
+      "displayName": "F#",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "fs",
+        "fsi",
+        "fsx"
+      ]
+    },
+    {
+      "id": "julia",
+      "displayName": "Julia",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "jl"
+      ]
+    },
+    {
+      "id": "vb",
+      "displayName": "Visual Basic",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "vb"
+      ]
+    },
+    {
+      "id": "sql",
+      "displayName": "SQL",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "sql"
+      ]
+    },
+    {
+      "id": "graphql",
+      "displayName": "GraphQL",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "graphql",
+        "gql"
+      ]
+    },
+    {
+      "id": "proto",
+      "displayName": "Protocol Buffers",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "proto"
+      ]
+    },
+    {
+      "id": "hcl",
+      "displayName": "HCL",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "tf",
+        "tfvars",
+        "hcl"
+      ]
+    },
+    {
+      "id": "xml",
+      "displayName": "XML",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "xml",
+        "xsd",
+        "xsl",
+        "xslt",
+        "svg",
+        "xaml",
+        "csproj",
+        "plist"
+      ]
+    },
     {
       "id": "ini",
-      "extensions": ["ini", "properties", "toml", "cfg", "conf"],
-      "filenames": [".gitconfig", ".gitattributes", ".editorconfig"]
+      "displayName": "INI / TOML",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "ini",
+        "properties",
+        "toml",
+        "cfg",
+        "conf"
+      ],
+      "filenames": [
+        ".gitconfig",
+        ".gitattributes",
+        ".editorconfig"
+      ]
     },
-    { "id": "bat", "extensions": ["bat", "cmd"] },
-    { "id": "powershell", "extensions": ["ps1", "psm1", "psd1"] },
-    { "id": "dockerfile", "extensions": ["dockerfile"], "filenames": ["Dockerfile"] },
-
-    { "id": "abap", "extensions": ["abap"] },
-    { "id": "apex", "extensions": ["cls"] },
-    { "id": "azcli", "extensions": ["azcli"] },
-    { "id": "bicep", "extensions": ["bicep"] },
-    { "id": "cameligo", "extensions": ["mligo"] },
-    { "id": "coffeescript", "extensions": ["coffee"] },
-    { "id": "cypher", "extensions": ["cypher", "cyp"] },
-    { "id": "ecl", "extensions": ["ecl"] },
-    { "id": "flow9", "extensions": ["flow"] },
-    { "id": "freemarker2", "extensions": ["ftl", "ftlh", "ftlx"] },
-    { "id": "handlebars", "extensions": ["handlebars", "hbs"] },
-    { "id": "liquid", "extensions": ["liquid"] },
-    { "id": "msdax", "extensions": ["dax", "msdax"] },
-    { "id": "pascal", "extensions": ["pas"] },
-    { "id": "pascaligo", "extensions": ["ligo"] },
-    { "id": "pla", "extensions": ["pla"] },
-    { "id": "postiats", "extensions": ["dats", "sats", "hats"] },
-    { "id": "powerquery", "extensions": ["pq", "pqm"] },
-    { "id": "pug", "extensions": ["pug", "jade"] },
-    { "id": "qsharp", "extensions": ["qs"] },
-    { "id": "razor", "extensions": ["cshtml"] },
-    { "id": "redis", "extensions": ["redis"] },
-    { "id": "restructuredtext", "extensions": ["rst"] },
-    { "id": "scheme", "extensions": ["scm", "ss", "sch", "rkt"] },
-    { "id": "sol", "extensions": ["sol"] },
-    { "id": "sparql", "extensions": ["rq", "sparql"] },
-    { "id": "systemverilog", "extensions": ["sv", "svh"] },
-    { "id": "verilog", "extensions": ["v", "vh"] },
-    { "id": "tcl", "extensions": ["tcl"] },
-    { "id": "twig", "extensions": ["twig"] },
-    { "id": "typespec", "extensions": ["tsp"] },
-    { "id": "wgsl", "extensions": ["wgsl"] }
+    {
+      "id": "bat",
+      "displayName": "Windows Batch",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "bat",
+        "cmd"
+      ]
+    },
+    {
+      "id": "powershell",
+      "displayName": "PowerShell",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "ps1",
+        "psm1",
+        "psd1"
+      ]
+    },
+    {
+      "id": "dockerfile",
+      "displayName": "Dockerfile",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "dockerfile"
+      ],
+      "filenames": [
+        "Dockerfile"
+      ],
+      "filenameGlobs": [
+        "Dockerfile.*"
+      ]
+    },
+    {
+      "id": "abap",
+      "displayName": "ABAP",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "abap"
+      ]
+    },
+    {
+      "id": "apex",
+      "displayName": "Apex",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "cls"
+      ]
+    },
+    {
+      "id": "azcli",
+      "displayName": "Azure CLI",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "azcli"
+      ]
+    },
+    {
+      "id": "bicep",
+      "displayName": "Bicep",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "bicep"
+      ]
+    },
+    {
+      "id": "cameligo",
+      "displayName": "CameLIGO",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "mligo"
+      ]
+    },
+    {
+      "id": "coffeescript",
+      "displayName": "CoffeeScript",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "coffee"
+      ]
+    },
+    {
+      "id": "cypher",
+      "displayName": "Cypher",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "cypher",
+        "cyp"
+      ]
+    },
+    {
+      "id": "ecl",
+      "displayName": "ECL",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "ecl"
+      ]
+    },
+    {
+      "id": "flow9",
+      "displayName": "Flow9",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "flow"
+      ]
+    },
+    {
+      "id": "freemarker2",
+      "displayName": "FreeMarker",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "ftl",
+        "ftlh",
+        "ftlx"
+      ]
+    },
+    {
+      "id": "handlebars",
+      "displayName": "Handlebars",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "handlebars",
+        "hbs"
+      ]
+    },
+    {
+      "id": "liquid",
+      "displayName": "Liquid",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "liquid"
+      ]
+    },
+    {
+      "id": "msdax",
+      "displayName": "DAX",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "dax",
+        "msdax"
+      ]
+    },
+    {
+      "id": "pascal",
+      "displayName": "Pascal",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "pas"
+      ]
+    },
+    {
+      "id": "pascaligo",
+      "displayName": "PascaLIGO",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "ligo"
+      ]
+    },
+    {
+      "id": "pla",
+      "displayName": "PLA",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "pla"
+      ]
+    },
+    {
+      "id": "postiats",
+      "displayName": "ATS",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "dats",
+        "sats",
+        "hats"
+      ]
+    },
+    {
+      "id": "powerquery",
+      "displayName": "Power Query",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "pq",
+        "pqm"
+      ]
+    },
+    {
+      "id": "pug",
+      "displayName": "Pug",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "pug",
+        "jade"
+      ]
+    },
+    {
+      "id": "qsharp",
+      "displayName": "Q#",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "qs"
+      ]
+    },
+    {
+      "id": "razor",
+      "displayName": "Razor",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "cshtml"
+      ]
+    },
+    {
+      "id": "redis",
+      "displayName": "Redis",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "redis"
+      ]
+    },
+    {
+      "id": "restructuredtext",
+      "displayName": "reStructuredText",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "rst"
+      ]
+    },
+    {
+      "id": "scheme",
+      "displayName": "Scheme",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "scm",
+        "ss",
+        "sch",
+        "rkt"
+      ]
+    },
+    {
+      "id": "sol",
+      "displayName": "Solidity",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "sol"
+      ]
+    },
+    {
+      "id": "sparql",
+      "displayName": "SPARQL",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "rq",
+        "sparql"
+      ]
+    },
+    {
+      "id": "systemverilog",
+      "displayName": "SystemVerilog",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "sv",
+        "svh"
+      ]
+    },
+    {
+      "id": "verilog",
+      "displayName": "Verilog",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "v",
+        "vh"
+      ]
+    },
+    {
+      "id": "tcl",
+      "displayName": "Tcl",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "tcl"
+      ]
+    },
+    {
+      "id": "twig",
+      "displayName": "Twig",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "twig"
+      ]
+    },
+    {
+      "id": "typespec",
+      "displayName": "TypeSpec",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "tsp"
+      ]
+    },
+    {
+      "id": "wgsl",
+      "displayName": "WGSL",
+      "syntaxSource": "monaco",
+      "extensions": [
+        "wgsl"
+      ]
+    }
   ]
 }

@@ -84,12 +84,14 @@ Codex runner protocol, Codex approval/sandbox/network policy, Claude Code
 permission mode, provider-auth inheritance flag, and the
 `claudeCodeLoadWorkspaceSkills` boolean (whether Claude Code sessions load the
 registered workspace's `project` settings source; see the safety doc), the
-`terminalEnabled` and `sceneEngineEnabled` booleans, host, port, workspace
+`terminalEnabled`, `languageServicesEnabled`, and `sceneEngineEnabled`
+booleans, host, port, workspace
 root, state dir, auth requirement, and release compatibility.
 
 The response never includes `AUTH_TOKEN`, `CODEX_EXECUTABLE`, `CODEX_ARGS`,
-`CLAUDE_CODE_EXECUTABLE`, `TERMINAL_SHELL`, or provider credentials. Clients read
-`terminalEnabled` to decide whether to offer the terminal pane and
+`CLAUDE_CODE_EXECUTABLE`, `SOURCEKIT_LSP_EXECUTABLE`, `TERMINAL_SHELL`, or provider credentials. Clients read
+`terminalEnabled` to decide whether to offer the terminal pane,
+`languageServicesEnabled` to decide whether semantic execution can be offered, and
 `sceneEngineEnabled` to decide whether to offer the spatial scene volume.
 
 ### Managed settings metadata
@@ -476,18 +478,72 @@ language map, themes, scope themes, and per-language configurations) are inlined
 large assets (grammars and the Oniguruma WASM) are referenced by content hash and
 fetched separately. `version` is an aggregate content hash, so it changes only
 when an asset changes, driving the client's incremental, content-addressed cache.
+`schemaVersion` is independent from that hash; absence means schema 1 for an old
+server, while schema 2 admits dependent scopes, injections, embedded-language
+mappings, and grammar provenance.
+
+At schema 2 a grammar entry carries what the editor page needs beyond the
+grammar's own bytes. `injectionScopes` names the grammars injected into that root
+scope (Vue's directive grammar into HTML, the JSDoc grammar into TypeScript).
+`embeddedLanguages` maps an embedded scope to the language id that owns it
+(`source.css` inside HTML is `css`), so the encoded token metadata names the
+embedded language and bracket matching follows it. `dependencyScopes` is derived
+by the backend from the grammar's own `include` rules and lists the catalog scopes
+it reaches; it is never declared, so a catalog cannot claim a dependency it does
+not use or hide one it does. `provenance` records the family, the pinned upstream
+source, its version, and its license. `scopeGrammars` holds the auxiliary grammars
+that have no language of their own: dependencies (`text.html.basic`, the versioned
+YAML grammars) and injections. A client defines every grammar in both lists before
+activating a language, so an `include` and an injection both resolve on the page.
+An `include` no grammar supplies is not an error; text under that scope tokenizes
+as its enclosing scope, and the status route counts those scopes.
 
 ```json
 {
   "catalog": {
+    "schemaVersion": 2,
     "version": "<sha256-hex>",
-    "languageMap": { "version": 3, "languages": [ { "id": "swift", "extensions": ["swift"] } ] },
+    "languageMap": {
+      "version": 3,
+      "languages": [
+        {
+          "id": "html",
+          "displayName": "HTML",
+          "syntaxSource": "textmate",
+          "extensions": ["html", "htm", "xhtml"],
+          "modelineIds": ["html"]
+        }
+      ]
+    },
     "grammars": [
       {
-        "languageId": "swift",
-        "scopeName": "source.swift",
-        "grammar": { "path": "grammars/swift.tmLanguage.json", "sha256": "...", "bytes": 132124 },
-        "languageConfig": "{ /* VS Code language configuration (JSONC) */ }"
+        "languageId": "html",
+        "scopeName": "text.html.derivative",
+        "grammar": { "path": "grammars/html-derivative.tmLanguage.json", "sha256": "...", "bytes": 1399 },
+        "languageConfig": "{ /* VS Code language configuration (JSONC) */ }",
+        "embeddedLanguages": { "source.css": "css", "source.js": "javascript" },
+        "injectionScopes": ["vue.directives", "vue.interpolations"],
+        "dependencyScopes": ["text.html.basic"],
+        "provenance": {
+          "family": "vscode",
+          "source": "github.com/microsoft/vscode@1.125.0/extensions/html/syntaxes/html-derivative.tmLanguage.json",
+          "version": "1.125.0",
+          "license": "MIT"
+        }
+      }
+    ],
+    "scopeGrammars": [
+      {
+        "scopeName": "text.html.basic",
+        "grammar": { "path": "grammars/html.tmLanguage.json", "sha256": "...", "bytes": 84416 },
+        "dependencyScopes": ["source.css", "source.js"],
+        "provenance": { "family": "vscode", "source": "...", "version": "1.125.0", "license": "MIT" }
+      },
+      {
+        "scopeName": "vue.directives",
+        "grammar": { "path": "grammars/vue-directives.tmLanguage.json", "sha256": "...", "bytes": 385 },
+        "dependencyScopes": ["text.html.vue"],
+        "provenance": { "family": "vue", "source": "...", "version": "v3.3.11", "license": "MIT" }
       }
     ],
     "themes": { "AgentRoom-Light": { }, "AgentRoom-Dark": { } },
@@ -502,47 +558,263 @@ referenced blob as raw bytes with the matching `Content-Type` (`application/json
 or `application/wasm`) and `Cache-Control: no-store`. The path is bounded to the
 curated asset directory exactly like the workspace read routes (lexical
 normalization rejecting `..`/absolute/NUL, realpath containment, symlink-leaf
-refusal) and is additionally restricted to a **`.json`/`.wasm` extension
+refusal for every path component) and is additionally restricted to a **`.json`/`.wasm` extension
 allowlist** and to **paths the manifest references** — the route never serves
 executable code (`.js`) or unreferenced files. Status codes: `400` for a
 malformed or missing `path`, `401` when `AUTH_TOKEN` is configured and the bearer
 token is missing, `404` for an unknown/unreferenced/absent asset or when the
 catalog is unavailable. The visionOS client verifies each returned blob's
-`sha256` against the manifest before use; the manifest itself is built in-memory
-from the served bytes, so the hashes and the blobs can never disagree.
+`sha256` against the manifest before use. The backend validates the complete
+snapshot under the documented catalog bounds and pins the accepted generation's
+bytes in memory, so later disk changes cannot make a manifest disagree with a blob.
+Both theme maps must define `AgentRoom-Light` and `AgentRoom-Dark`, the names every
+client resolves; a catalog missing either is rejected whole.
 
 `GET /api/editor/catalog/status` reports which catalog is live for the macOS
 Languages pane (Phase C.5). It returns no asset bytes — only whether the catalog
 is `enabled`, the `source` of the live snapshot (`override` for the operator
-`EDITOR_CATALOG_DIR`, `bundled` for the shipped `catalog-assets`, or `none`), the
-aggregate `version`, and the `languageCount`:
+`EDITOR_CATALOG_DIR`, `bundled` for the shipped `catalog-assets`, or `none`),
+schema versions, total detected languages, syntax-provider and grammar counts,
+how many embedded scopes the live grammars include that no grammar supplies
+(`unresolvedScopeCount`; text under those scopes stays on its enclosing scope),
+and a bounded validation code/location:
 
 ```json
 {
   "enabled": true,
   "source": "override",
   "version": "<sha256-hex>",
-  "languageCount": 8
+  "schemaVersion": 2,
+  "languageMapVersion": 3,
+  "languageCount": 76,
+  "syntaxProviders": { "monaco": 64, "textmate": 12, "plaintext": 0 },
+  "primaryGrammarCount": 12,
+  "scopeGrammarCount": 14,
+  "unresolvedScopeCount": 73,
+  "validation": { "state": "accepted", "code": null, "location": null }
 }
 ```
 
 `POST /api/editor/catalog/reload` re-resolves the catalog from disk (the operator
 `EDITOR_CATALOG_DIR` when it holds a manifest, else the bundled `catalog-assets`,
-else none) and atomically swaps in the new snapshot. It is a mutating route, so it
+else none) and atomically swaps in the new snapshot. A malformed runtime candidate
+is rejected and the last accepted snapshot remains live; an invalid startup
+override uses the bundled snapshot. It is a mutating route, so it
 requires the bearer token when `AUTH_TOKEN` is configured. When the aggregate
 `version` actually changes, the backend broadcasts an `editor_catalog_changed`
 event over `WS /api/events` so connected visionOS editors re-hydrate live; an
 idempotent reload that changes nothing emits no event. The response reports the
-outcome:
+outcome and repeats the status route's counts and validation fields (abbreviated
+here):
 
 ```json
 {
   "reloaded": true,
+  "accepted": true,
   "source": "override",
   "version": "<sha256-hex>",
-  "changed": true
+  "changed": true,
+  "validation": { "state": "accepted", "code": null, "location": null }
 }
 ```
+
+`accepted: false` means the candidate was rejected, `changed` is false, and the
+reported source/version still identify the previous live generation.
+
+## Editor Language Services
+
+`GET /api/editor/language-services` is the safe, probe-free registry projection
+for Mac-hosted editor semantics. It is always present, including when execution
+is disabled. Reading it never resolves an executable or starts a child:
+
+```json
+{
+  "protocolVersion": 1,
+  "services": [
+    {
+      "id": "sourcekit_lsp",
+      "displayName": "SourceKit-LSP",
+      "configured": true,
+      "enabled": false,
+      "languageIds": ["swift", "c", "cpp", "objective-c"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols", "semantic_tokens"]
+    },
+    {
+      "id": "typescript_language_server",
+      "displayName": "TypeScript Language Server",
+      "configured": true,
+      "enabled": false,
+      "languageIds": ["typescript", "typescriptreact", "javascript"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols", "semantic_tokens"]
+    },
+    {
+      "id": "pyright_language_server",
+      "displayName": "Pyright Language Server",
+      "configured": true,
+      "enabled": false,
+      "languageIds": ["python"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols"]
+    },
+    {
+      "id": "rust_analyzer",
+      "displayName": "rust-analyzer",
+      "configured": false,
+      "enabled": false,
+      "languageIds": ["rust"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols", "semantic_tokens"]
+    },
+    {
+      "id": "gopls",
+      "displayName": "gopls",
+      "configured": false,
+      "enabled": false,
+      "languageIds": ["go"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols", "semantic_tokens"]
+    },
+    {
+      "id": "eclipse_jdt_ls",
+      "displayName": "Eclipse JDT Language Server",
+      "configured": false,
+      "enabled": false,
+      "languageIds": ["java"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols"]
+    },
+    {
+      "id": "kotlin_lsp",
+      "displayName": "Kotlin Language Server",
+      "configured": false,
+      "enabled": false,
+      "languageIds": ["kotlin"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols", "semantic_tokens"]
+    },
+    {
+      "id": "csharp_ls",
+      "displayName": "csharp-ls",
+      "configured": false,
+      "enabled": false,
+      "languageIds": ["csharp"],
+      "featureKinds": ["completion", "hover", "definition", "document_symbols"]
+    }
+  ]
+}
+```
+
+`ready` is omitted until an authenticated socket has attempted that descriptor
+in the current backend process. A successful initialization records `true`; a
+failed attempt records `false`. The projection never contains an executable
+path, argv, environment name or value, stderr, project path, or document text.
+
+`WS /api/workspaces/:workspaceId/editor/language-service` is registered only
+when the tier-2 `LANGUAGE_SERVICES_ENABLED` setting is true (default false).
+Otherwise the upgrade is a plain `404`. When `AUTH_TOKEN` is configured, the
+handler verifies `Authorization: Bearer <token>` before accepting document
+content or resolving a language server. The optional tier-3
+`SOURCEKIT_LSP_EXECUTABLE` is an absolute executable override; without it the
+first authenticated open resolves the active Xcode toolchain with the fixed
+`xcrun --find sourcekit-lsp` command. TypeScript and JavaScript use pinned
+production dependencies: the current Node runtime starts the resolved
+`typescript-language-server` 5.3.0 CLI with fixed `--stdio` argv and supplies
+the resolved TypeScript 5.9.3 `tsserver.js` as a fixed initialization option.
+Automatic type acquisition is disabled, so the server does not invoke npm to
+fetch ambient types. Python uses pinned Pyright 1.1.413: the current Node
+runtime starts the resolved `pyright/langserver.index.js` entry with fixed
+`--stdio` argv. It advertises completion, hover, definition, and document
+symbols, but not semantic tokens. The bundled services have no executable
+override or managed setting.
+
+Rust, Go, Java, Kotlin, and C# use optional operator-installed services selected
+only by the tier-3 environment values `RUST_ANALYZER_EXECUTABLE`,
+`GOPLS_EXECUTABLE`, `JDTLS_EXECUTABLE`, `KOTLIN_LSP_EXECUTABLE`, and
+`CSHARP_LS_EXECUTABLE`. Each value must name an absolute executable regular
+file that is not a symlink; AgentRoom never searches `PATH` for these servers.
+The admitted versions and fixed argv are rust-analyzer 2026-08-31 with no
+arguments, gopls 0.23.0 with `serve` and fixed semantic-token initialization,
+Eclipse JDT LS 1.61.0 with a unique backend-owned `-data` directory, Kotlin LSP
+262.9593.0 alpha with `--stdio`, and csharp-ls 0.27.0 with `--loglevel warning`.
+These values and launch details are never managed settings or public fields.
+
+An operator can add an external LSP descriptor without changing either Apple
+client. This path has a second default-off gate,
+`EXTERNAL_LANGUAGE_SERVICES_ENABLED`, and reads definitions only from the
+tier-3 `LANGUAGE_SERVICE_ADAPTERS` environment value. Both that gate and the
+global `LANGUAGE_SERVICES_ENABLED` switch must be on before the descriptor can
+run. The JSON value is capped at 64 KiB and eight definitions; a malformed,
+duplicated, overlapping, or over-limit list is ignored as a whole. Each
+definition supplies a namespaced `external_lsp_*` id, display name,
+operator-tested version, absolute executable, fixed argv, one or more language
+ids, bounded exact or dot-suffix project markers, standalone-root policy, a
+subset of the five feature kinds, and optional non-credential environment
+grants. External language ids must be unique and cannot overlap a built-in, so
+an environment definition cannot replace the implementation selected for Swift,
+TypeScript, Python, Rust, Go, Java, Kotlin, or C#.
+
+The executable must be a regular executable file and not a symlink; it is
+realpath-resolved again at launch. Its child receives only the base language
+service environment (`PATH`, `HOME`, `TMPDIR`, locale, and user names) plus
+explicit non-credential grants. External descriptors are treated as able to
+invoke project build tools and load plugins, regardless of their implementation,
+because configuration cannot make an arbitrary binary less trusted. They use
+the existing bounded work-done-progress and null workspace-configuration
+responses; every other server request is refused. The safe registry projection
+still returns only id, display name, configured/enabled/observed-ready state,
+language ids, and feature kinds. It never returns the definition, executable,
+argv, markers, version, or environment names and values.
+
+Client frames form a closed protocol: `open` carries one workspace-relative
+path, language id, positive `clientVersion`, and full text; `change` carries a
+newer version and full text; `request` carries a unique request id, the current
+client version, one of the five named feature kinds, and an applicable UTF-16
+position/range; `cancel` names that request id; `close` releases the document.
+There is no field for an LSP method, command, executable, environment, HTML, or
+arbitrary JSON. Server frames are `status`, `diagnostics`, `response`, or a
+stable-code `error`; status, diagnostic, and response frames carry the client
+version used by the backend. Status describes the current connection and may
+precede edits queued during startup or replay; diagnostics and feature results
+apply only to their exact document version. Positions are zero-based UTF-16 code units
+and ranges are half-open.
+
+The backend realpath-bounds the regular, non-secret, non-symlink document, walks
+ancestors no higher than its registered workspace, and selects the nearest
+descriptor-owned project marker. Same-directory marker priority breaks a tie;
+an unresolved tie reports `ambiguous_project`. One process is shared only by
+the same `(workspaceId, descriptorId, projectRoot)`, and one authenticated
+socket leases a workspace path at a time (`document_busy` for a competitor).
+The TypeScript descriptor gives `tsconfig.json` and `jsconfig.json` equal
+priority above `package.json`; files with no marker use the registered workspace
+root. The Pyright descriptor prefers `pyrightconfig.json` over `pyproject.toml`
+and then Django's `manage.py`; it also permits the registered workspace root for
+standalone files. rust-analyzer prefers `rust-project.json` over `Cargo.toml`;
+gopls prefers `go.work` over `go.mod`; Eclipse JDT LS prefers Eclipse project
+metadata, then Maven, then Gradle; Kotlin LSP prefers Gradle settings, then
+Gradle build files, then Maven; csharp-ls prefers `.slnx`, `.sln`, then
+`.csproj`. Rust, Go, Java, and Kotlin permit standalone workspace-root files;
+csharp-ls requires a project marker and otherwise reports `project_not_found`.
+
+The fixed ceilings are 8 processes globally/4 per workspace, 32 documents per
+process, 256 KiB per shadow, 32 MiB of shadow text globally, 4 MiB per LSP
+frame, 4 MiB queued stdin per child including active writes and framing bytes,
+384 KiB inbound/2 MiB outbound per socket frame, separate 8-frame/512 KiB
+inbound-operation and send queues, and 16 outstanding requests per socket/64 per process. Initialize,
+feature, and shutdown deadlines are 20 s/10 s/3 s; changes coalesce for 150 ms;
+idle children close after 10 minutes; at most three crash restarts occur in five
+minutes. Replay uses the latest in-memory draft and a new LSP version—it never
+rereads an unsaved buffer from disk.
+
+Normalized results cap diagnostics/completions/definitions at 500/200/20,
+document symbols at 1,000 nodes and depth 16, and semantic tokens at 20,000
+five-integer tokens. A completion can carry optional plain `insertText`, capped
+at 256 KiB, separately from its display `label`; `textEdit` takes precedence.
+Commands, snippets, additional edits, insert-replace edits, outside-workspace
+definitions, and unknown server requests are omitted or refused. Documentation
+and diagnostics preserve literal text, including code punctuation and markup
+source. Clients disable HTML rendering and executable links.
+Each descriptor owns its fixed server-request allowlist.
+SourceKit-LSP answers bounded `window/workDoneProgress/create` only. The
+TypeScript, Pyright, rust-analyzer, gopls, Eclipse JDT LS, Kotlin LSP, and
+csharp-ls language servers also receive one fixed `null` per bounded
+`workspace/configuration` item. Buffer and server payloads are never logged.
+The complete execution posture is in
+`docs/safety/TRUST_AND_SAFETY.md`.
 
 ## Workspaces
 
@@ -2257,9 +2529,11 @@ max output gap, output byte, and runner event-count fields. WebSocket sends log
 slow stream delivery when an event is more than 250 ms old or a socket send
 takes more than 250 ms.
 
-## WebSocket
+## Broadcast WebSocket
 
-`WS /api/events` streams typed backend events. The server sends an initial
+`WS /api/events` is the only broadcast event socket and streams typed backend
+events. The workspace terminal and editor language-service sockets are separate,
+authenticated, workspace-scoped protocols. The server sends an initial
 `status_snapshot`, then lifecycle events such as:
 
 - `agent_session_created`

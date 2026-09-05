@@ -41,10 +41,24 @@ import { registerSpatialSceneRoutes } from "./routes/spatialSceneRoutes";
 import { DIAGRAM_PROMPT_INSTRUCTION } from "./scene/diagram/prompt";
 import { DiagramHumanEditTracker } from "./scene/diagram/humanEdits";
 import { DiagramRenderFeedbackTracker } from "./scene/diagram/renderFeedback";
+import {
+  configuredLanguageServiceDescriptors,
+  LanguageServiceRegistry
+} from "./editor/languageServices/registry";
+import { LanguageServiceHost } from "./editor/languageServices/LanguageServiceHost";
+import type { LanguageServiceDescriptor, LanguageServiceSpawner } from "./editor/languageServices/types";
+import type { LanguageServiceLimits } from "./editor/languageServices/limits";
+import { registerLanguageServiceRoutes } from "./routes/languageServiceRoutes";
 
 export interface BuildServerInput {
   config: ServiceConfig;
   runners?: Partial<Record<AgentRunnerKind, AgentRunner>>;
+  /** Test seam for synthetic servers; production uses the built-in registry. */
+  languageServices?: {
+    descriptors?: readonly LanguageServiceDescriptor[];
+    spawner?: LanguageServiceSpawner;
+    limits?: LanguageServiceLimits;
+  };
 }
 
 export interface BuiltServer {
@@ -89,6 +103,32 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
   const runnerReadiness = new RunnerRuntimeReadiness();
   const localWorkspaceRegistry = new LocalWorkspaceRegistry(input.config);
   const workspaceExplorer = new WorkspaceExplorer(localWorkspaceRegistry);
+  const languageServiceRegistry = new LanguageServiceRegistry(
+    input.config,
+    input.languageServices?.descriptors ?? configuredLanguageServiceDescriptors()
+  );
+  const languageServiceHost = input.config.languageServicesEnabled === true
+    ? new LanguageServiceHost({
+      config: input.config,
+      workspaces: localWorkspaceRegistry,
+      registry: languageServiceRegistry,
+      ...(input.languageServices?.spawner ? { spawner: input.languageServices.spawner } : {}),
+      ...(input.languageServices?.limits ? { limits: input.languageServices.limits } : {})
+    })
+    : undefined;
+  const stopLanguageServiceWorkspaceWatch = languageServiceHost
+    ? eventBus.subscribe((event) => {
+      if (event.type !== "workspace_removed") return;
+      const workspaceId = (event.payload as { workspaceId?: unknown }).workspaceId;
+      if (typeof workspaceId === "string") void languageServiceHost.closeWorkspace(workspaceId);
+    })
+    : undefined;
+  if (languageServiceHost) {
+    app.addHook("onClose", async () => {
+      stopLanguageServiceWorkspaceWatch?.();
+      await languageServiceHost.close();
+    });
+  }
   let agentSessions: AgentSessionService;
   const agentAttachments = new AgentAttachmentStore({
     config: input.config,
@@ -181,6 +221,12 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     explorer: workspaceExplorer
   });
   await registerAgentSessionRoutes(app, agentSessions, agentAttachments, input.config);
+  await registerLanguageServiceRoutes(app, {
+    config: input.config,
+    registry: languageServiceRegistry,
+    ...(languageServiceHost ? { host: languageServiceHost } : {}),
+    ...(input.languageServices?.limits ? { limits: input.languageServices.limits } : {})
+  });
 
   // The spatial render engine defaults on. An
   // explicit `sceneEngineEnabled: false` leaves the read route unregistered

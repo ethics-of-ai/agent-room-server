@@ -1,23 +1,19 @@
 import type { RegisteredRunnerKind } from "../runner/registry";
-
-export interface ServiceConfig {
+import type { LanguageServiceExecutableConfig } from "./languageService";
+export interface ServiceConfig extends LanguageServiceExecutableConfig {
   runnerKind: AgentRunnerKind;
   agentRoomHome?: string;
   host: string;
   port: number;
   workspaceRoot: string;
   stateDir: string;
-  // Operator-managed editor language catalog override directory (Phase C.5). The
-  // backend serves this directory's data assets when it holds a manifest, else
-  // falls back to the bundled `catalog-assets`. Always resolved (AGENTROOM_HOME-
-  // relative default), like workspaceRoot/stateDir.
+  // Operator-managed editor catalog override. It falls back to bundled assets
+  // and is always resolved like workspaceRoot and stateDir.
   editorCatalogDir: string;
   requireAuth: boolean;
   authToken?: string;
   gitCommandTimeoutMs: number;
-  // Timeout for the three git operations that talk to a remote (fetch, pull,
-  // push). Separate from `gitCommandTimeoutMs` because a slow clone-sized fetch
-  // is not a hung local command; it also bounds a credential helper that stalls.
+  // Separate timeout for fetch, pull, push, and stalled credential helpers.
   gitNetworkTimeoutMs?: number;
   codexExecutable?: string;
   codexArgs: string[];
@@ -98,14 +94,15 @@ export interface ServiceConfig {
   // When false, the in-band artifact channel is disabled: assistant text is not
   // parsed for <artifact> regions and no artifact prompt instruction is injected.
   artifactsEnabled?: boolean;
-  // When false, the clarifying-question channel is off: no runner is given a
-  // way to pause a turn and ask the person driving the session, so each behaves
-  // exactly as before the channel existed. Tier 1: answering a question
-  // authorizes nothing. See docs/safety/TRUST_AND_SAFETY.md.
+  // When false, runners cannot pause a turn for clarification. Tier 1: answering
+  // a question authorizes nothing. See docs/safety/TRUST_AND_SAFETY.md.
   clarifyingQuestionsEnabled?: boolean;
   // When false, the backend-served editor language catalog (Phase C) is disabled:
   // the catalog routes are not registered and clients fall back to bundled assets.
   languageCatalogEnabled?: boolean;
+  sceneEngineEnabled?: boolean;
+  /** Tier 2: permits workspace-scoped language-server processes. */
+  languageServicesEnabled?: boolean;
   // Interactive terminal (PTY) channel. OFF by default: it is the one deliberate
   // relaxation of the "no arbitrary shell execution" posture — a real login shell
   // spawned in a registered workspace, unsandboxed, behind bearer auth. See
@@ -157,6 +154,8 @@ export interface PublicServiceConfig {
   claudeCodePermissionMode: ClaudeCodePermissionMode;
   claudeCodeInheritProviderAuth: boolean;
   claudeCodeLoadWorkspaceSkills: boolean;
+  sceneEngineEnabled?: boolean;
+  languageServicesEnabled?: boolean;
   terminalEnabled: boolean;
 }
 

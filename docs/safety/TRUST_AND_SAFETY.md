@@ -69,7 +69,7 @@ Current posture:
     merge into a file it could not parse — that would silently drop the
     operator's other keys — and reports `409` instead.
   - **Which settings exist is declared by the runner that owns them.** The
-    globals are declared in `config/settingsStore.ts`; every runner-owned setting
+    globals are declared in `config/globalManagedSettings.ts`; every runner-owned setting
     is a `ManagedSettingDefinition` on that runner's `RunnerDescriptor`, carrying
     its schema, tier, environment variable, and default. The file schema, the
     env-name table, the tier table, the defaults, the PATCH schema, and the
@@ -1468,6 +1468,153 @@ Current posture:
     file and from the metadata block by construction. The switch itself and the
     session cap are tier-2 managed settings and *are* reported there — a client
     that may offer the terminal has to be able to see whether it is on.
+- Mac-hosted editor language services are an **opt-in local execution surface**.
+  `LANGUAGE_SERVICES_ENABLED` is a tier-2 managed setting and defaults to
+  `false`; while false, the workspace WebSocket is not registered. The always-
+  present `GET /api/editor/language-services` read is deliberately probe-free:
+  it returns only descriptor id/display name, configured/enabled state,
+  observed `ready` after a socket attempt, supported language ids, and each
+  descriptor's supported subset of the five fixed feature kinds. It never
+  resolves or starts a binary and never returns an executable path, argv,
+  environment, stderr, project root, or document content.
+  `SOURCEKIT_LSP_EXECUTABLE` is tier 3 and environment-only; an
+  override must be an absolute executable regular file and not a symlink. With
+  no override, SourceKit-LSP is resolved from the active Xcode toolchain by the
+  fixed `xcrun --find sourcekit-lsp` invocation only after an authenticated
+  document open. TypeScript and JavaScript use pinned production dependencies:
+  the current Node runtime starts the resolved `typescript-language-server`
+  5.3.0 CLI with fixed `--stdio` argv and supplies the resolved TypeScript 5.9.3
+  `tsserver.js` as a fixed initialization option. Neither path is configurable
+  or projected to a client. Automatic type acquisition is disabled so the
+  server does not invoke npm to fetch ambient types. Python uses pinned Pyright
+  1.1.413: the current Node runtime starts the resolved
+  `pyright/langserver.index.js` entry with fixed `--stdio` argv. Its path is
+  likewise neither configurable nor projected to a client.
+  The optional Rust, Go, Java, Kotlin, and C# descriptors are selected only by
+  tier-3 environment values: `RUST_ANALYZER_EXECUTABLE`, `GOPLS_EXECUTABLE`,
+  `JDTLS_EXECUTABLE`, `KOTLIN_LSP_EXECUTABLE`, and `CSHARP_LS_EXECUTABLE`.
+  AgentRoom does not search `PATH`; each configured value must be an absolute,
+  executable regular file and not a symlink. The admitted versions and fixed
+  argv are rust-analyzer 2026-08-31 with no arguments, gopls 0.23.0 with
+  `serve` and fixed initialization that enables its otherwise-disabled semantic
+  tokens, Eclipse JDT LS 1.61.0 with a backend-created unique `-data` directory,
+  Kotlin LSP 262.9593.0 alpha with `--stdio`, and csharp-ls 0.27.0 with
+  `--loglevel warning`. JDT LS process data is outside the workspace and is
+  removed when its process closes. These executable paths, argv, temporary
+  paths, and environment values are never managed settings or public fields.
+  - **External LSP descriptors are separately gated and fail closed.**
+    `EXTERNAL_LANGUAGE_SERVICES_ENABLED` defaults to `false`; while false the
+    backend does not parse `LANGUAGE_SERVICE_ADAPTERS` and registers no external
+    descriptor. The general `LANGUAGE_SERVICES_ENABLED` gate must also be on
+    before any built-in or external child can run. The definition list is tier
+    3 and environment-only, capped at 64 KiB and eight descriptors, zod-validated
+    as one strict document, and dropped whole on malformed JSON, an unknown
+    field, a duplicate, or a conflict. IDs live under `external_lsp_*`, and each
+    external language id is unique and must be absent from the built-in registry,
+    so a definition cannot shadow the service a client reaches for an existing
+    language. No definition value enters managed settings or a public response;
+    the existing registry route projects only the safe identity, availability,
+    language-id, and feature-kind fields it projects for built-ins.
+  - **An external definition admits one exact program, not a command line.** Its
+    `command` is absolute, must be an executable regular file, cannot be a
+    symlink, and is realpath-canonicalized immediately before spawn. `args` are a
+    bounded fixed array and no shell or client fragment participates. The
+    definition also fixes the operator-tested version, exact/dot-suffix project
+    markers with explicit priority and entry type, standalone-root policy, and
+    its subset of the five closed features. The client still names only a
+    language id and a fixed feature kind; it cannot select the descriptor,
+    executable, argv, marker, or LSP method.
+  - **The external child environment is an allowlist.** It receives the base
+    language-service names (`PATH`, `HOME`, `TMPDIR`, locale, and user identity)
+    plus at most 16 names the operator explicitly grants. A grant must use a
+    bounded uppercase environment name and cannot be `AUTH_TOKEN`, a
+    credential-shaped `*_TOKEN`/`*_API_KEY`/`*_SECRET`/`*_PASSWORD`, or an
+    Anthropic, OpenAI, Cursor, DeepSeek, or AWS-prefixed value. Unset names stay
+    absent. The generated descriptor is conservatively recorded as able to invoke
+    build tools and load plugins — a declaration cannot make arbitrary local code
+    safer — and admits only the bounded progress-create and null-per-item
+    workspace-configuration server answers. Every other request keeps the
+    existing `-32601` refusal.
+  - **Execution is not a workspace sandbox.** Each server starts with `cwd` set
+    to a realpath-proven project root inside a registered workspace, but a
+    language server may read SDKs outside that workspace or load project state
+    and plugins. SourceKit-LSP may ask SwiftPM/Xcode to invoke build tools; the
+    TypeScript descriptor does not invoke project build tools but may load
+    TypeScript plugins. The Pyright descriptor admits neither project build-tool
+    invocation nor language-server plugin loading, though Pyright may inspect
+    Python environments and import sources available to the backend process.
+    rust-analyzer may invoke Cargo and procedural macros; gopls may invoke Go
+    project tooling but does not admit plugins; Eclipse JDT LS and Kotlin LSP may
+    invoke Maven or Gradle and load project plugins; csharp-ls may invoke the
+    .NET/MSBuild toolchain and load analyzers or source generators. Those tools
+    can execute project-controlled code or perform network access according to
+    their own configuration. Register and open only trusted projects. Every
+    descriptor records its tested version, UTF-16 position encoding, and this
+    project-loading posture; the bounded workspace preview APIs do not weaken
+    it.
+  - **Closed, authenticated workspace protocol.** The only execution route is
+    `WS /api/workspaces/:workspaceId/editor/language-service`. It performs its
+    own bearer check before accepting buffer text. Client frames are the strict
+    version-1 `open`/`change`/`request`/`cancel`/`close` union; requests can name
+    only completion, hover, definition, document symbols, or full semantic
+    tokens. There is no raw LSP method, command, executable, argv, environment,
+    HTML, or arbitrary-JSON escape hatch. `/api/events` remains the only
+    **broadcast event** socket; this route and the terminal are authenticated,
+    workspace-scoped protocols.
+  - **Bounded file and project selection.** An open path passes the existing
+    lexical and secret-name filters, then every path segment and the regular
+    file are realpath-checked; symlink aliases are refused. Project selection
+    walks no higher than the registered workspace, chooses the nearest
+    descriptor-declared marker and explicit same-directory priority, and reports
+    `ambiguous_project` rather than relying on filesystem order. The instance
+    key is `(workspaceId, descriptorId, projectRoot)`. SourceKit-LSP, TypeScript,
+    Pyright, rust-analyzer, gopls, Eclipse JDT LS, and Kotlin LSP may fall back to
+    the registered workspace root; csharp-ls requires an admitted project marker
+    and otherwise reports `project_not_found`. One socket generation
+    leases one canonical workspace file path, including its case aliases; a competitor gets `document_busy`
+    without its buffer reaching the child.
+  - **Bounded process, memory, and transport.** The host admits 8 processes
+    globally and 4 per workspace, 32 shadows per process, 256 KiB per shadow,
+    and 32 MiB of shadow text globally. LSP frames are capped at 4 MiB and the
+    private stderr tail at 64 KiB. Each child's queued stdin, including the
+    active write and framing bytes, is capped at 4 MiB. An overflow terminates
+    that service through the existing bounded restart path. Socket input/output frames are capped at
+    384 KiB/2 MiB, with separate 8-frame/512 KiB inbound-operation and send
+    queues; outstanding feature requests are capped at 16 per socket and 64 per process. Initialize,
+    feature, and shutdown deadlines are 20 s/10 s/3 s. Full-buffer changes
+    coalesce for 150 ms. An idle process closes after 10 minutes. Shutdown,
+    and workspace removal release child processes. Disconnect and explicit close
+    release their shadows, requests, and leases; the now-idle child then follows
+    the bounded idle-close path.
+  - **Versioned replay, never a disk reconstruction.** Client versions must be
+    positive and strictly increase; LSP versions are backend-owned and increase
+    across changes, reconnects, and crash replay. A non-monotonic change reports
+    `resync_required` and closes the socket. A crashed child may restart three
+    times in five minutes (the budget clears after ten healthy minutes); replay
+    sends `didOpen` with the latest bounded in-memory draft and a fresh LSP
+    version. It never rereads an unsaved buffer from disk. Stale, cancelled, or
+    cross-generation responses are dropped. Readiness applies to the current
+    socket generation even if typing has advanced past its opening version;
+    diagnostics and feature results still require the current document version.
+  - **Narrow results and server authority.** Diagnostics, completions,
+    definitions, document symbols, semantic tokens, strings, legends, and tree
+    depth are normalized to the Phase 0 caps. Definition targets must be
+    existing regular, non-symlink files inside the same workspace. Completion
+    commands, snippets, additional edits, and insert-replace edits do not cross
+    the boundary. Plain `insertText` is retained separately from the display
+    label and capped at 256 KiB, like an explicit edit. Documentation and
+    diagnostic strings preserve code punctuation, including literal Markdown
+    or HTML source; clients render them as inert text with HTML and link
+    execution disabled. Each descriptor owns its fixed
+    server-request allowlist and responses. SourceKit-LSP admits only bounded
+    `window/workDoneProgress/create`; the TypeScript, Pyright, rust-analyzer,
+    gopls, Eclipse JDT LS, Kotlin LSP, and csharp-ls language servers admit that
+    request plus `workspace/configuration` with one fixed `null` per bounded
+    item. Apply-edit, command,
+    interactive prompt, dynamic-registration, and every unknown request receive
+    JSON-RPC `-32601`. Buffer text and server payloads are never logged or
+    persisted, and the child's descriptor allowlist is still filtered to scrub
+    `AUTH_TOKEN` and provider-credential names.
 - Agent turn context accepts only selected workspace-relative paths; the backend
   resolves and bounds previews before injecting them into runner prompts.
 - Backend turn context assembly is limited to the original user message,
@@ -1609,10 +1756,12 @@ Current posture:
   - **Webview stays no-network.** The editor WKWebView keeps `connect-src 'none'`: native
     fetches the catalog over REST and injects it over the existing bridge, exactly like
     the bundled path — the webview, `MonacoSchemeHandler`, and the page CSP are unchanged.
-  - **Hash-verified, bundled fallback.** The client **verifies every fetched blob's
-    sha256** against the manifest before use and caches assets content-addressed on
-    device; **bundled assets remain the offline fallback**, so a malformed, tampered, or
-    absent catalog degrades to bundled rather than breaking the editor.
+  - **Hash-verified, whole-generation fallback.** The client **verifies every fetched
+    blob's sha256 and byte count** against the manifest before use and caches assets
+    content-addressed on device. It activates a backend generation only when every
+    required asset verifies; a partial generation never mixes with bundled accessors.
+    **Bundled assets remain the offline fallback**, so a malformed, tampered, or absent
+    catalog does not break the editor.
 - The editor language catalog directory is **operator-managed and reloadable** (Phase C.5),
   so an operator can push a new/updated catalog from the macOS app **without rebuilding the
   backend**. This does not widen the catalog's boundaries — it only makes its source
@@ -1622,25 +1771,60 @@ Current posture:
     holds a manifest, else the **bundled** `apps/backend/catalog-assets`, else no catalog
     (routes 404 → client uses its bundled floor). Whichever root is chosen, the asset route
     keeps the **same read bounding** (lexical normalize, realpath containment, `.json`/`.wasm`
-    extension allowlist — never `.js`, symlink-leaf refusal, manifest-referenced paths only).
+    extension allowlist that never admits `.js`, refusal of symlinks in every path component,
+    manifest-referenced paths only).
     The catalog root is **never a registered workspace** and never routes through the
     workspace file API; reads stay bearer-authed via `authorizedForRead`.
-  - **Reload route.** `POST /api/editor/catalog/reload` re-reads the directory and swaps the
-    in-memory manifest. It is a mutating method, so the global preHandler **requires the
+  - **Validated immutable generations.** Language maps, theme maps, grammar extensions,
+    dependencies, types, paths, hashes, JSON depth, claim counts, grammar counts, and byte
+    sizes are validated before a snapshot becomes live. Both theme maps must define
+    `AgentRoom-Light` and `AgentRoom-Dark`, the names every client resolves, so a
+    catalog no client could use is refused here rather than ignored on the headset. The frozen ceilings are 256
+    languages, 4,096 total detection claims (64 per language), 256 primary and 512
+    auxiliary grammars, dependency depth 8, 2 MiB per grammar/WASM, 64 KiB per language
+    configuration, 32 MiB aggregate asset bytes, and JSON depth 32. Language
+    configurations are parsed as JSONC and checked for object shape, consumed
+    field types, and depth before acceptance, then embedded as strict JSON so
+    every client reads the validated value. Accepted referenced
+    bytes are pinned in memory, so a later disk write cannot race the advertised hashes.
+    A rejected runtime reload preserves the last accepted generation; an invalid startup
+    override falls back to the bundled snapshot. A schema-2 index is checked further: every
+    scope named as an injection must exist and its grammar must declare an
+    `injectionSelector`, the injection graph is cycle-free within the depth bound, a grammar
+    may name at most 128 external scopes, and each grammar's `dependencyScopes` are derived
+    from its own `include` rules rather than declared, so a catalog cannot claim a dependency
+    it does not use or hide one it does. An `include` no grammar supplies is not a
+    rejection: that text tokenizes as its enclosing scope, and the status route reports the
+    count as `unresolvedScopeCount` so an operator can see which embedded blocks stay plain.
+  - **Reload route.** `POST /api/editor/catalog/reload` re-reads the directory and swaps only
+    a validated complete snapshot. It is a mutating method, so the global preHandler **requires the
     bearer token when `AUTH_TOKEN` is configured**; it is gated by `LANGUAGE_CATALOG_ENABLED`
     and performs **no workspace mutation**. `GET /api/editor/catalog/status` (a bearer-gated
-    read) reports only the live source/version/language-count for the operator UI.
+    read) reports only live source/version, schema versions, aggregate counts, and a bounded
+    validation code/location for the operator UI, never asset content.
   - **New writable surface (operator-side).** The macOS Languages pane imports an
-    operator-chosen folder by copying its **data files only** (`.json`/`.wasm`, never `.js`,
-    a clean replace) into the app-managed `$AGENTROOM_HOME/catalog-assets`. This is the one
+    operator-chosen folder by copying its **data files only** (`.json`/`.wasm`, never `.js`)
+    into a sibling staging directory, then activating it by same-volume rename. The prior
+    override remains as a rollback target until the backend accepts the candidate.
+    The supervisor admits one import, reset, or reload at a time and holds that
+    ownership through acceptance or rollback. This is the one
     new write, and it targets AgentRoom's **own app-support directory on the operator's Mac**
     — not a registered workspace and not an arbitrary path. The TextMate engine JS stays
     bundled in the app, so the served catalog can still never carry executable language packs.
+  - **Grammars enter the source tree through a maintainer importer, never the operator
+    path.** `apps/backend/scripts/import-editor-grammars.mjs` reads a pinned source table
+    (`editor-grammar-sources.json`), fetches each grammar, language configuration, and
+    license text verbatim from that ref over HTTPS, validates it as JSON data against the
+    same bounds the backend enforces, and writes it into the visionOS source catalog with a
+    provenance record and the license text beside it; it then runs the one-way sync into
+    the committed backend catalog. It executes nothing it fetches, admits only `.json`
+    grammars, and runs only from a developer checkout with network access. The operator
+    importer above stays what it was: a local folder copy that downloads nothing.
   - **Auto-propagation carries no content.** A reload that changes the aggregate version
     publishes an `editor_catalog_changed` event over `WS /api/events` carrying only
     `{version, languageCount}` — never asset bytes. visionOS re-hydrates on receipt and still
-    **verifies every fetched blob's sha256** before use, so a malformed or tampered push
-    degrades to the bundled floor rather than reaching the editor.
+    **verifies every fetched blob's sha256 and byte count** before use, so a malformed or
+    tampered push leaves the current complete generation active rather than reaching the editor.
 - The spatial render engine adds **no new execution or write surface**.
   Geometry-first scenes (`<name>.scene.json`) and semantic solution diagrams
   (`<name>.diagram.json`) are ordinary workspace files; human placement lands

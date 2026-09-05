@@ -1,0 +1,6 @@
+{
+  "include": ["src", "typings"],
+  "reportMissingModuleSource": false,
+  "stubPath": "typings",
+  "typeCheckingMode": "strict"
+}

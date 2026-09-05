@@ -24,7 +24,7 @@ public struct APIClient {
     public var serverBaseURL: URL
     public var authToken: String
 
-    private var urlSession: URLSession
+    var urlSession: URLSession
 
     public init(serverBaseURL: URL, authToken: String, urlSession: URLSession = .shared) {
         self.serverBaseURL = serverBaseURL

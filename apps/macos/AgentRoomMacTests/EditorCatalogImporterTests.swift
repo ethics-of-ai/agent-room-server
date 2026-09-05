@@ -15,6 +15,15 @@ final class EditorCatalogImporterTests: XCTestCase {
         try Data(contents.utf8).write(to: url)
     }
 
+    /// The full stage, activate, commit sequence the supervisor runs around a backend reload.
+    @discardableResult
+    private func importCatalog(from source: URL, into destination: String) throws -> EditorCatalogImporter.Summary {
+        let transaction = try EditorCatalogImporter().stageCatalog(from: source, into: destination)
+        try transaction.activate()
+        try transaction.commit()
+        return transaction.summary
+    }
+
     func testImportCopiesDataFilesAndExcludesExecutableCode() throws {
         let source = makeTempDir()
         try write("{\"grammars\":[]}", to: source.appendingPathComponent("EditorGrammars.json"))
@@ -24,7 +33,7 @@ final class EditorCatalogImporterTests: XCTestCase {
         try write("evil()", to: source.appendingPathComponent("vs-textmate/vscode-textmate.js"))
 
         let destination = makeTempDir().appendingPathComponent("catalog-assets").path
-        let summary = try EditorCatalogImporter().importCatalog(from: source, into: destination)
+        let summary = try importCatalog(from: source, into: destination)
 
         XCTAssertEqual(summary.fileCount, 3)
         let dest = URL(fileURLWithPath: destination)
@@ -39,7 +48,7 @@ final class EditorCatalogImporterTests: XCTestCase {
         try write("{}", to: source.appendingPathComponent("grammars/swift.tmLanguage.json"))
         let destination = makeTempDir().appendingPathComponent("catalog-assets").path
 
-        XCTAssertThrowsError(try EditorCatalogImporter().importCatalog(from: source, into: destination)) { error in
+        XCTAssertThrowsError(try importCatalog(from: source, into: destination)) { error in
             XCTAssertEqual(error as? EditorCatalogImporter.ImportError, .missingIndex)
         }
     }
@@ -52,11 +61,41 @@ final class EditorCatalogImporterTests: XCTestCase {
         // Pre-seed a stale grammar the source no longer has; the clean replace must drop it.
         try write("stale", to: URL(fileURLWithPath: destination).appendingPathComponent("grammars/old.tmLanguage.json"))
 
-        _ = try EditorCatalogImporter().importCatalog(from: source, into: destination)
+        _ = try importCatalog(from: source, into: destination)
 
         let dest = URL(fileURLWithPath: destination)
         XCTAssertTrue(fileManager.fileExists(atPath: dest.appendingPathComponent("EditorGrammars.json").path))
         XCTAssertFalse(fileManager.fileExists(atPath: dest.appendingPathComponent("grammars/old.tmLanguage.json").path))
+    }
+
+    func testStagedImportDoesNotTouchLiveOverrideUntilActivation() throws {
+        let source = makeTempDir()
+        try write("{\"grammars\":[]}", to: source.appendingPathComponent("EditorGrammars.json"))
+        let destination = makeTempDir().appendingPathComponent("catalog-assets")
+        try write("old", to: destination.appendingPathComponent("old.json"))
+
+        let transaction = try EditorCatalogImporter().stageCatalog(from: source, into: destination.path)
+
+        XCTAssertTrue(fileManager.fileExists(atPath: destination.appendingPathComponent("old.json").path))
+        XCTAssertFalse(fileManager.fileExists(atPath: destination.appendingPathComponent("EditorGrammars.json").path))
+        try transaction.rollback()
+        XCTAssertTrue(fileManager.fileExists(atPath: destination.appendingPathComponent("old.json").path))
+    }
+
+    func testRollbackRestoresPreviousOverrideAfterActivation() throws {
+        let source = makeTempDir()
+        try write("{\"grammars\":[]}", to: source.appendingPathComponent("EditorGrammars.json"))
+        let destination = makeTempDir().appendingPathComponent("catalog-assets")
+        try write("old", to: destination.appendingPathComponent("old.json"))
+        let transaction = try EditorCatalogImporter().stageCatalog(from: source, into: destination.path)
+
+        try transaction.activate()
+        XCTAssertFalse(fileManager.fileExists(atPath: destination.appendingPathComponent("old.json").path))
+        XCTAssertTrue(fileManager.fileExists(atPath: destination.appendingPathComponent("EditorGrammars.json").path))
+
+        try transaction.rollback()
+        XCTAssertTrue(fileManager.fileExists(atPath: destination.appendingPathComponent("old.json").path))
+        XCTAssertFalse(fileManager.fileExists(atPath: destination.appendingPathComponent("EditorGrammars.json").path))
     }
 
     func testResetEmptiesTheOverrideDirectory() throws {

@@ -57,8 +57,10 @@ final class BackendSupervisor {
     /// Keyed by runner kind: one source-checkout walk per runner, unlike probe
     /// statuses, which are per probe.
     private(set) var sourceCheckoutOutcomes: [String: RunnerBootstrapSourceCheckoutOutcome] = [:]
-    private(set) var editorCatalogStatus: EditorCatalogStatus?
-    private(set) var editorCatalogActionStatus: EditorCatalogActionStatus?
+    var editorCatalogStatus: EditorCatalogStatus?
+    var editorCatalogActionStatus: EditorCatalogActionStatus?
+    var languageServiceCatalog: LanguageServiceCatalog?
+    var languageServiceCatalogIssue: String?
     /// Whether a backend this app supervises exists right now — spawned this
     /// session or adopted from an earlier one.
     ///
@@ -1153,71 +1155,6 @@ final class BackendSupervisor {
         }
     }
 
-    // MARK: - Editor language catalog (Phase C.5)
-
-    /// Refresh the operator-facing catalog status (source/version/language count)
-    /// for the Languages settings pane.
-    func refreshEditorCatalogStatus() async {
-        do {
-            editorCatalogStatus = try await apiClient.fetchEditorCatalogStatus()
-        } catch {
-            editorCatalogStatus = nil
-            appendDiagnostic("warning", "Could not load editor catalog status: \(error.localizedDescription)")
-        }
-    }
-
-    /// Import a catalog folder into the app-managed override dir (data-only copy),
-    /// then ask the running backend to reload so connected Vision Pro editors update.
-    func importEditorCatalog(from sourceURL: URL) async {
-        editorCatalogActionStatus = .working("Importing catalog…")
-        do {
-            // The copy includes multi-MB .wasm files; running it synchronously on
-            // the main actor hung the UI for the duration of the import.
-            let destinationPath = settings.editorCatalogPath
-            let summary = try await Task.detached(priority: .userInitiated) {
-                try EditorCatalogImporter().importCatalog(from: sourceURL, into: destinationPath)
-            }.value
-            let result = try await apiClient.reloadEditorCatalog()
-            await refreshEditorCatalogStatus()
-            editorCatalogActionStatus = .success("Imported \(summary.fileCount) files. Backend serving the \(result.source.rawValue) catalog.")
-            appendDiagnostic("info", "Imported editor catalog (\(summary.fileCount) files); backend now serving \(result.source.rawValue).")
-        } catch {
-            editorCatalogActionStatus = .failure("Import failed: \(error.localizedDescription)")
-            appendDiagnostic("error", "Failed to import editor catalog: \(error.localizedDescription)")
-        }
-    }
-
-    /// Ask the running backend to re-read the catalog directory and swap in any
-    /// changes (e.g. after editing files in the override dir directly).
-    func reloadEditorCatalog() async {
-        editorCatalogActionStatus = .working("Reloading catalog…")
-        do {
-            let result = try await apiClient.reloadEditorCatalog()
-            await refreshEditorCatalogStatus()
-            editorCatalogActionStatus = .success(result.changed ? "Reloaded; catalog updated." : "Reloaded; no changes.")
-            appendDiagnostic("info", "Reloaded editor catalog (changed: \(result.changed), source: \(result.source.rawValue)).")
-        } catch {
-            editorCatalogActionStatus = .failure("Reload failed: \(error.localizedDescription)")
-            appendDiagnostic("error", "Failed to reload editor catalog: \(error.localizedDescription)")
-        }
-    }
-
-    /// Empty the override dir and reload so the backend falls back to its bundled
-    /// catalog.
-    func resetEditorCatalog() async {
-        editorCatalogActionStatus = .working("Resetting to bundled…")
-        do {
-            try EditorCatalogImporter().reset(settings.editorCatalogPath)
-            let result = try await apiClient.reloadEditorCatalog()
-            await refreshEditorCatalogStatus()
-            editorCatalogActionStatus = .success("Reset to the \(result.source.rawValue) catalog.")
-            appendDiagnostic("info", "Reset editor catalog override; backend now serving \(result.source.rawValue).")
-        } catch {
-            editorCatalogActionStatus = .failure("Reset failed: \(error.localizedDescription)")
-            appendDiagnostic("error", "Failed to reset editor catalog: \(error.localizedDescription)")
-        }
-    }
-
     func refreshDiagnosticsData() async {
         await refreshConnectionStatus()
         async let healthResult = diagnosticsRequestRaw("health")
@@ -1566,7 +1503,7 @@ final class BackendSupervisor {
 
     /// Read-merge-write one managed key, then re-read the backend's provenance so
     /// the pane's pending badge reflects the write that just landed.
-    private func updateManagedSettings(
+    func updateManagedSettings(
         describedAs description: String,
         _ mutate: (inout ManagedBackendSettings) -> Void
     ) {
@@ -1671,7 +1608,7 @@ final class BackendSupervisor {
         defaults.set(settings.remoteSettingsAdminEnabled, forKey: SettingKey.remoteSettingsAdminEnabled)
     }
 
-    private func appendDiagnostic(_ level: String, _ message: String) {
+    func appendDiagnostic(_ level: String, _ message: String) {
         diagnostics.insert(DiagnosticMessage(timestamp: Date(), level: level, message: message), at: 0)
         if diagnostics.count > 80 {
             diagnostics.removeLast(diagnostics.count - 80)

@@ -16,8 +16,45 @@ describe("service config", () => {
       expect(config.codexSandboxMode).toBe("workspace-write");
       expect(config.codexWorkspaceNetworkAccess).toBe(false);
       expect(config.terminalMaxSessions).toBe(8);
+      expect(config.languageServicesEnabled).toBe(false);
       expect(toPublicConfig(config).codexRunnerProtocol).toBe("jsonrpc");
+      expect(toPublicConfig(config).languageServicesEnabled).toBe(false);
       expect(toPublicConfig(config)).not.toHaveProperty("terminalMaxSessions");
+    });
+  });
+
+  it("keeps language-service execution off by default and executable resolution private", () => {
+    withCleanEnv(() => {
+      process.env.LANGUAGE_SERVICES_ENABLED = "true";
+      process.env.SOURCEKIT_LSP_EXECUTABLE = "/opt/toolchains/sourcekit-lsp";
+      process.env.RUST_ANALYZER_EXECUTABLE = "/opt/toolchains/rust-analyzer";
+      process.env.GOPLS_EXECUTABLE = "/opt/toolchains/gopls";
+      process.env.JDTLS_EXECUTABLE = "/opt/toolchains/jdtls";
+      process.env.KOTLIN_LSP_EXECUTABLE = "/opt/toolchains/intellij-server";
+      process.env.CSHARP_LS_EXECUTABLE = "/opt/toolchains/csharp-ls";
+
+      const config = getServiceConfig();
+      const publicConfig = toPublicConfig(config);
+
+      expect(config.languageServicesEnabled).toBe(true);
+      expect(config.sourcekitLspExecutable).toBe("/opt/toolchains/sourcekit-lsp");
+      expect(config.rustAnalyzerExecutable).toBe("/opt/toolchains/rust-analyzer");
+      expect(config.goplsExecutable).toBe("/opt/toolchains/gopls");
+      expect(config.jdtlsExecutable).toBe("/opt/toolchains/jdtls");
+      expect(config.kotlinLspExecutable).toBe("/opt/toolchains/intellij-server");
+      expect(config.csharpLsExecutable).toBe("/opt/toolchains/csharp-ls");
+      expect(publicConfig.languageServicesEnabled).toBe(true);
+      for (const key of [
+        "sourcekitLspExecutable",
+        "rustAnalyzerExecutable",
+        "goplsExecutable",
+        "jdtlsExecutable",
+        "kotlinLspExecutable",
+        "csharpLsExecutable"
+      ]) {
+        expect(publicConfig).not.toHaveProperty(key);
+        expect(publicConfig.settings).not.toHaveProperty(key);
+      }
     });
   });
 
@@ -238,6 +275,13 @@ function withCleanEnv(run: () => void): void {
     "STATE_DIR",
     "EDITOR_CATALOG_DIR",
     "LANGUAGE_CATALOG_ENABLED",
+    "LANGUAGE_SERVICES_ENABLED",
+    "SOURCEKIT_LSP_EXECUTABLE",
+    "RUST_ANALYZER_EXECUTABLE",
+    "GOPLS_EXECUTABLE",
+    "JDTLS_EXECUTABLE",
+    "KOTLIN_LSP_EXECUTABLE",
+    "CSHARP_LS_EXECUTABLE",
     "TERMINAL_MAX_SESSIONS"
   ];
   const previous = new Map(names.map((name) => [name, process.env[name]]));

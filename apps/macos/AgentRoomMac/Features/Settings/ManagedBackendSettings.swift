@@ -31,6 +31,7 @@ struct ManagedBackendSettings: Codable, Equatable {
     var gitCommandTimeoutMs: Int?
     var gitNetworkTimeoutMs: Int?
     // Tier 2 — trust posture.
+    var languageServicesEnabled: Bool?
     var terminalEnabled: Bool?
     var terminalMaxSessions: Int?
     // Codex.
@@ -74,6 +75,7 @@ struct ManagedBackendSettings: Codable, Equatable {
     /// shows what an absent key actually produces instead of guessing.
     static let defaultRunnerKind = AppSettings.defaultRunnerKind
     static let defaultSceneEngineEnabled = true
+    static let defaultLanguageServicesEnabled = false
     static let defaultTerminalEnabled = false
     static let defaultCodexWorkspaceNetworkAccess = false
 
@@ -87,6 +89,10 @@ struct ManagedBackendSettings: Codable, Equatable {
 
     var resolvedSceneEngineEnabled: Bool {
         sceneEngineEnabled ?? Self.defaultSceneEngineEnabled
+    }
+
+    var resolvedLanguageServicesEnabled: Bool {
+        languageServicesEnabled ?? Self.defaultLanguageServicesEnabled
     }
 
     var resolvedTerminalEnabled: Bool {

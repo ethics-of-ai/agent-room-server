@@ -206,8 +206,8 @@ durable sessions.
 ## Managed Backend Settings
 
 Runtime preferences and trust posture — the default runner, the Codex sandbox
-and network policy, the interactive terminal, the spatial scene engine, and the
-model/effort defaults — live in the backend-owned
+and network policy, the interactive terminal, editor language services, the
+spatial scene engine, and the model/effort defaults — live in the backend-owned
 `$AGENTROOM_HOME/config/settings.json` rather than in the launch environment.
 The app **writes that file directly** instead of calling `PATCH /api/config`, so
 the panes keep working while the backend is stopped, which is exactly when an
@@ -326,19 +326,28 @@ not yet have dedicated Mac UI controls. The app
 strips stale provider and git automation environment values from the backend
 launch environment before starting the sidecar.
 
-The Advanced settings pane carries two managed feature toggles: **Enable
+The Advanced settings pane carries three managed feature toggles: **Enable
 interactive terminal** (`terminalEnabled`, off by default — see
-`docs/safety/TRUST_AND_SAFETY.md`) and **Enable spatial scene volumes**
+`docs/safety/TRUST_AND_SAFETY.md`), **Enable editor language services**
+(`languageServicesEnabled`, off by default), and **Enable spatial scene volumes**
 (`sceneEngineEnabled`, on by default), which gates the backend's bearer-auth'd
 composed-scene read route and, through `/api/config`, the visionOS Spatial Scene
-open affordance. Both take effect on the next backend launch.
+open affordance. All three take effect on the next backend launch.
+
+The Languages pane renders every row returned by the backend registry, including
+an operator-defined external service, without reading its definition. External
+services are configured only in the app-managed config `.env` with
+`EXTERNAL_LANGUAGE_SERVICES_ENABLED` and `LANGUAGE_SERVICE_ADAPTERS`; the app
+does not copy their executable paths, argv, markers, or environment grants into
+managed settings or its own bootstrap descriptors.
 
 Beside them is **Allow clients to change trust settings**
 (`REMOTE_SETTINGS_ADMIN`, off by default), the master switch for remote tier-2
 edits. Paired clients can always change preferences such as the default runner
 or model; this switch is what additionally lets them change trust posture —
-terminal access, the Claude Code permission mode and workspace-settings loading,
-the Codex sandbox and network policy — with only the AgentRoom bearer token.
+terminal access, editor language services, the Claude Code permission mode and
+workspace-settings loading, the Codex sandbox and network policy — with only
+the AgentRoom bearer token.
 Leaving it off keeps those decisions physically on this Mac. It is deliberately
 an app setting injected at launch, never a key in `settings.json`: a key in the
 file could be granted by whoever already holds the bearer token, which is the
@@ -625,13 +634,23 @@ Vision Pro editors **without shipping an app update** (Phase C.5).
 - **Import Catalog Folder…** picks a folder shaped like the catalog
   (`EditorGrammars.json` at its root, plus `grammars/`, `language-configs/`, and
   `vs-textmate/`). The app copies only `.json`/`.wasm` **data** (never `.js`) into
-  the app-managed override dir `$AGENTROOM_HOME/catalog-assets` (a clean replace),
-  then asks the running backend to reload.
+  a sibling staging directory. The app activates that candidate with a same-volume
+  directory rename, asks the backend to validate and reload it, and commits only an
+  accepted generation. A rejected candidate rolls back to the previous override.
 - **Reload** re-reads the override dir (then the bundled catalog) and swaps in any
   changes; **Reset to Bundled** empties the override dir so the backend serves its
   built-in catalog again.
-- The pane shows which catalog is being served (imported vs. bundled), the version,
-  and the language count.
+- The pane shows the live source and hash, catalog/language schema versions, total
+  languages, syntax-provider and grammar counts, how many embedded scopes the live
+  grammars include that no grammar supplies (those blocks stay plain text), and
+  bounded validation status including its code and catalog-relative location.
+- **Semantic Service Readiness** reads the backend's public
+  `GET /api/editor/language-services` projection and distinguishes disabled, not
+  configured, not checked, ready, and failed states. Not checked is neutral: the
+  registry read never starts a service, and readiness exists only after an editor
+  connection attempts initialization. The response contains service names,
+  language ids, feature kinds, and booleans only. Executable paths, environment
+  values, and other tier-3 configuration remain on the Mac and never enter it.
 
 The app injects `EDITOR_CATALOG_DIR=$AGENTROOM_HOME/catalog-assets` at launch so the
 import target and the backend's read path are one source of truth. The backend

@@ -8,10 +8,12 @@
   validated without knowing which runners exist, so the registry is built first
   (stage 1) and `getServiceConfig()` parses the settings file against the id
   schema derived from it.
-- `src/config/settingsStore.ts`: the backend-owned managed settings file
+- `src/config/globalManagedSettings.ts` declares backend-global settings;
+  `src/config/settingsStore.ts` owns the backend-managed settings file
   (`$AGENTROOM_HOME/config/settings.json`, dev fallback
   `<cwd>/.agentroom/config/settings.json`). It owns the *assembly* of the managed
-  setting table rather than the table itself: the globals are declared here and
+  setting table rather than the table itself: globals come from the adjacent
+  declaration module and
   every runner-owned setting is declared on that runner's `RunnerDescriptor` as a
   `ManagedSettingDefinition` (`domain/managedSettings.ts`) carrying its schema,
   tier, environment variable, value kind, and default. The file schema, the
@@ -569,15 +571,56 @@
   fails, times out, or the SDK has no such method, and the value then travels
   the exact path `modelContextWindowTokens` takes through `recordTokenUsage`,
   the session and turn records, and both usage events.
-- `src/editor`: the backend-served editor language catalog (Phase C/C.5).
-  `EditorCatalogStore`/`EditorCatalogManager` resolve the served directory
-  (`EDITOR_CATALOG_DIR` operator override when it holds a manifest, else the
-  bundled `apps/backend/catalog-assets`, else none), build a versioned in-memory
-  manifest from the served bytes, serve referenced blobs under the same read
-  bounding as workspaces (`.json`/`.wasm` allowlist, never `.js`), and reload on
-  operator request; `editorCatalogManifest.ts` holds the zod contracts. Gated by
-  `LANGUAGE_CATALOG_ENABLED`. Shared path/hash helpers live in `src/util`
-  (`pathBounding.ts`, `hash.ts`).
+- `src/editor`: the backend-served editor language catalog (Phase C/C.5,
+  extended by language-intelligence Phase 2). `EditorCatalogStore`/
+  `EditorCatalogManager` resolve the served directory (`EDITOR_CATALOG_DIR`
+  operator override when it holds a manifest, else the bundled
+  `apps/backend/catalog-assets`, else none), pin an accepted generation's
+  referenced bytes in memory, preserve the last accepted runtime generation on
+  rejection, serve referenced blobs under the same read bounding as workspaces
+  (`.json`/`.wasm` allowlist, never `.js`), and reload on operator request.
+  `editorCatalogAssembly.ts` is the read-and-validate pass that turns a directory
+  into a generation: it parses every grammar, derives each one's
+  `dependencyScopes` from its own `include` rules (never declared), refuses an
+  injection whose grammar declares no `injectionSelector`, bounds the injection
+  graph's depth and refuses a cycle in it, caps the external scopes one grammar
+  may name, and records the scopes no grammar supplies, which status serves as
+  `unresolvedScopeCount`. `editorLanguageConfiguration.ts` parses JSONC using
+  the bundled TypeScript parser and validates the configuration fields the
+  client consumes. Assembly embeds the accepted value as strict JSON, avoiding
+  differences between backend and WebKit JSONC readers.
+  `editorCatalogManifest.ts` holds the zod contracts.
+  Gated by `LANGUAGE_CATALOG_ENABLED`. Shared path/hash helpers live in
+  `src/util` (`pathBounding.ts`, `hash.ts`). The grammars themselves enter the
+  visionOS source tree through the maintainer-only
+  `scripts/import-editor-grammars.mjs`: it fetches the refs pinned in
+  `scripts/editor-grammar-sources.json`, validates each file as JSON data
+  against the same bounds, writes provenance and license texts beside the
+  grammars, then runs `scripts/sync-catalog-assets.mjs` into the committed
+  `catalog-assets` and `scripts/language-intelligence-matrix.mjs` into the
+  generated support matrix. The matrix combines those tested syntax facts with
+  the built-in language-service registry's tested versions, languages, features,
+  project markers, and standalone-file policy. It excludes runtime readiness,
+  executable details, environment grants, and operator-defined adapters.
+  `test/fixtures/editorGrammarCorpus.json` is the
+  tokenization corpus the backend suite runs under Node with the vendored
+  engine and the visionOS render suite runs inside the real editor page.
+  `docs/engineering/VISIONOS_LANGUAGE_DEPENDENCY_UPDATES.md` is the maintainer
+  procedure for changing any editor engine, syntax-data, or built-in service
+  pin and names the focused and full verification gates.
+  `editor/languageServices` is the separate Phase 3 semantic-execution boundary:
+  a descriptor registry for SourceKit-LSP, pinned bundled TypeScript and
+  Pyright, plus optional configured rust-analyzer, gopls, Eclipse JDT LS,
+  Kotlin LSP, and csharp-ls; deterministic bounded project roots; an
+  `EditorLanguageService` adapter over bounded Content-Length JSON-RPC;
+  and a host that owns process instances, document shadows and leases, separate
+  client/LSP versions, request correlation, cancellation, idle close, and crash
+  replay. `externalAdapters.ts` may add operator-defined descriptors only when
+  `EXTERNAL_LANGUAGE_SERVICES_ENABLED` admits the environment-only
+  `LANGUAGE_SERVICE_ADAPTERS` list; invalid or built-in-shadowing lists are
+  dropped whole, and their values never reach a public response. Semantic
+  execution is gated by `LANGUAGE_SERVICES_ENABLED` (default off); neither the
+  catalog nor `AgentRunner` owns it.
 - `src/terminal/TerminalSessionService.ts`: the interactive terminal (PTY)
   backend. Spawns a real login shell (`node-pty`) in the realpath of a registered
   workspace, tracks sessions behind the configurable global per-process cap
@@ -723,6 +766,8 @@
   coding-agent capabilities, agent sessions (including the one route that
   answers an outstanding permission request), editor language catalog
   (`editorCatalogRoutes.ts`: manifest/asset/status reads + operator reload), the
+  probe-free language-service registry read and opt-in closed workspace socket
+  (`languageServiceRoutes.ts`), the
   spatial render read plus the Mermaid import and diagram edit computes
   (`spatialSceneRoutes.ts`, all registered when
   `SCENE_ENGINE_ENABLED`), the

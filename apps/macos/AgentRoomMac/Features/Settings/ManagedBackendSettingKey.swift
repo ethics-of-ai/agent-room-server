@@ -29,6 +29,7 @@ enum ManagedBackendSettingKey: String, CaseIterable {
     case gitNetworkTimeoutMs
     // Tier 2 — trust posture. Editable from these panes always; editable from a
     // paired client only while the Mac-side `REMOTE_SETTINGS_ADMIN` switch is on.
+    case languageServicesEnabled
     case terminalEnabled
     case terminalMaxSessions
     // Codex.

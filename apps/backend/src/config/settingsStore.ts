@@ -10,9 +10,9 @@ import type {
   ManagedSettingValue,
   ManagedSettingValueKind
 } from "../domain/managedSettings";
-import { agentRunnerKindSchema, serviceConfigSchema } from "../domain/schemas";
 import { managedSettingScope, runnerManagedSettings, type ManagedSettingScope } from "../runner/registry";
 import { booleanEnv, numberEnv, optionalEnv } from "./env";
+import { globalSettingDefinitions } from "./globalManagedSettings";
 
 // The backend-owned managed settings file.
 //
@@ -31,7 +31,7 @@ import { booleanEnv, numberEnv, optionalEnv } from "./env";
 //    at startup, so a uniform "applies on restart" is both the simplest rule and
 //    the true one.
 // 4. One admission list. *Which* settings exist is not written down here: the
-//    global ones are declared below and every runner's are declared on its own
+//    global ones are declared in `globalManagedSettings.ts` and every runner's on its own
 //    `RunnerDescriptor` (`runner/registry.ts`), and this module walks both. A
 //    runner's settings work everywhere because the registry declared them, not
 //    because several tables were edited together.
@@ -43,10 +43,8 @@ import { booleanEnv, numberEnv, optionalEnv } from "./env";
 // every trust-posture default is the conservative one (terminal off, no
 // workspace network access), so the fail-safe direction is the safe one.
 
-// The managed-settings fields ride outside `src/domain` for the same reason
-// `sceneEngineEnabled` does (see serviceConfig.ts): the domain contracts are not
-// the owner of this seam. Every field is optional so a hand-built ServiceConfig
-// (route tests) still typechecks; only `getServiceConfig()` populates them.
+// Runtime-only managed-settings metadata stays beside its assembler. Every
+// field is optional so hand-built ServiceConfig values in tests still typecheck.
 declare module "../domain/models" {
   interface ServiceConfig {
     /** Per-key provenance, snapshotted at startup — the file can change under us. */
@@ -75,93 +73,6 @@ declare module "../domain/models" {
 /** The two sections of a version-2 document. Every canonical address starts here. */
 const GLOBAL_SECTION = "global";
 const RUNNERS_SECTION = "runners";
-
-/**
- * The settings this backend owns that belong to no runner, in file order.
- *
- * A global is a setting about the backend itself — which runner is the default,
- * which channels are on, how long a Git command may take, whether the terminal
- * exists. Anything a *runner* owns is declared on that runner's descriptor
- * instead, so this list does not grow when a runner is registered.
- */
-const globalSettingDefinitions: readonly ManagedSettingDefinition[] = [
-  {
-    field: "runnerKind",
-    // Derived from the registry so the settings file admits exactly the runners
-    // known after startup registration.
-    schema: agentRunnerKindSchema.optional(),
-    tier: 1,
-    env: "RUNNER_KIND",
-    valueKind: "string",
-    defaultValue: "codex"
-  },
-  {
-    field: "artifactsEnabled",
-    schema: z.boolean().optional(),
-    tier: 1,
-    env: "ARTIFACTS_ENABLED",
-    valueKind: "boolean",
-    defaultValue: true
-  },
-  {
-    field: "languageCatalogEnabled",
-    schema: z.boolean().optional(),
-    tier: 1,
-    env: "LANGUAGE_CATALOG_ENABLED",
-    valueKind: "boolean",
-    defaultValue: true
-  },
-  {
-    field: "sceneEngineEnabled",
-    schema: z.boolean().optional(),
-    tier: 1,
-    env: "SCENE_ENGINE_ENABLED",
-    valueKind: "boolean",
-    defaultValue: true
-  },
-  {
-    field: "clarifyingQuestionsEnabled",
-    schema: z.boolean().optional(),
-    tier: 1,
-    env: "CLARIFYING_QUESTIONS_ENABLED",
-    valueKind: "boolean",
-    defaultValue: true
-  },
-  {
-    field: "gitCommandTimeoutMs",
-    schema: serviceConfigSchema.shape.gitCommandTimeoutMs.optional(),
-    tier: 1,
-    env: "GIT_COMMAND_TIMEOUT_MS",
-    valueKind: "number",
-    defaultValue: 30_000
-  },
-  {
-    field: "gitNetworkTimeoutMs",
-    schema: serviceConfigSchema.shape.gitNetworkTimeoutMs,
-    tier: 1,
-    env: "GIT_NETWORK_TIMEOUT_MS",
-    valueKind: "number",
-    defaultValue: 120_000
-  },
-  // Tier 2 — trust posture. In the file like tier 1; what differs is who may
-  // change it remotely (see `REMOTE_SETTINGS_ADMIN` below).
-  {
-    field: "terminalEnabled",
-    schema: z.boolean().optional(),
-    tier: 2,
-    env: "TERMINAL_ENABLED",
-    valueKind: "boolean",
-    defaultValue: false
-  },
-  {
-    field: "terminalMaxSessions",
-    schema: serviceConfigSchema.shape.terminalMaxSessions.removeDefault().optional(),
-    tier: 2,
-    env: "TERMINAL_MAX_SESSIONS",
-    valueKind: "number",
-    defaultValue: 8
-  }
-];
 
 /**
  * One managed setting, at both of its addresses.

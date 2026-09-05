@@ -65,17 +65,14 @@ export async function registerEditorCatalogRoutes(
   });
 
   // Operator-facing status for the macOS catalog pane. A read; bearer-gated like
-  // the other GETs. Returns no asset content, only the live source + version.
+  // the other GETs. Returns bounded counts and validation metadata, never assets.
   app.get("/api/editor/catalog/status", async (request, reply) => {
     if (!authorizedForRead(request.headers.authorization, config)) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
-    const manifest = catalog.getManifest();
     return {
       enabled: config.languageCatalogEnabled !== false,
-      source: catalog.source(),
-      version: manifest?.version ?? null,
-      languageCount: manifest?.grammars.length ?? 0
+      ...catalog.status()
     };
   });
 
@@ -85,17 +82,15 @@ export async function registerEditorCatalogRoutes(
   // don't churn connected editors.
   app.post("/api/editor/catalog/reload", async (_request, _reply) => {
     const result = await catalog.reload();
-    if (result.changed && result.version) {
+    if (result.accepted && result.changed && result.version) {
       eventBus.publish<EditorCatalogChangedPayload>("editor_catalog_changed", {
         version: result.version,
-        languageCount: catalog.getManifest()?.grammars.length ?? 0
+        languageCount: result.languageCount
       });
     }
     return {
       reloaded: true,
-      source: result.source,
-      version: result.version,
-      changed: result.changed
+      ...result
     };
   });
 }

@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "jsx": "preserve",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "paths": {
+      "react": ["types/react/index.d.ts"]
+    },
+    "strict": true
+  },
+  "include": ["src", "types"]
+}

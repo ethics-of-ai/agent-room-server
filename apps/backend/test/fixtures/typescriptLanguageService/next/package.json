@@ -1,0 +1,7 @@
+{
+  "name": "agentroom-next-fixture",
+  "private": true,
+  "dependencies": {
+    "next": "fixture"
+  }
+}

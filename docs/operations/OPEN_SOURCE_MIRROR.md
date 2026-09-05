@@ -88,6 +88,9 @@ owner's.
 8. **Docs scope.** **Decided:** strip the visionOS documents. Read as: the
    visionOS-specific files go (`docs/clients/VISIONOS.md`,
    `docs/engineering/VISIONOS_DESIGN_PRINCIPLES.md`,
+   `docs/engineering/VISIONOS_LANGUAGE_INTELLIGENCE.md` with its Phase 0 record,
+   its generated evidence, and the matrix script and test that read
+   `apps/visionos`,
    `docs/engineering/VISIONOS_PROFILE_SELECTION.md`, and `docs/reference/`);
    shared documents that mention the visionOS client in passing (the API,
    architecture, trust, and orchestration records) travel whole, because a
@@ -169,7 +172,7 @@ at that commit travel (never the working tree, so `.env`, `.agentroom/`,
 | `scripts/generate-app-icons.swift` | `macosDistribution.test.ts` reads its source. It also writes visionOS icon paths, so it cannot *run* in the mirror; see Phase 1. |
 | `scripts/acp-conformance-agent.mjs` | Referenced by `ACP_CONFORMANCE.md`; harmless. |
 | `assets/branding/` | Inputs to the icon generator (two PNGs plus a README). Licensing note below. |
-| `docs/` minus `docs/README.md`, `docs/reference/`, the three visionOS documents in Decision 8, and the `*-check.diagram.json` dogfood files | Decisions 7 and 8. |
+| `docs/` minus `docs/README.md`, `docs/reference/`, the private visionOS documents in Decision 8, and the `*-check.diagram.json` dogfood files | Decisions 7 and 8. |
 | `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.env.example`, `.gitignore`, `tests/README.md` | Root build files. `pnpm-workspace.yaml` says `apps/*`; only `apps/backend` has a `package.json`, so the lockfile is unchanged by dropping visionOS. |
 
 Overlay, kept in this repo under `mirror/overlay/` and copied on top of the
@@ -183,10 +186,16 @@ allowlisted tree (overlay wins):
 | `CONTRIBUTING.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `SECURITY.md` | Decisions 5 and 6. |
 | `.github/workflows/ci.yml` | Public CI (below). |
 | `.github/workflows/release.yml` | DMG build and GitHub Release (below). |
-| `THIRD_PARTY_NOTICES.md` | Sources and licenses of what the DMG bundles: Node.js, the production npm tree, the catalog grammars and themes, the Claude Agent SDK and Claude Code binary under Anthropic's terms (Decision 9), and the Cursor SDK with its signed helper binaries under Cursor's terms (Decision 10). |
+| `THIRD_PARTY_NOTICES.md` | Sources and licenses of what the DMG bundles: Node.js, the production npm tree including the TypeScript and Pyright language services, the catalog grammars, language configurations, and Oniguruma WASM, the Claude Agent SDK and Claude Code binary under Anthropic's terms (Decision 9), and the Cursor SDK with its signed helper binaries under Cursor's terms (Decision 10). |
 
 Never mirrored: `apps/visionos/`, `docs/reference/`, `docs/clients/VISIONOS.md`,
 `docs/engineering/VISIONOS_DESIGN_PRINCIPLES.md`,
+`docs/engineering/VISIONOS_LANGUAGE_INTELLIGENCE.md`,
+`docs/engineering/VISIONOS_LANGUAGE_INTELLIGENCE_PHASE0.md`, `docs/engineering/generated/`,
+`docs/engineering/VISIONOS_LANGUAGE_DEPENDENCY_UPDATES.md`,
+`apps/backend/scripts/language-intelligence-matrix.mjs`,
+`apps/backend/scripts/capture-language-intelligence-evidence.ts`,
+`apps/backend/test/languageIntelligenceMatrix.test.ts`,
 `docs/engineering/VISIONOS_PROFILE_SELECTION.md`, this repo's `README.md` and
 `docs/README.md` (overlay versions replace them), `AGENTS.md` and `CLAUDE.md`
 (no public counterpart), `.agents/`, `.codex/`, `.claude/`,
@@ -621,10 +630,14 @@ backend.
   package step depends on it. The parity test skips; the script is a dev tool.
 - Third-party content the DMG ships: the Node runtime (its `LICENSE` is in the
   tarball and must not be stripped when the runtime directory is copied), the
-  production npm tree, the catalog grammars and themes, the Claude Agent SDK
-  with the Claude Code binary (Decision 9), and the Cursor SDK with its signed
-  helper binaries (Decision 10). The `THIRD_PARTY_NOTICES.md` overlay file
-  lists them. `pnpm licenses list --prod` is the source for the npm portion;
+  production npm tree including the TypeScript and Pyright language services,
+  the catalog grammars, language configurations, and Oniguruma WASM, the Claude
+  Agent SDK with the Claude Code binary (Decision 9), and the Cursor SDK with
+  its signed helper binaries (Decision 10). The `THIRD_PARTY_NOTICES.md`
+  overlay file lists them. The private grammar source table and its generated
+  provenance and license directories are the source for the catalog portion;
+  a private test pins them to the public notice. `pnpm licenses list --prod` is
+  the source for the npm portion;
   the Anthropic SDK's `package.json` says `SEE LICENSE IN README.md`, and that
   README points at Anthropic's Commercial Terms of Service; the Cursor SDK's
   says `SEE LICENSE IN LICENSE.md`, one line pointing at Cursor's Terms of

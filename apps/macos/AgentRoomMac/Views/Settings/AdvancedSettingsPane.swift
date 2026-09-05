@@ -5,6 +5,7 @@ struct AdvancedSettingsPane: View {
     @State private var launchAtLoginEnabled = false
     @State private var autoRestartBackendAfterCrash = true
     @State private var terminalEnabled = false
+    @State private var languageServicesEnabled = false
     @State private var sceneEngineEnabled = true
     @State private var remoteSettingsAdminEnabled = false
 
@@ -31,6 +32,17 @@ struct AdvancedSettingsPane: View {
                 SettingsCaption(text: "Lets visionOS open an unsandboxed shell inside a registered workspace. The shell has the same filesystem access as your Mac user.", systemImage: "terminal")
                 SettingsCaption(text: "Leave this off if anyone you do not trust can reach the backend. The change applies after the next backend restart.")
                 ManagedSettingFootnote(key: .terminalEnabled)
+            }
+
+            Section("Code Intelligence") {
+                Toggle("Enable editor language services", isOn: $languageServicesEnabled)
+                    .disabled(supervisor.isSettingEnvironmentLocked(.languageServicesEnabled))
+                    .onChange(of: languageServicesEnabled) {
+                        updateLanguageServicesEnabled()
+                    }
+                SettingsCaption(text: "Starts a bounded SourceKit-LSP process only after an authenticated editor tab opens a supported file in a registered workspace.", systemImage: "chevron.left.forwardslash.chevron.right")
+                SettingsCaption(text: "The service receives the tab's unsaved buffer and project files. The change applies after the next backend restart.")
+                ManagedSettingFootnote(key: .languageServicesEnabled)
             }
 
             Section("Spatial Scenes") {
@@ -112,6 +124,7 @@ struct AdvancedSettingsPane: View {
     /// Reloads changes made in the Runner pane, by a paired client, or by reset.
     private func loadManagedSettings() {
         terminalEnabled = supervisor.displayedTerminalEnabled
+        languageServicesEnabled = supervisor.displayedLanguageServicesEnabled
         sceneEngineEnabled = supervisor.displayedSceneEngineEnabled
     }
 
@@ -127,6 +140,11 @@ struct AdvancedSettingsPane: View {
     private func updateTerminalEnabled() {
         guard terminalEnabled != supervisor.displayedTerminalEnabled else { return }
         supervisor.updateTerminalEnabled(terminalEnabled)
+    }
+
+    private func updateLanguageServicesEnabled() {
+        guard languageServicesEnabled != supervisor.displayedLanguageServicesEnabled else { return }
+        supervisor.updateLanguageServicesEnabled(languageServicesEnabled)
     }
 
     private func updateSceneEngineEnabled() {

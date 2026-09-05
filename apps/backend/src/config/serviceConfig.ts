@@ -21,20 +21,6 @@ import { releaseCompatibility } from "../releaseInfo";
 import { registerExternalRunnerDescriptors } from "../runner/registry";
 import { acpRunnerDescriptor, readAcpAdapterConfigs } from "../runner/acp/config";
 
-// Spatial scene engine flag (Phase 0 of the spatial-solution-diagrams plan).
-// The flag stays out of src/domain for now — the domain contracts are owned by
-// the diagram phases — so the config interfaces are augmented here instead of
-// edited. When false, the scene read route is not registered; scene files
-// remain ordinary workspace files either way.
-declare module "../domain/models" {
-  interface ServiceConfig {
-    sceneEngineEnabled?: boolean;
-  }
-  interface PublicServiceConfig {
-    sceneEngineEnabled?: boolean;
-  }
-}
-
 export function getServiceConfig(): ServiceConfig {
   // Stage 1 of the two-stage startup, and the first release where it has
   // something to read: externally configured (tier-3) ACP adapters are admitted
@@ -146,11 +132,18 @@ export function getServiceConfig(): ServiceConfig {
     cursorBackendUrl: optionalEnv("CURSOR_BACKEND_URL"),
     terminalShell: optionalEnv("TERMINAL_SHELL")
   });
-  // `sceneEngineEnabled` rides outside the domain schema parse (which strips
-  // keys it does not know) — see the module augmentation above.
+  // These startup-only fields stay outside the schema parse, which strips keys
+  // it does not know. Their contracts still live in domain/models.ts.
   return {
     ...parsed,
     sceneEngineEnabled: settings.sceneEngineEnabled as boolean | undefined,
+    languageServicesEnabled: settings.languageServicesEnabled as boolean | undefined,
+    sourcekitLspExecutable: optionalEnv("SOURCEKIT_LSP_EXECUTABLE"),
+    rustAnalyzerExecutable: optionalEnv("RUST_ANALYZER_EXECUTABLE"),
+    goplsExecutable: optionalEnv("GOPLS_EXECUTABLE"),
+    jdtlsExecutable: optionalEnv("JDTLS_EXECUTABLE"),
+    kotlinLspExecutable: optionalEnv("KOTLIN_LSP_EXECUTABLE"),
+    csharpLsExecutable: optionalEnv("CSHARP_LS_EXECUTABLE"),
     settingsMeta: managed.sources,
     settingsValues: settings,
     managedSettingsPath,
@@ -180,6 +173,7 @@ export function toPublicConfig(config: ServiceConfig, onDiskSettings?: ManagedSe
     claudeCodeLoadWorkspaceSkills:
       config.claudeCodeLoadWorkspaceSkills ?? defaultClaudeCodeLoadWorkspaceSkills,
     sceneEngineEnabled: config.sceneEngineEnabled ?? true,
+    languageServicesEnabled: config.languageServicesEnabled ?? false,
     terminalEnabled: config.terminalEnabled ?? false,
     // Additive metadata: the flat fields above keep their meaning (the values
     // this process is *running* with), so existing clients are untouched.
