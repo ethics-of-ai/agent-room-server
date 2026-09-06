@@ -1,4 +1,5 @@
 import type { LocalWorkspaceGitStatus, LocalWorkspaceGitSnapshot } from "../domain/models";
+import { GitHistoryReader } from "./git/historyReads";
 import {
   gitCommandEnv,
   gitNetworkEnv,
@@ -77,6 +78,7 @@ export interface GitPushTarget {
 }
 
 export class LocalWorkspaceGit {
+  readonly historyReader: GitHistoryReader;
   constructor(
     private readonly runGit: GitCommandExecutor,
     private readonly runGitBlob: GitBlobExecutor,
@@ -86,7 +88,9 @@ export class LocalWorkspaceGit {
      * one — a fetch over a slow link is not a hung command.
      */
     private readonly runGitNetwork: GitCommandExecutor = runGit
-  ) {}
+  ) {
+    this.historyReader = new GitHistoryReader(runGit, runGitBlob);
+  }
 
   async snapshot(workspacePath: string): Promise<LocalWorkspaceGitSnapshot> {
     try {

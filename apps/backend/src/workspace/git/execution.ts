@@ -19,7 +19,7 @@ export type GitCommandExecutor = (
 // Keeping this separate from `GitCommandExecutor` (which always decodes stdout
 // as a utf8 string) lets `fileAtHead` detect invalid-UTF-8/binary content from
 // the actual bytes instead of from an already-lossily-decoded string.
-export type GitBlobExecutor = (cwd: string, args: string[]) => Promise<Buffer>;
+export type GitBlobExecutor = (cwd: string, args: string[], env?: NodeJS.ProcessEnv) => Promise<Buffer>;
 
 export function defaultGitExecutor(timeoutMs: number): GitCommandExecutor {
   return async (cwd, args, env) => {
@@ -41,9 +41,10 @@ export function defaultGitExecutor(timeoutMs: number): GitCommandExecutor {
 // pre-bound `promisify`d function, which is why `defaultGitExecutor` cannot also
 // serve buffer reads.
 export function defaultGitBlobExecutor(timeoutMs: number): GitBlobExecutor {
-  return (cwd, args) =>
+  return (cwd, args, env) =>
     new Promise<Buffer>((resolveBuffer, reject) => {
-      execFile("git", args, { cwd, timeout: timeoutMs, windowsHide: true, encoding: "buffer" }, (error, stdout) => {
+      execFile("git", args, { cwd, env: env ? { ...process.env, ...env } : undefined,
+        timeout: timeoutMs, windowsHide: true, encoding: "buffer" }, (error, stdout) => {
         if (error) {
           reject(error);
           return;

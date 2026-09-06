@@ -709,7 +709,7 @@ public struct APIClient {
         try await request(path.split(separator: "/").map(String.init), method: method, body: body, contentType: contentType)
     }
 
-    private func request<T: Decodable>(
+    func request<T: Decodable>(
         _ pathSegments: [String],
         method: String = "GET",
         body: Data? = nil,

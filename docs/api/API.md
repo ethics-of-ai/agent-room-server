@@ -1455,6 +1455,69 @@ content), `404` for an unknown workspace, and `415` for a secret-named path, a
 directory (tree) target, or a binary blob. Like the other read routes, it emits
 no events and no audit entries.
 
+### Git history and historical diffs
+
+These three GET routes require bearer auth when configured and emit no events
+or audit entries. They read the local repository only. Remote-tracking refs
+describe the last fetch; none of these reads fetches or mutates Git state.
+Older backends return `404` for these additive routes.
+
+`GET /api/workspaces/:workspaceId/git/history?branch=refs/heads/main&compare=refs/heads/feature&limit=100`
+returns repository ancestry for a registered workspace. `branch` defaults to
+the current branch or detached HEAD. `compare` is optional. Both accept only
+`HEAD` or an exact id from the returned local/remote branch catalog, never
+revision expressions. `limit` defaults to 100 and accepts integers from 1 to
+200. Unknown query keys are refused.
+
+The response has `workspaceId`, `isRepository`, optional `head`, `selectedRef`,
+`comparisonRef`, and `upstreamRef`, plus:
+
+- `refs`: up to 200 local and remote refs plus HEAD. Each has `id`, display
+  `name`, pinned `commit`, `current`, and open-string `kind`, currently
+  `local`, `remote`, or `head`. `refsTruncated` reports the catalog limit.
+- `commits`: unique commits in newest-first topological order, across the
+  selected tip, its locally available upstream, and the optional comparison
+  tip. Each has full `id`, original `parents`, `subject` up to 500 characters,
+  `author` up to 100 characters, and ISO `committedAt`. Commit parents can
+  name ids outside the returned slice; clients must preserve that boundary.
+- `truncated`: more commits exist beyond the requested slice. `shallow`
+  independently reports an incomplete local repository.
+- Optional `comparison`: `mergeBases` up to 16 ids, and `leftOnly`/`rightOnly`
+  ids with an aggregate limit of 200, relative to selected/comparison tips.
+  Its own `truncated` covers these bounds and shallow repositories. These are
+  membership sets, not total ahead/behind counts. An empty merge-base set in
+  a shallow repository does not establish unrelated history.
+- `refreshedAt`: the read timestamp. All traversal uses pinned object ids.
+
+An unborn repository returns an empty commit list. A non-repository returns
+`isRepository: false` and empty lists. The graph is repository-wide metadata
+even when the registered workspace is a repository subdirectory; file reads
+remain scoped to that subdirectory.
+
+`GET /api/workspaces/:workspaceId/git/commit?commit=<full-id>` returns
+`workspaceId`, `commit` in the shape above, optional first `parent`, and `files`
+with workspace-relative `path`, Git status letter `status`, and `previewable`.
+Files compare against the first parent, or the empty tree for a root commit.
+Renames appear as a deletion and an addition. The list contains at most 200
+eligible entries with `truncated`; `filtered` reports omitted protected paths.
+Symlinks and submodules have `previewable: false`.
+
+`GET /api/workspaces/:workspaceId/git/commit-file?commit=<full-id>&path=src/app.ts`
+returns `workspaceId`, `commit`, optional first `parent`, `path`, and complete
+UTF-8 `before` and `after` strings. An added file has empty `before`; a deleted
+file has empty `after`. Each side is capped at 256 KiB. No partial diff is
+returned. Both sides come from the pinned commit trees, independent of current
+working files or open editor drafts.
+
+Commit reads accept full SHA-1 or SHA-256 commit ids reachable from HEAD or a
+local/remote branch. An arbitrary blob id or an unreachable commit is refused.
+Status codes are `400` for invalid input or a ref outside the current catalog,
+`401` for auth failure, `404` for missing workspace/commit/changed path, `413`
+for over-cap file content, `415` for protected paths or non-regular/non-UTF-8
+content, and `503` for failed or unsupported Git reads. A commit with more
+than 64 parents is unsupported. Fixed Git invocations retain the configured
+local command timeout and 16 MiB text-output ceiling.
+
 ### Mutating Git operations
 
 These eight routes are the source-control surface a client drives: staging,

@@ -448,6 +448,24 @@ settings gate and emits no event or audit entry.
 
 ## Git operations
 
+History, commit detail, and historical file comparisons are authenticated reads
+through the same fixed Git executor. Ref selectors must match the returned
+local/remote branch catalog and are pinned to full commit ids before traversal.
+Explicit commit ids must name commits reachable from HEAD or those branch
+namespaces. Replace objects, signature display, external diff, text conversion,
+interactive prompts, and lazy fetching are disabled for these reads.
+
+History exposes repository-wide commit/ref metadata, including for a workspace
+registered as a repository subdirectory. File detail and both diff sides stay
+inside the registered subtree. NUL-delimited tree entries supply literal paths
+and blob ids; every path passes the secret/generated filter. Symlink and
+submodule modes are refused before content reads. The backend reads immutable
+tree blobs without following working-tree symlinks. Each UTF-8 side is capped
+at 256 KiB and binary or partial content is refused. Command failures return
+fixed error text, never stdout, stderr, or committed content. Reads publish no
+events or audit content. Wire limits and partial-history flags are defined in
+[Git history](../api/API.md#git-history-and-historical-diffs).
+
 Git status is read-only, bearer-gated when configured, and capped at 200 changed
 file summaries. Branch switch accepts an existing local branch only, uses fixed
 `git switch`, and refuses a dirty workspace.

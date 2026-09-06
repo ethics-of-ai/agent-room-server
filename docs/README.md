@@ -21,6 +21,7 @@ For a focused change, start with the matching sections:
 | Sessions and turns | [Agent sessions](api/API.md#agent-sessions) | [Persistence](safety/TRUST_AND_SAFETY.md#session-persistence) |
 | Files and search | [Workspaces](api/API.md#workspaces) | [Workspace files](safety/TRUST_AND_SAFETY.md#workspace-files) |
 | Git mutations | [Git operations](api/API.md#mutating-git-operations) | [Git safety](safety/TRUST_AND_SAFETY.md#git-operations) |
+| Git history and commit diffs | [History reads](api/API.md#git-history-and-historical-diffs) | [Git safety](safety/TRUST_AND_SAFETY.md#git-operations) |
 | Permission input | [Permission answers](api/API.md#permission-answers) | [Approval](safety/TRUST_AND_SAFETY.md#permission-approval) |
 | Question input | [Question answers](api/API.md#clarifying-question-answers) | [Questions and storage](safety/TRUST_AND_SAFETY.md#clarifying-questions) |
 | Language services | [Semantic protocol](api/API.md#editor-language-services) | [Execution](safety/TRUST_AND_SAFETY.md#language-services) |

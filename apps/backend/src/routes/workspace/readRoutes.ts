@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { registerWorkspaceGitHistoryRoutes } from "./gitHistoryRoutes";
 import { workspaceSkillsAvailable } from "../../runner/registry";
 import { authorizedForRead } from "../readAuthorization";
 import { replyWorkspaceError, type WorkspaceRouteDeps } from "./deps";
@@ -19,6 +20,7 @@ import {
  * and none emits an event or an audit entry.
  */
 export async function registerWorkspaceReadRoutes(app: FastifyInstance, deps: WorkspaceRouteDeps): Promise<void> {
+  await registerWorkspaceGitHistoryRoutes(app, deps);
   app.get("/api/workspaces/:workspaceId/tree", async (request, reply) => {
     if (!authorizedForRead(request.headers.authorization, deps.config)) {
       return reply.code(401).send({ error: "Unauthorized" });
