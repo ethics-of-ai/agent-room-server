@@ -330,9 +330,9 @@ export interface WorkspaceTreeEntry {
   sizeBytes?: number;
   modifiedAt?: string;
   previewable?: boolean;
+  mediaKind?: string; // Suffix-only classification; absent for ordinary files.
   children?: WorkspaceTreeEntry[];
 }
-
 export interface WorkspaceTreeSnapshot {
   workspaceId: string;
   path: string;
@@ -380,8 +380,8 @@ export interface WorkspaceFileIndexEntry {
    * open and save it.
    */
   previewable: boolean;
+  mediaKind?: string; // Suffix-only classification; absent for ordinary files.
 }
-
 export interface WorkspaceFileIndexSnapshot {
   workspaceId: string;
   /** Echo of the (trimmed) query the ranking used; empty means "unfiltered". */

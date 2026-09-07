@@ -36,6 +36,11 @@ import {
 } from "./explorer/entryRelocate";
 import { copyWorkspaceEntry, type WorkspaceEntryCopyResult } from "./explorer/entryCopy";
 import { buildPromptWithContext } from "./explorer/promptContext";
+import {
+  WorkspaceMediaError,
+  WorkspaceMediaReader,
+  type WorkspaceMediaRead
+} from "./explorer/workspaceMedia";
 
 // The bounded workspace surface, assembled from `./explorer`. Each operation
 // there owns one contract — the tree read, the preview, the index and search,
@@ -50,9 +55,11 @@ export { indexableRelativePath } from "./explorer/paths";
 export { maxSubtreeBytes, maxSubtreeEntries, maxWriteBytes } from "./explorer/bounds";
 export { maxFileIndexResults } from "./explorer/fileListing";
 export { maxSearchMatches } from "./explorer/contentSearch";
+export { WorkspaceMediaError } from "./explorer/workspaceMedia";
 
 export class WorkspaceExplorer {
   private readonly fileIndex: WorkspaceFileIndexCache;
+  private readonly mediaReader = new WorkspaceMediaReader();
 
   constructor(private readonly registry: LocalWorkspaceRegistry) {
     this.fileIndex = new WorkspaceFileIndexCache(registry);
@@ -78,6 +85,22 @@ export class WorkspaceExplorer {
     const safePath = normalizeWorkspaceRelativePath(input.path);
     const targetPath = await resolveInsideWorkspace(target.workspaceRoot, safePath);
     return readFilePreview(workspaceId, targetPath, safePath, input.maxBytes ?? maxPreviewBytes);
+  }
+
+  async fileMedia(
+    workspaceId: string,
+    input: { path: string; signal?: AbortSignal }
+  ): Promise<WorkspaceMediaRead> {
+    let target: WorkspaceTarget;
+    try {
+      target = await this.target(workspaceId);
+    } catch (error) {
+      if (error instanceof WorkspaceExplorerError && error.statusCode === 404) {
+        throw new WorkspaceMediaError("Workspace is not registered", 404, "workspace_not_found");
+      }
+      throw error;
+    }
+    return this.mediaReader.read(target, input);
   }
 
   async gitFileBaseline(

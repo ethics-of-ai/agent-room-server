@@ -615,9 +615,194 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(status.files[1].oldPath, "Sources/OldName.swift")
     }
 
-    /// A bearer-authenticated client whose traffic is captured by
-    /// `RequestCapturingURLProtocol` and answered with a 200; each test installs
-    /// its own `responseBody`.
+    func testDownloadWorkspaceMediaAuthenticatesValidatesAndOwnsTemporaryFile() async throws {
+        let client = try makeClient()
+        let bytes = Data([137, 80, 78, 71, 13, 10, 26, 10])
+        RequestCapturingURLProtocol.response = HTTPURLResponse(
+            url: try XCTUnwrap(URL(string: "http://example.test/agent-room/api/workspaces/workspace%201/file-media")),
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: [
+                "Content-Type": "image/png; charset=binary",
+                "Content-Length": "\(bytes.count)",
+                "Last-Modified": "Sun, 06 Sep 2026 00:00:00 GMT"
+            ]
+        )
+        RequestCapturingURLProtocol.responseBody = bytes
+
+        let download = try await client.downloadWorkspaceMedia(
+            workspaceId: "workspace 1",
+            path: "Art/logo 1.PNG",
+            kind: .image
+        )
+        defer { try? FileManager.default.removeItem(at: download.fileURL) }
+
+        let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+        XCTAssertEqual(
+            serverDecodedQuery(request.url)["path"],
+            "Art/logo 1.PNG"
+        )
+        XCTAssertEqual(download.mimeType, "image/png")
+        XCTAssertEqual(download.byteCount, Int64(bytes.count))
+        XCTAssertNotNil(download.modificationDate)
+        XCTAssertEqual(try Data(contentsOf: download.fileURL), bytes)
+        XCTAssertEqual(download.fileURL.pathExtension, "png")
+    }
+
+    func testDownloadWorkspaceMediaRejectsMIMEAndStructuredServiceErrors() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.response = HTTPURLResponse(
+            url: try XCTUnwrap(URL(string: "http://example.test/media")),
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "text/plain", "Content-Length": "3"]
+        )
+        RequestCapturingURLProtocol.responseBody = Data("bad".utf8)
+
+        do {
+            _ = try await client.downloadWorkspaceMedia(workspaceId: "workspace 1", path: "bad.png", kind: .image)
+            XCTFail("Expected MIME refusal")
+        } catch let error as WorkspaceMediaDownloadError {
+            XCTAssertEqual(error, .unsupportedMIME("text/plain"))
+        }
+
+        RequestCapturingURLProtocol.response = HTTPURLResponse(
+            url: try XCTUnwrap(URL(string: "http://example.test/media")),
+            statusCode: 413,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )
+        RequestCapturingURLProtocol.responseBody = Data(
+            #"{"code":"media_too_large","message":"Preview exceeds the cap"}"#.utf8
+        )
+
+        do {
+            _ = try await client.downloadWorkspaceMedia(workspaceId: "workspace 1", path: "large.pdf", kind: .pdf)
+            XCTFail("Expected service refusal")
+        } catch let error as WorkspaceMediaDownloadError {
+            XCTAssertEqual(
+                error,
+                .server(statusCode: 413, code: "media_too_large", message: "Preview exceeds the cap")
+            )
+        }
+    }
+
+    func testDownloadWorkspaceMediaAcceptsMissingLengthAndRejectsALyingLength() async throws {
+        let client = try makeClient()
+        let bytes = Data([137, 80, 78, 71, 13, 10, 26, 10])
+        RequestCapturingURLProtocol.response = HTTPURLResponse(
+            url: try XCTUnwrap(URL(string: "http://example.test/media")),
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "image/png"]
+        )
+        RequestCapturingURLProtocol.responseBody = bytes
+
+        let download = try await client.downloadWorkspaceMedia(
+            workspaceId: "workspace 1",
+            path: "logo.png",
+            kind: .image
+        )
+        XCTAssertEqual(download.byteCount, Int64(bytes.count))
+        try FileManager.default.removeItem(at: download.fileURL)
+
+        RequestCapturingURLProtocol.response = HTTPURLResponse(
+            url: try XCTUnwrap(URL(string: "http://example.test/media")),
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "image/png", "Content-Length": "99"]
+        )
+
+        do {
+            _ = try await client.downloadWorkspaceMedia(workspaceId: "workspace 1", path: "logo.png", kind: .image)
+            XCTFail("Expected declared-length refusal")
+        } catch let error as WorkspaceMediaDownloadError {
+            XCTAssertEqual(error, .declaredSizeMismatch(expected: 99, actual: Int64(bytes.count)))
+        }
+    }
+
+    func testDownloadWorkspaceMediaDistinguishesTypedAndLegacyNotFound() async throws {
+        let client = try makeClient()
+        RequestCapturingURLProtocol.response = HTTPURLResponse(
+            url: try XCTUnwrap(URL(string: "http://example.test/media")),
+            statusCode: 404,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )
+        RequestCapturingURLProtocol.responseBody = Data(
+            #"{"code":"file_not_found","error":"File was not found"}"#.utf8
+        )
+
+        do {
+            _ = try await client.downloadWorkspaceMedia(workspaceId: "workspace 1", path: "gone.pdf", kind: .pdf)
+            XCTFail("Expected typed 404")
+        } catch let error as WorkspaceMediaDownloadError {
+            XCTAssertEqual(
+                error,
+                .server(statusCode: 404, code: "file_not_found", message: "File was not found")
+            )
+        }
+
+        RequestCapturingURLProtocol.responseBody = Data(#"{"error":"Not Found"}"#.utf8)
+        do {
+            _ = try await client.downloadWorkspaceMedia(workspaceId: "workspace 1", path: "old.pdf", kind: .pdf)
+            XCTFail("Expected legacy 404")
+        } catch let error as WorkspaceMediaDownloadError {
+            XCTAssertEqual(error, .server(statusCode: 404, code: nil, message: "Not Found"))
+        }
+    }
+
+    func testDownloadWorkspaceMediaRefusesRedirects() async throws {
+        let client = try makeClient()
+        let source = try XCTUnwrap(URL(string: "http://example.test/media"))
+        RequestCapturingURLProtocol.response = try XCTUnwrap(HTTPURLResponse(
+            url: source,
+            statusCode: 302,
+            httpVersion: nil,
+            headerFields: nil
+        ))
+        RequestCapturingURLProtocol.responseBody = Data()
+
+        do {
+            _ = try await client.downloadWorkspaceMedia(workspaceId: "workspace 1", path: "logo.png", kind: .image)
+            XCTFail("Expected redirect refusal")
+        } catch let error as WorkspaceMediaDownloadError {
+            XCTAssertEqual(error, .redirected)
+        }
+    }
+
+    func testCancelledWorkspaceMediaDownloadDoesNotCreateAnOwnedFile() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HangingMediaURLProtocol.self]
+        let client = APIClient(
+            serverBaseURL: try XCTUnwrap(URL(string: "http://example.test/agent-room")),
+            authToken: "secret",
+            urlSession: URLSession(configuration: configuration)
+        )
+        let started = expectation(description: "download started")
+        HangingMediaURLProtocol.onStart = { started.fulfill() }
+        defer { HangingMediaURLProtocol.onStart = nil }
+        let directory = FileManager.default.temporaryDirectory.appending(path: "AgentRoomWorkspaceMedia")
+        let before = (try? Set(FileManager.default.contentsOfDirectory(atPath: directory.path))) ?? []
+
+        let task = Task {
+            try await client.downloadWorkspaceMedia(workspaceId: "workspace 1", path: "slow.png", kind: .image)
+        }
+        await fulfillment(of: [started], timeout: 2)
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Expected cancellation")
+        } catch {
+            XCTAssertTrue(error is CancellationError || (error as? URLError)?.code == .cancelled)
+        }
+
+        let after = (try? Set(FileManager.default.contentsOfDirectory(atPath: directory.path))) ?? []
+        XCTAssertEqual(after, before)
+    }
+
     private func makeClient(file: StaticString = #filePath, line: UInt = #line) throws -> APIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RequestCapturingURLProtocol.self]
@@ -684,6 +869,15 @@ private final class RequestCapturingURLProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
 
+    override func stopLoading() {}
+}
+
+private final class HangingMediaURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var onStart: (() -> Void)?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { Self.onStart?() }
     override func stopLoading() {}
 }
 

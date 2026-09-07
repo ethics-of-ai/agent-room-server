@@ -76,7 +76,10 @@ const allowlist: Readonly<Record<string, number>> = {
   "apps/shared/AgentRoomClient/Sources/AgentRoomClient/APIClient.swift": 824,
   "apps/backend/src/runner/cursor/CursorSdkRunner.ts": 810,
   "apps/backend/src/runner/registry.ts": 800,
-  "apps/visionos/AgentRoom/Views/Workspace/WorkspaceWindowView.swift": 787,
+  // File opening still belongs beside the window actions that raise the editor.
+  // The shared decision policy keeps classification out of the view; these two
+  // thin entry-point adapters retain the scene's existing openWindow ownership.
+  "apps/visionos/AgentRoom/Views/Workspace/WorkspaceWindowView.swift": 813,
   "apps/backend/src/domain/models.ts": 683,
   "apps/backend/src/scene/diagram/humanEdits.ts": 639,
   "apps/visionos/AgentRoom/State/AppStore/AppStore.swift": 623,

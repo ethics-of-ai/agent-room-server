@@ -4,6 +4,7 @@ import type { WorkspaceFileIndexEntry } from "../../domain/models";
 import type { LocalWorkspaceRegistry } from "../LocalWorkspaceRegistry";
 import { isHiddenEntryName, isPreviewableName, maxWriteBytes } from "./bounds";
 import { compareDirents, indexableRelativePath, joinWorkspacePath, safeRealpath } from "./paths";
+import { workspaceMediaKind } from "./mediaKind";
 
 // --- Bounded workspace file index --------------------------------------------
 // One enumeration backs both the quick-open/`@`-mention file list and the
@@ -190,7 +191,8 @@ export async function describeIndexedFile(
   return {
     path: safePath,
     name,
-    previewable: isPreviewableName(name) && fileStat.size <= maxWriteBytes
+    previewable: isPreviewableName(name) && fileStat.size <= maxWriteBytes,
+    ...(workspaceMediaKind(name) ? { mediaKind: workspaceMediaKind(name) } : {})
   };
 }
 

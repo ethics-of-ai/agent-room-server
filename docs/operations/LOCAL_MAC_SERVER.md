@@ -216,7 +216,7 @@ curl -X POST http://127.0.0.1:8787/api/agent-sessions/<session-id>/turns \
 ```
 
 When `AUTH_TOKEN` is configured, add the bearer token to mutating requests and
-workspace tree/file-preview reads:
+workspace tree/file-preview/file-media reads:
 
 ```bash
 -H "authorization: Bearer $AUTH_TOKEN"

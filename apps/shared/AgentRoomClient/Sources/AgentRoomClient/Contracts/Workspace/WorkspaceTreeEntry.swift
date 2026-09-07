@@ -7,6 +7,7 @@ public struct WorkspaceTreeEntry: Codable, Hashable, Identifiable {
     public var sizeBytes: Int?
     public var modifiedAt: String?
     public var previewable: Bool?
+    public var mediaKind: String?
     public var children: [WorkspaceTreeEntry]?
 
     public var id: String { path }
@@ -20,6 +21,7 @@ public struct WorkspaceTreeEntry: Codable, Hashable, Identifiable {
         sizeBytes: Int? = nil,
         modifiedAt: String? = nil,
         previewable: Bool? = nil,
+        mediaKind: String? = nil,
         children: [WorkspaceTreeEntry]? = nil
     ) {
         self.type = type
@@ -28,6 +30,7 @@ public struct WorkspaceTreeEntry: Codable, Hashable, Identifiable {
         self.sizeBytes = sizeBytes
         self.modifiedAt = modifiedAt
         self.previewable = previewable
+        self.mediaKind = mediaKind
         self.children = children
     }
 }

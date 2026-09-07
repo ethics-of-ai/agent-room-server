@@ -5,6 +5,7 @@ import { authorizedForRead } from "../readAuthorization";
 import { replyWorkspaceError, type WorkspaceRouteDeps } from "./deps";
 import {
   fileIndexQuerySchema,
+  fileMediaQuerySchema,
   filePreviewQuerySchema,
   gitFileBaselineQuerySchema,
   searchQuerySchema,
@@ -12,6 +13,7 @@ import {
   treeQuerySchema,
   workspaceParamsSchema
 } from "../../domain/workspaceSchemas";
+import { WorkspaceMediaError } from "../../workspace/WorkspaceExplorer";
 
 /**
  * The bounded, read-only workspace surface. Every route here exposes project
@@ -50,6 +52,42 @@ export async function registerWorkspaceReadRoutes(app: FastifyInstance, deps: Wo
       return await deps.explorer.filePreview(workspaceId, parsed.data);
     } catch (error) {
       return replyWorkspaceError(reply, error);
+    }
+  });
+
+  app.get("/api/workspaces/:workspaceId/file-media", async (request, reply) => {
+    if (!authorizedForRead(request.headers.authorization, deps.config)) {
+      return reply.code(401).send({ error: "Unauthorized", code: "unauthorized" });
+    }
+    const params = workspaceParamsSchema.safeParse(request.params);
+    const parsed = fileMediaQuerySchema.safeParse(request.query);
+    if (!params.success || !parsed.success) {
+      return reply.code(400).send({ error: "Invalid workspace media query", code: "invalid_path" });
+    }
+
+    const controller = new AbortController();
+    const cancel = (): void => controller.abort();
+    request.raw.once("aborted", cancel);
+    reply.raw.once("close", cancel);
+    try {
+      const media = await deps.explorer.fileMedia(params.data.workspaceId, { ...parsed.data, signal: controller.signal });
+      reply
+        .header("Content-Type", media.contentType)
+        .header("Content-Length", String(media.bytes.length))
+        .header("Last-Modified", media.modifiedAt.toUTCString())
+        .header("Cache-Control", "no-store")
+        .header("X-Content-Type-Options", "nosniff");
+      return reply.send(media.bytes);
+    } catch (error) {
+      if (error instanceof WorkspaceMediaError) {
+        if (error.code === "media_busy") reply.header("Retry-After", "1");
+        return reply.code(error.statusCode).send({ error: error.message, code: error.code });
+      }
+      request.log.error({ error }, "workspace media read failed");
+      return reply.code(500).send({ error: "Unable to read workspace media", code: "media_error" });
+    } finally {
+      request.raw.off("aborted", cancel);
+      reply.raw.off("close", cancel);
     }
   });
 

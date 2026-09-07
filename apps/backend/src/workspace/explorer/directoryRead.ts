@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { WorkspaceTreeEntry } from "../../domain/models";
 import { isHiddenEntryName, isPreviewableName, maxEntriesPerDirectory, maxWriteBytes } from "./bounds";
 import { compareDirents, joinWorkspacePath, safeRealpath } from "./paths";
+import { workspaceMediaKind } from "./mediaKind";
 
 /**
  * The bounded tree read. Entries are capped per directory, generated and
@@ -59,7 +60,8 @@ export async function readDirectoryEntries(
         // non-secret name within the write cap. The editor loads it with `maxBytes` up to
         // `maxWriteBytes` (see `filePreviewQuerySchema`), so the open/edit gate is the
         // write cap, not the smaller 24 KB browse-content default.
-        previewable: isPreviewableName(dirent.name) && childStat.size <= maxWriteBytes
+        previewable: isPreviewableName(dirent.name) && childStat.size <= maxWriteBytes,
+        ...(workspaceMediaKind(dirent.name) ? { mediaKind: workspaceMediaKind(dirent.name) } : {})
       };
     }
     return undefined;

@@ -422,7 +422,7 @@ protected names, sockets, devices, unsupported types, more than 20,000 entries,
 or more than 1 GiB of regular-file data fail before deletion. It is symlink-safe
 but not a transactional snapshot against concurrent regular-file changes.
 
-### File index, search, preview, and skills
+### File index, search, preview, media, and skills
 
 The file index and literal content search share one filtered enumeration. Git
 workspaces use fixed `git ls-files -z --cached --others --exclude-standard`;
@@ -440,6 +440,34 @@ File preview and HEAD-baseline reads reject binary or NUL content and cap text
 at 256 KiB. An over-cap HEAD blob returns metadata without partial content.
 The baseline uses fixed `git cat-file` and scopes `HEAD:./<path>` to the
 registered directory.
+
+The media read is a separate authenticated content route for PNG/JPEG/WebP
+(20 MiB) and PDF or USDZ (50 MiB). Suffix and signature must agree. It buffers at most
+cap plus one byte, admits two reads process-wide, follows no leaf symlink, and
+checks the opened file's inode, size, and mtime before and after reading. Parent
+and final realpaths are containment-checked again before bytes are returned.
+Resolved paths also pass the protected-name filter, so a contained directory
+symlink cannot expose a hidden directory. Nonblocking leaf opening prevents a
+concurrent replacement with a FIFO from holding a read slot indefinitely.
+These checks reject races AgentRoom observes; they do not create an atomic
+snapshot of a workspace that another process can mutate concurrently.
+
+`mediaKind` in tree/index responses is only a suffix hint and does not add a
+file to prompt context. USDZ bytes are served only through the same bounded
+media read. Its ZIP signature check identifies the container, not the validity
+or safety of package contents. AgentRoom does not extract USDZ or pass workspace
+models to its in-process RealityKit importer: that importer has no enforceable
+package-only dependency resolver.
+
+An explicit View in 3D action hands a downloaded local snapshot to the system
+Quick Look application through `PreviewApplication`, with editing disabled.
+Only that local file URL is handed off, never a backend URL or bearer token.
+Quick Look owns parsing, dependency resolution, rendering, and its system
+controls in a separate process. This boundary relies on platform isolation;
+AgentRoom does not claim package-only resolution, deny network access inside
+Quick Look, or impose limits on the system renderer's decoded model memory.
+The original workspace file is never written back by the preview. Disconnect
+requests closure of owned preview sessions and removes their temporary copies.
 
 Skill discovery scans only descriptor-owned workspace directories. It follows
 no escaping symlink and reads only `SKILL.md` frontmatter name and description,

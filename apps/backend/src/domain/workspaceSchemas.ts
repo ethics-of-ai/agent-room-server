@@ -32,6 +32,10 @@ export const filePreviewQuerySchema = z.object({
   maxBytes: z.coerce.number().int().min(1).max(maxWriteBytes).optional()
 });
 
+export const fileMediaQuerySchema = z.object({
+  path: z.string().trim().min(1).max(1024)
+});
+
 export const gitFileBaselineQuerySchema = z.object({
   path: z.string().trim().min(1),
   // Same cap contract as `filePreviewQuerySchema`; the default is the full write

@@ -20,6 +20,7 @@ For a focused change, start with the matching sections:
 | Runner discovery | [Capabilities](api/API.md#coding-agent-capabilities) | [Catalog and readiness](safety/TRUST_AND_SAFETY.md#runner-catalog-and-readiness) |
 | Sessions and turns | [Agent sessions](api/API.md#agent-sessions) | [Persistence](safety/TRUST_AND_SAFETY.md#session-persistence) |
 | Files and search | [Workspaces](api/API.md#workspaces) | [Workspace files](safety/TRUST_AND_SAFETY.md#workspace-files) |
+| Media previews | [Media reads](api/API.md#tree-file-preview-and-media) | [Media bounds](safety/TRUST_AND_SAFETY.md#file-index-search-preview-media-and-skills) |
 | Git mutations | [Git operations](api/API.md#mutating-git-operations) | [Git safety](safety/TRUST_AND_SAFETY.md#git-operations) |
 | Git history and commit diffs | [History reads](api/API.md#git-history-and-historical-diffs) | [Git safety](safety/TRUST_AND_SAFETY.md#git-operations) |
 | Permission input | [Permission answers](api/API.md#permission-answers) | [Approval](safety/TRUST_AND_SAFETY.md#permission-approval) |

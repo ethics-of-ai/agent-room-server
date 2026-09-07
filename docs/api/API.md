@@ -852,7 +852,7 @@ the branch list, so the snapshot costs no extra Git invocation.
 The path must be an existing absolute directory. Registration stores metadata
 under `STATE_DIR` and does not write files inside the selected workspace.
 
-### Tree and file preview
+### Tree, file preview, and media
 
 `GET /api/workspaces/:workspaceId/tree?path=&depth=3` returns a bounded,
 read-only folder tree for a registered workspace. Generated and local-state
@@ -860,7 +860,10 @@ directories such as `.git`, `node_modules`, `dist`, `build`, and `.agentroom`
 are hidden. Paths are workspace-relative and must stay inside the registered
 workspace, including after symlink resolution. Each file entry's `previewable`
 flag marks a non-binary, non-secret text file within the 256 KB write cap — one
-the editor can open (and, when writable, save).
+the editor can open (and, when writable, save). An optional `mediaKind` is a
+suffix-only hint: `image` for PNG/JPEG/WebP, `pdf` for PDF, and `usdz` for USDZ.
+It is advertised regardless of size and does not make the file eligible for
+prompt context.
 
 ```json
 {
@@ -895,6 +898,32 @@ read-only. When `AUTH_TOKEN` is configured, workspace tree and file-preview
 reads require the bearer token because they expose project structure and file
 contents.
 
+`GET /api/workspaces/:workspaceId/file-media?path=Art/logo.png` returns a
+complete, buffered media file for native preview. It accepts PNG, JPEG, and
+WebP up to 20 MiB and PDF or USDZ up to 50 MiB, case-insensitively. The suffix
+and signature must agree; WebP's declared RIFF size must also equal the file
+size. USDZ requires a ZIP local-file header of at least 30 bytes starting with
+`PK\x03\x04` and returns `model/vnd.usdz+zip`. This identifies the container;
+it does not validate ZIP contents or USD dependencies. AgentRoom neither
+extracts packages nor resolves their assets. The visionOS client passes a local
+copy to the system Quick Look application for model validation and rendering.
+
+A successful response uses the verified media MIME, exact `Content-Length`,
+checked file `Last-Modified`, `Cache-Control: no-store`, and
+`X-Content-Type-Options: nosniff`. The endpoint follows no leaf symlink, checks
+the opened inode/size/mtime before and after its bounded read, and sends no
+partial success. Protected-name filtering applies to both requested and
+resolved paths, including contained directory aliases. Disconnecting cancels
+the pending read. At most two reads are admitted process-wide; a third receives
+`503 media_busy` with `Retry-After: 1`.
+
+Media failures have `{ "error": string, "code": string }`. Codes are
+`invalid_path` (400), `unauthorized` (401), `forbidden_path` (403),
+`workspace_not_found` or `file_not_found` (404), `file_changed` (409),
+`media_too_large` (413), `unsupported_media` (415), and `media_busy` (503).
+When configured, bearer authentication is required before media content is
+read. The endpoint does not support ranges or historical Git objects.
+
 ### File index and content search
 
 `GET /api/workspaces/:workspaceId/files?query=app&limit=50` returns a bounded,
@@ -909,14 +938,15 @@ from 1 to 200 and defaults to 50.
   "query": "app",
   "files": [
     { "path": "src/app.ts", "name": "app.ts", "previewable": true },
-    { "path": "docs/app-notes.md", "name": "app-notes.md", "previewable": true }
+    { "path": "docs/app-notes.md", "name": "app-notes.md", "previewable": true },
+    { "path": "Art/app.png", "name": "app.png", "previewable": false, "mediaKind": "image" }
   ],
   "truncated": false
 }
 ```
 
-Entries carry path metadata only, never file content, and `previewable` has the
-same meaning as in the tree read. Ranking runs backend-side and is
+Entries carry path metadata only, never file content; `previewable` and optional
+`mediaKind` have the same meanings as in the tree read. Ranking runs backend-side and is
 case-insensitive, best tier first: exact basename, basename prefix, basename
 substring, path substring, then a subsequence ("fuzzy") match over the whole
 path. Ties break on the shorter path and then alphabetically, so the order is

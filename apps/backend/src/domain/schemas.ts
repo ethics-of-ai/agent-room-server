@@ -267,6 +267,7 @@ export const workspaceTreeEntrySchema: z.ZodType<WorkspaceTreeEntry> = z.lazy(()
   sizeBytes: z.number().int().nonnegative().optional(),
   modifiedAt: z.string().optional(),
   previewable: z.boolean().optional(),
+  mediaKind: z.string().min(1).optional(),
   children: z.array(workspaceTreeEntrySchema).optional()
 }));
 
@@ -291,7 +292,8 @@ export const workspaceFilePreviewSchema = z.object({
 export const workspaceFileIndexEntrySchema = z.object({
   path: z.string().min(1),
   name: z.string().min(1),
-  previewable: z.boolean()
+  previewable: z.boolean(),
+  mediaKind: z.string().min(1).optional()
 });
 
 export const workspaceFileIndexSnapshotSchema = z.object({
