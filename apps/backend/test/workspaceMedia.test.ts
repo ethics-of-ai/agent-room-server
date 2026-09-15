@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { finished } from "node:stream/promises";
 import { get } from "node:http";
 import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,8 +9,6 @@ import type { ServiceConfig } from "../src/domain/models";
 import { buildServer } from "../src/server";
 import { WorkspaceExplorer } from "../src/workspace/WorkspaceExplorer";
 import {
-  maxDocumentMediaBytes,
-  maxImageMediaBytes,
   WorkspaceMediaError,
   WorkspaceMediaReader,
   type WorkspaceMediaRead
@@ -117,67 +117,30 @@ describe("workspace media route", () => {
     await fixture.app.close();
   });
 
-  it("enforces the exact image and document size caps", async () => {
-    const fixture = await setupWorkspace();
-    const exactImage = Buffer.alloc(maxImageMediaBytes);
-    pngHeader.copy(exactImage);
-    const oversizedImage = Buffer.alloc(maxImageMediaBytes + 1);
-    pngHeader.copy(oversizedImage);
-    const exactPDF = Buffer.alloc(maxDocumentMediaBytes);
-    pdfHeader.copy(exactPDF);
-    const oversizedPDF = Buffer.alloc(maxDocumentMediaBytes + 1);
-    pdfHeader.copy(oversizedPDF);
-    await writeFile(join(fixture.directory, "exact.png"), exactImage);
-    await writeFile(join(fixture.directory, "large.png"), oversizedImage);
-    await writeFile(join(fixture.directory, "exact.pdf"), exactPDF);
-    await writeFile(join(fixture.directory, "large.pdf"), oversizedPDF);
-
-    const exactImageResponse = await fixture.app.inject({
-      method: "GET",
-      url: `/api/workspaces/${fixture.workspaceId}/file-media?path=exact.png`
-    });
-    const largeImageResponse = await fixture.app.inject({
-      method: "GET",
-      url: `/api/workspaces/${fixture.workspaceId}/file-media?path=large.png`
-    });
-    const exactPDFResponse = await fixture.app.inject({
-      method: "GET",
-      url: `/api/workspaces/${fixture.workspaceId}/file-media?path=exact.pdf`
-    });
-    const largePDFResponse = await fixture.app.inject({
-      method: "GET",
-      url: `/api/workspaces/${fixture.workspaceId}/file-media?path=large.pdf`
-    });
-
-    expect(exactImageResponse.statusCode).toBe(200);
-    expect(largeImageResponse.statusCode).toBe(413);
-    expect(largeImageResponse.json()).toMatchObject({ code: "media_too_large" });
-    expect(exactPDFResponse.statusCode).toBe(200);
-    expect(largePDFResponse.statusCode).toBe(413);
-    expect(largePDFResponse.json()).toMatchObject({ code: "media_too_large" });
-    await fixture.app.close();
-  });
-
-  it("bounds USDZ bytes and authenticates model reads without extracting the package", async () => {
+  it("serves media above the former size caps, including authenticated USDZ", async () => {
     const fixture = await setupWorkspace({ requireAuth: true, authToken: "media-secret" });
-    const bytes = Buffer.alloc(maxDocumentMediaBytes);
-    usdzHeader.copy(bytes);
-    await writeFile(join(fixture.directory, "model.usdz"), bytes);
-    await writeFile(join(fixture.directory, "large.usdz"), Buffer.alloc(maxDocumentMediaBytes + 1));
-    await symlink(join(fixture.directory, "model.usdz"), join(fixture.directory, "link.usdz"));
-    const request = (path: string, authorized = true) => fixture.app.inject({
-      method: "GET",
-      url: `/api/workspaces/${fixture.workspaceId}/file-media?path=${path}`,
-      headers: authorized ? { authorization: "Bearer media-secret" } : undefined
-    });
-    expect((await request("model.usdz", false)).statusCode).toBe(401);
-    const modelResponse = await request("model.usdz");
-    expect(modelResponse.statusCode).toBe(200);
-    expect(modelResponse.rawPayload.length).toBe(maxDocumentMediaBytes);
-    expect(modelResponse.rawPayload.subarray(0, usdzHeader.length)).toEqual(usdzHeader);
-    expect((await request("large.usdz")).statusCode).toBe(413);
-    expect((await request("link.usdz")).statusCode).toBe(403);
-    await fixture.app.close();
+    try {
+      for (const [name, header, size] of [
+        ["large.png", pngHeader, 20 * 1024 * 1024 + 1],
+        ["large.pdf", pdfHeader, 50 * 1024 * 1024 + 1],
+        ["large.usdz", usdzHeader, 50 * 1024 * 1024 + 1]
+      ] as const) {
+        const bytes = Buffer.alloc(size);
+        header.copy(bytes);
+        bytes[size - 1] = 42;
+        await writeFile(join(fixture.directory, name), bytes);
+        const url = `/api/workspaces/${fixture.workspaceId}/file-media?path=${name}`;
+        expect((await fixture.app.inject({ method: "GET", url })).statusCode).toBe(401);
+        const response = await fixture.app.inject({
+          method: "GET", url, headers: { authorization: "Bearer media-secret" }
+        });
+        expect(response.statusCode, name).toBe(200);
+        expect(response.headers["content-length"]).toBe(String(size));
+        expect(response.rawPayload.equals(bytes)).toBe(true);
+      }
+    } finally {
+      await fixture.app.close();
+    }
   });
 
   it("maps auth, path, workspace, protected-name, missing, directory, and symlink refusals", async () => {
@@ -236,12 +199,19 @@ describe("workspace media read admission", () => {
       code: "media_busy"
     });
     gates.shift()?.();
-    await first;
+    const firstMedia = await first;
+    await expect(reader.read(target, { path: "still-busy.png" })).rejects.toMatchObject({ code: "media_busy" });
+    firstMedia.stream.resume();
+    await finished(firstMedia.stream);
     const fourth = reader.read(target, { path: "fourth.png" });
     gates.shift()?.();
-    await second;
+    const secondMedia = await second;
+    secondMedia.stream.resume();
+    await finished(secondMedia.stream);
     gates.shift()?.();
-    await fourth;
+    const fourthMedia = await fourth;
+    fourthMedia.stream.resume();
+    await finished(fourthMedia.stream);
 
     const failing = new WorkspaceMediaReader(async () => {
       throw new Error("failure");
@@ -283,7 +253,8 @@ function fakeMedia(): WorkspaceMediaRead {
     name: "image.png",
     kind: "image",
     contentType: "image/png",
-    bytes: pngHeader,
+    stream: Readable.from([pngHeader]),
+    byteLength: BigInt(pngHeader.length),
     modifiedAt: new Date(0)
   };
 }

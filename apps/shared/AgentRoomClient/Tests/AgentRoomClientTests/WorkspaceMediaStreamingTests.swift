@@ -3,17 +3,15 @@ import XCTest
 @testable import AgentRoomClient
 
 final class WorkspaceMediaStreamingTests: XCTestCase {
-    func testRejectsOversizedDeclarationWithoutWaitingForCompleteBody() async throws {
+    func testAcceptsImageAboveFormerCapWithDeclaredLength() async throws {
         let client = try client(status: 200, headers: [
             "Content-Type": "image/png", "Content-Length": "20971521"
         ])
-        BoundedMediaURLProtocol.body = Data(repeating: 65, count: 8 * 1_024)
-        do {
-            _ = try await client.downloadWorkspaceMedia(workspaceId: "ws", path: "image.png", kind: .image)
-            XCTFail("Expected size refusal before the body arrives")
-        } catch let error as WorkspaceMediaDownloadError {
-            XCTAssertEqual(error, .tooLarge(limit: 20 * 1_024 * 1_024))
-        }
+        BoundedMediaURLProtocol.body = Data(repeating: 65, count: 20 * 1_024 * 1_024 + 1)
+        BoundedMediaURLProtocol.finishes = true
+        let download = try await client.downloadWorkspaceMedia(workspaceId: "ws", path: "image.png", kind: .image)
+        defer { try? FileManager.default.removeItem(at: download.fileURL) }
+        XCTAssertEqual(download.byteCount, 20 * 1_024 * 1_024 + 1)
     }
 
     func testErrorBodyStopsAtEightKiBEvenWhenServerDoesNotFinish() async throws {
@@ -27,19 +25,13 @@ final class WorkspaceMediaStreamingTests: XCTestCase {
         }
     }
 
-    func testMissingLengthStopsAtCapPlusOneAndRemovesPartialFile() async throws {
+    func testAcceptsImageAboveFormerCapWithoutContentLength() async throws {
         let client = try client(status: 200, headers: ["Content-Type": "image/png"])
         BoundedMediaURLProtocol.body = Data(repeating: 65, count: 20 * 1_024 * 1_024 + 1)
-        let directory = FileManager.default.temporaryDirectory.appending(path: "AgentRoomWorkspaceMedia")
-        let before = (try? Set(FileManager.default.contentsOfDirectory(atPath: directory.path))) ?? []
-        do {
-            _ = try await client.downloadWorkspaceMedia(workspaceId: "ws", path: "image.png", kind: .image)
-            XCTFail("Expected cap refusal without waiting for EOF")
-        } catch let error as WorkspaceMediaDownloadError {
-            XCTAssertEqual(error, .tooLarge(limit: 20 * 1_024 * 1_024))
-        }
-        let after = (try? Set(FileManager.default.contentsOfDirectory(atPath: directory.path))) ?? []
-        XCTAssertEqual(after, before)
+        BoundedMediaURLProtocol.finishes = true
+        let download = try await client.downloadWorkspaceMedia(workspaceId: "ws", path: "image.png", kind: .image)
+        defer { try? FileManager.default.removeItem(at: download.fileURL) }
+        XCTAssertEqual(download.byteCount, 20 * 1_024 * 1_024 + 1)
     }
 
     func testBusyPreservesRetryAfterSecondsAndDate() async throws {

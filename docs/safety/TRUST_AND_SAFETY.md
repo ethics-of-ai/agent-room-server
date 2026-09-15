@@ -441,19 +441,25 @@ at 256 KiB. An over-cap HEAD blob returns metadata without partial content.
 The baseline uses fixed `git cat-file` and scopes `HEAD:./<path>` to the
 registered directory.
 
-The media read is a separate authenticated content route for PNG/JPEG/WebP
-(20 MiB) and PDF or USDZ (50 MiB). Suffix and signature must agree. It buffers at most
-cap plus one byte, admits two reads process-wide, follows no leaf symlink, and
-checks the opened file's inode, size, and mtime before and after reading. Parent
+The media read is a separate authenticated content route for PNG/JPEG/WebP,
+PDF, and USDZ with no application-level file-size cap. Suffix and signature
+must agree. It copies a private disk-backed snapshot using a 64 KiB buffer,
+reading no more than the original size plus one byte to detect growth. It
+admits two operations process-wide through response streaming, follows no leaf
+symlink, and checks the opened file's inode, size, and mtime before and after reading. Parent
 and final realpaths are containment-checked again before bytes are returned.
 Resolved paths also pass the protected-name filter, so a contained directory
 symlink cannot expose a hidden directory. Nonblocking leaf opening prevents a
 concurrent replacement with a FIFO from holding a read slot indefinitely.
 These checks reject races AgentRoom observes; they do not create an atomic
 snapshot of a workspace that another process can mutate concurrently.
+The validated temporary snapshot is streamed only after these checks pass. Its
+file is unlinked immediately; success, failure, and cancellation close the
+handle and release its disk space. Available temporary disk space limits large
+previews; encoded file sizes are no longer bounded by AgentRoom.
 
 `mediaKind` in tree/index responses is only a suffix hint and does not add a
-file to prompt context. USDZ bytes are served only through the same bounded
+file to prompt context. USDZ bytes are served only through the same authenticated
 media read. Its ZIP signature check identifies the container, not the validity
 or safety of package contents. AgentRoom does not extract USDZ or pass workspace
 models to its in-process RealityKit importer: that importer has no enforceable

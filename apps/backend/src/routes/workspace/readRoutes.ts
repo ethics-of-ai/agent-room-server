@@ -73,11 +73,11 @@ export async function registerWorkspaceReadRoutes(app: FastifyInstance, deps: Wo
       const media = await deps.explorer.fileMedia(params.data.workspaceId, { ...parsed.data, signal: controller.signal });
       reply
         .header("Content-Type", media.contentType)
-        .header("Content-Length", String(media.bytes.length))
+        .header("Content-Length", String(media.byteLength))
         .header("Last-Modified", media.modifiedAt.toUTCString())
         .header("Cache-Control", "no-store")
         .header("X-Content-Type-Options", "nosniff");
-      return reply.send(media.bytes);
+      return await reply.send(media.stream);
     } catch (error) {
       if (error instanceof WorkspaceMediaError) {
         if (error.code === "media_busy") reply.header("Retry-After", "1");

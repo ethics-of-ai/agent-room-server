@@ -1,5 +1,6 @@
 import { constants } from "node:fs";
 import * as fs from "node:fs/promises";
+import { finished } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,7 +49,10 @@ describe("workspace media filesystem boundaries", () => {
     await fs.mkdir(join(target.workspaceRoot, "art"));
     await fs.writeFile(join(target.workspaceRoot, "art/image.png"), png);
     await fs.symlink(join(target.workspaceRoot, "art"), join(target.workspaceRoot, "alias"));
-    expect((await readWorkspaceMedia(target, { path: "alias/image.png" })).bytes).toEqual(png);
+    const media = await readWorkspaceMedia(target, { path: "alias/image.png" });
+    const chunks: Buffer[] = [];
+    for await (const chunk of media.stream) chunks.push(chunk);
+    expect(Buffer.concat(chunks)).toEqual(png);
   });
 
   it("refuses escaping intermediate symlinks", async () => {
@@ -59,6 +63,62 @@ describe("workspace media filesystem boundaries", () => {
     await fs.symlink(outside, join(target.workspaceRoot, "outside"));
     await expect(readWorkspaceMedia(target, { path: "outside/image.png" }))
       .rejects.toMatchObject({ statusCode: 403, code: "forbidden_path" });
+  });
+
+  it("streams the validated snapshot even if the workspace file changes afterward", async () => {
+    const { target, path } = await fixture();
+    const media = await readWorkspaceMedia(target, { path: "image.png" });
+    await fs.writeFile(path, Buffer.from("replaced"));
+    const chunks: Buffer[] = [];
+    for await (const chunk of media.stream) chunks.push(chunk);
+    expect(Buffer.concat(chunks)).toEqual(png);
+    expect(media.byteLength).toBe(BigInt(png.length));
+  });
+
+  it("closes the anonymous snapshot when a response is cancelled", async () => {
+    const { target } = await fixture();
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let snapshot: Awaited<ReturnType<typeof fs.open>> | undefined;
+    let snapshotPath: string | undefined;
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      if (args[1] === "wx+") {
+        snapshot = handle;
+        snapshotPath = String(args[0]);
+      }
+      return handle;
+    });
+    const controller = new AbortController();
+    const media = await readWorkspaceMedia(target, { path: "image.png", signal: controller.signal });
+    expect(snapshot).toBeDefined();
+    await expect(fs.stat(snapshotPath!)).rejects.toMatchObject({ code: "ENOENT" });
+    const completion = finished(media.stream);
+    controller.abort();
+    await expect(completion).rejects.toMatchObject({ name: "AbortError" });
+    await expect(snapshot!.stat()).rejects.toMatchObject({ code: "EBADF" });
+  });
+
+  it("detects growth while copying and closes the failed snapshot", async () => {
+    const { target, path } = await fixture();
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let snapshot: Awaited<ReturnType<typeof fs.open>> | undefined;
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      if (args[1] === "wx+") {
+        snapshot = handle;
+      } else {
+        const read = handle.read.bind(handle);
+        vi.spyOn(handle, "read").mockImplementationOnce(async (...readArgs: unknown[]) => {
+          await fs.appendFile(path, Buffer.alloc(1024));
+          return await (read as (...values: unknown[]) => ReturnType<typeof handle.read>)(...readArgs);
+        });
+      }
+      return handle;
+    });
+    await expect(readWorkspaceMedia(target, { path: "image.png" }))
+      .rejects.toMatchObject({ code: "file_changed" });
+    expect(snapshot).toBeDefined();
+    await expect(snapshot!.stat()).rejects.toMatchObject({ code: "EBADF" });
   });
 
   it("rejects a same-inode size change between validation and opening and closes its handle", async () => {

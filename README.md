@@ -232,9 +232,10 @@ repository you did not write:
 - The backend binds to the LAN by default. Set `AUTH_TOKEN` before connecting a
   second device or enabling the terminal or editor language services.
 
-Workspace reads stay registered-folder-only, bounded, symlink-checked, and
-secret-name filtered. The one client write is a bounded UTF-8 file endpoint with
-an optimistic lock. Git routes accept fixed operations, not command strings. The
+Workspace reads stay registered-folder-only, symlink-checked, and secret-name
+filtered. Text reads are bounded; native media previews have no file-size cap
+and stream validated disk-backed snapshots. The one client write is a bounded
+UTF-8 file endpoint with an optimistic lock. Git routes accept fixed operations, not command strings. The
 full posture, including known gaps, is
 [Trust and safety](docs/safety/TRUST_AND_SAFETY.md).
 

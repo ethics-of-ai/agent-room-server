@@ -5,14 +5,10 @@ public enum WorkspaceMediaKind: String, Codable, CaseIterable, Sendable {
     case pdf
     case usdz
 
-    public var maximumDownloadBytes: Int64 {
-        switch self {
-        case .image:
-            20 * 1_024 * 1_024
-        case .pdf, .usdz:
-            50 * 1_024 * 1_024
-        }
-    }
+    /// Retained for source compatibility. Media downloads no longer impose an
+    /// application-level file-size cap.
+    @available(*, deprecated, message: "Workspace media downloads no longer impose an application-level file-size cap.")
+    public var maximumDownloadBytes: Int64 { .max }
 
     public var contentTypes: Set<String> {
         switch self {

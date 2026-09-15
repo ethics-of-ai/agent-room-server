@@ -899,8 +899,8 @@ reads require the bearer token because they expose project structure and file
 contents.
 
 `GET /api/workspaces/:workspaceId/file-media?path=Art/logo.png` returns a
-complete, buffered media file for native preview. It accepts PNG, JPEG, and
-WebP up to 20 MiB and PDF or USDZ up to 50 MiB, case-insensitively. The suffix
+complete media file for native preview with no application-level file-size cap.
+It accepts PNG, JPEG, WebP, PDF, and USDZ case-insensitively. The suffix
 and signature must agree; WebP's declared RIFF size must also equal the file
 size. USDZ requires a ZIP local-file header of at least 30 bytes starting with
 `PK\x03\x04` and returns `model/vnd.usdz+zip`. This identifies the container;
@@ -911,16 +911,21 @@ copy to the system Quick Look application for model validation and rendering.
 A successful response uses the verified media MIME, exact `Content-Length`,
 checked file `Last-Modified`, `Cache-Control: no-store`, and
 `X-Content-Type-Options: nosniff`. The endpoint follows no leaf symlink, checks
-the opened inode/size/mtime before and after its bounded read, and sends no
-partial success. Protected-name filtering applies to both requested and
-resolved paths, including contained directory aliases. Disconnecting cancels
-the pending read. At most two reads are admitted process-wide; a third receives
+the opened inode/size/mtime before and after copying a disk-backed snapshot.
+It validates the snapshot before sending response headers; transport failures
+can still interrupt a response. Protected-name filtering applies to both
+requested and resolved paths, including contained directory aliases. Disconnecting cancels
+snapshot creation and response streaming. Temporary snapshots are unlinked
+immediately and their disk space is released when their handles close. Copying
+uses a 64 KiB buffer and never reads beyond the original size plus one byte.
+Available disk space and system renderer resources remain practical limits.
+At most two reads or streams are admitted process-wide; a third receives
 `503 media_busy` with `Retry-After: 1`.
 
 Media failures have `{ "error": string, "code": string }`. Codes are
 `invalid_path` (400), `unauthorized` (401), `forbidden_path` (403),
 `workspace_not_found` or `file_not_found` (404), `file_changed` (409),
-`media_too_large` (413), `unsupported_media` (415), and `media_busy` (503).
+`unsupported_media` (415), and `media_busy` (503).
 When configured, bearer authentication is required before media content is
 read. The endpoint does not support ranges or historical Git objects.
 
