@@ -30,15 +30,15 @@ jobs:
 
   macos-app:
     name: macOS app (build and unit tests)
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Select the newest Xcode 26 on the image
+      - name: Select Xcode 27.0
         run: |
           set -euo pipefail
-          XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
           xcodebuild -version
+          swift --version
       - run: brew install xcodegen
       - run: xcodegen generate
         working-directory: apps/macos
@@ -59,14 +59,14 @@ jobs:
 
   shared-client:
     name: Shared client (swift test)
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Select the newest Xcode 26 on the image
+      - name: Select Xcode 27.0
         run: |
           set -euo pipefail
-          XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
+          xcodebuild -version
           swift --version
       - run: swift test
         working-directory: apps/shared/AgentRoomClient

@@ -88,7 +88,9 @@ merging a manifest or mirrored-document change.
 
 ## Public CI
 
-The public workflow runs on push and pull request using a macOS 26 arm64 image:
+The public workflow runs on push and pull request. Backend checks use the
+macOS 26 arm64 image. The macOS app and shared Swift tests use the arm64
+`xcode-27` image and explicitly select Xcode 27.0:
 
 - Node 24, pnpm 9.15.4, frozen install, typecheck, backend build, and all tests;
 - XcodeGen, macOS `build-for-testing`, then targeted
@@ -96,7 +98,11 @@ The public workflow runs on push and pull request using a macOS 26 arm64 image:
 - shared Swift package tests.
 
 The split Xcode build and test avoids the single-command hang observed for this
-project. Pin the selected Xcode 26 minor and update it deliberately.
+project. Xcode 27.0 matches the local development major/minor and avoids the
+Swift 6.3.3 isolation-checker failure in the media cancellation test. Both Swift
+jobs print the Xcode and Swift versions. The hosted image is currently a public
+preview and may lag the local Xcode build; it does not guarantee build-for-build
+parity. Update the selected minor deliberately.
 
 `editorGrammarCorpus.test.ts` uses the exact TextMate engines bundled in the
 private visionOS app. The public tree omits those engines, so that suite skips
