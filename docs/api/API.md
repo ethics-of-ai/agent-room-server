@@ -95,8 +95,10 @@ root, state dir, auth requirement, and release compatibility.
 The response never includes `AUTH_TOKEN`, `CODEX_EXECUTABLE`, `CODEX_ARGS`,
 `CLAUDE_CODE_EXECUTABLE`, `SOURCEKIT_LSP_EXECUTABLE`, `TERMINAL_SHELL`, or provider credentials. Clients read
 `terminalEnabled` to decide whether to offer the terminal pane,
-`languageServicesEnabled` to decide whether semantic execution can be offered, and
-`sceneEngineEnabled` to decide whether to offer the spatial scene volume.
+`languageServicesEnabled` to decide whether semantic execution can be offered,
+`sceneEngineEnabled` to decide whether to offer the spatial scene volume, and
+`repositorySketches: true` advertises the repository document API below, available
+independently of runner readiness. An absent field means unsupported.
 
 ### Managed settings metadata
 
@@ -330,6 +332,24 @@ never resolved to a known runner. See `docs/safety/TRUST_AND_SAFETY.md` and
 `docs/engineering/RUNNERS.md`.
 
 ## Coding Agent Capabilities
+
+Capabilities may include `checks`, each with an `id`, a `status` of `ready`,
+`unavailable`, or `not_checked`, and a safe `message`. DeepSeek uses `runtime`,
+`provider`, and `agent_tools`. Optional `connectionTestAvailable` enables an
+explicit test action. `sessionNotice` explains continuation limitations, and
+`modelSelectionScope: "session"` tells clients that an existing conversation's
+model is fixed. Missing fields preserve older-client behavior.
+
+`POST /api/coding-agent/connection-test` accepts only `{ "runnerKind": "deepseek" }`
+or `{}` for the default runner. It requires bearer authentication when configured,
+returns `{ "ok": boolean, "message": string }`, and accepts no prompt, path,
+credential, or arbitrary model override. It returns 400 for invalid input or an
+unsupported runner and 409 while another test for that runner is pending.
+Managed DeepSeek tests use a temporary graph without tools, the fixed prompt
+`Reply with OK.`, a 32-token output cap, and a 30-second deadline. Runtime teardown
+and temporary-state cleanup follow the result. This explicit action may incur
+provider usage. It is never triggered by a capability read and does not create
+an AgentRoom session or claim lasting provider readiness.
 
 `GET /api/coding-agent/capabilities` returns safe client-renderable controls
 for the configured coding agent. The optional
@@ -2221,6 +2241,11 @@ for the session thread. Like the artifact read, it requires the bearer token whe
       "content": "Inspect this workspace.",
       "context": {
         "paths": ["README.md"],
+        "sketch": {
+          "sketchId": "sketch-962ec096-e4d4-46fa-b333-0539bcb6bc4e",
+          "revision": 3,
+          "objectIds": ["route-1"]
+        },
         "attachments": [
           {
             "id": "attachment-00000000-0000-0000-0000-000000000001",
@@ -2239,9 +2264,11 @@ for the session thread. Like the artifact read, it requires the bearer token whe
 ```
 
 For user messages, `context` is present when the turn included selected
-workspace paths or uploaded image attachment ids. It contains safe display
-metadata only; image bytes remain in backend-owned attachment storage under
-`STATE_DIR`. A user message whose `context.questionRequestId` is set is the
+workspace paths, uploaded image attachment ids, or a sketch selection. The
+sketch block stores only the sketch id, revision, and up to 16 unique selected
+object ids; geometry remains in the session sketch. Image bytes remain in
+backend-owned attachment storage under `STATE_DIR`. A user message whose
+`context.questionRequestId` is set is the
 backend's record of a person answering a clarifying-question batch mid-turn
 (see the questions routes below): its `content` is the rendered answer — each
 set's header or ordinal, its prompt, the chosen labels, and the person's own
@@ -2403,6 +2430,11 @@ explicitly. Nothing on either path drops an attachment silently. Optional
 `/api/coding-agent/capabilities`. In Codex JSON-RPC mode they map to `turn/start`
 model, reasoning effort, and speed overrides.
 
+`context.sketch` is retired. New turn requests containing it return `400`
+before a turn starts. Historical message context may still contain a sketch
+selection for transcript compatibility. Human sketch editing is independent of
+agent turns.
+
 When Codex reports `thread/tokenUsage/updated`, the backend records cumulative
 turn token totals and the thread's effective model context window. The selected
 session and status snapshots then include `modelContextWindowTokens` plus
@@ -2514,14 +2546,14 @@ authorizes one action, a question batch asks for direction: the agent pauses
 its turn with one or more *sets* — each a prompt, the options it offers, how
 many may be chosen, and whether free text is accepted — and continues once a
 person answers. Claude Code raises it through `AskUserQuestion`, Codex through
-`request_user_input`, and DeepSeek Harness through a descriptor-owned bounded
-assistant-text block because its SDK has no server-to-client request. A runner
+`request_user_input`, and DeepSeek Harness through the shared Cordis question
+tool in managed mode or a bounded assistant-text block in custom mode. A runner
 whose descriptor declares neither a native nor prompt-contract channel has
 nothing outstanding and answers `404`. Gated as a whole by the tier-1 managed setting
 `global.clarifyingQuestionsEnabled` (default on): off, no runner is given the
 channel and each behaves exactly as before it existed.
 
-For DeepSeek, one AgentRoom turn can contain two Harness protocol turns. The
+For custom-mode DeepSeek, one AgentRoom turn can contain two Harness protocol turns. The
 asking Harness `turn/end` leaves the AgentRoom turn running while the request is
 outstanding; a human answer or timeout is queued as another `session/prompt` on
 the same live Harness session, and the continuation's terminal event completes
@@ -2587,6 +2619,217 @@ turn is ignored for transcript/session state. DeepSeek is the exception: its
 protocol has no cancel or verified restore method, so stopping it makes that
 AgentRoom session uncontinuable and a follow-up fails until the client creates a
 new session.
+
+## Sketches
+
+### Repository documents
+
+`GET /api/config` advertises `repositorySketches: true`. The routes require
+bearer authentication for reads and writes when configured. They never start a
+runner or a turn. A sketch is any `*.sketch.json` file in a registered
+workspace, addressed by its workspace-relative path. Threads do not link
+sketches. Clients discover sketches through the bounded file index, as they do
+diagrams.
+
+| Route | Behavior |
+| --- | --- |
+| `POST /api/workspaces/:workspaceId/sketch` | Create an empty document named from `{ name }` (trimmed, 1–120 characters); return `201 { sketch }`. |
+| `GET /api/workspaces/:workspaceId/sketch?path=...` | Read a document. Reading publishes nothing. A missing file returns `409 file_missing`. |
+| `POST /api/workspaces/:workspaceId/sketch/commits?path=...` | Apply human operations using `{ requestId, baseRevision, fileVersion, label?, operations }`. |
+| `POST /api/workspaces/:workspaceId/sketch/undo?path=...` and `/redo` | Apply head-only history using `{ requestId, baseRevision, fileVersion, label? }`. |
+| `POST /api/workspaces/:workspaceId/sketch/reset-history?path=...` | After inspecting current bytes, explicitly discard auxiliary history and ambiguous recovery evidence using `{ fileVersion }`. Geometry is unchanged. Use new request ids afterward. |
+
+Repository reads return `{ sketch: { workspaceId, path, sketchId, revision,
+document, fileVersion, undoDepth, redoDepth, historyReset, outcomeUnknown } }`.
+Creation prefers an existing `docs/sketches` directory, otherwise workspace root.
+Names derive from the supplied name. Occupied names, including a name another
+writer takes during the create-only write, move on to suffixes `-2` through
+`-5`, then return `409 name_collision` asking for another name. A retried
+create after a lost response makes another file. No directories are created. Files contain only the canonical document,
+formatted with two-space indentation and a final newline. The final UTF-8 form
+must fit 2 MiB. Generic text PUT remains capped at 256 KiB.
+
+Schema version 2 adds persisted stroke `brush` (`finePen`, `broadMarker`, or
+`highlighter`) and `lineStyle` (`solid`, `dashed`, or `dotted`) fields. Stroke
+width remains an independent bounded value. V1 files read as their existing appearance with
+`finePen` and `solid` supplied in memory; reading does not rewrite the file.
+The first successful commit, undo, or redo writes schema version 2 under the
+same revision and file-version checks, preserving migratable undo history.
+Schema-version-1 backends refuse version-2 files without rewriting them.
+Version 1 kept unknown kinds as opaque objects. A version-1 object whose kind
+is `planarShape` or `textBox` is read as that version-2 kind when it matches the
+definitions below. Otherwise the read fails with `invalid_document`, the message
+names the object and kind, and the file is not rewritten.
+
+Stroke, box, and text objects accept an optional `color` in `#RRGGBB` or
+`#RRGGBBAA` form. The final two digits are alpha. Create operations set the
+initial color; update operations can change it or pass `null` to restore the
+object's default appearance. Stroke updates can also change brush, width, or
+line style. The backend validates the value and records the edit in ordinary
+undo history.
+
+Version 2 also accepts `planarShape` objects with `shapeType` (`rectangle`,
+`ellipse`, or `triangle`), a two-dimensional meter `size`, and `appearance`
+(`outline`, `fill`, or `fillAndOutline`). `fillColor` and `outlineColor` are
+independent `#RRGGBB` or `#RRGGBBAA` values; `outlineWidth` is 1 mm–100 mm and
+defaults to 4 mm. Shape dimensions are 1 mm–10 m. Transforms and parent groups
+place the shape in the same 10-meter sketch cube as other geometry. The
+document-wide `shapeSegments` limit is 8,192 polygon segments across visible
+fill and outline passes; exceeding it returns `422 limit_exceeded`.
+
+Version 2 accepts a distinct `textBox` kind for wrapped text on a bounded XY
+panel. It stores non-empty plain `text` up to 1,000 UTF-16 code units, an
+optional text `color`, a two-dimensional meter `size` (1 mm–10 m), an
+`appearance`, independent `fillColor` and `outlineColor`, and an `outlineWidth`
+bounded to 1 mm–100 mm (4 mm default). The existing transform places the
+panel; world-bounds validation includes its full bounds and visible outline.
+Text boxes share the document-wide 8,192-segment budget for visible fills and
+outlines. Existing version-2 readers preserve this new kind as an unknown
+object with its fields, but only readers that know `textBox` can edit it.
+
+Schema version 3 adds formatting to `textBox`. Plain `text` stays the
+canonical content, and these fields sit beside it:
+
+| Field | Meaning |
+| --- | --- |
+| `font` | `{ family, size }` for the whole box. `family` is `system`, `rounded`, `serif`, or `monospaced`. `size` is the Body size in meters, 5 mm–250 mm. |
+| `paragraphs` | Exactly one `{ style, alignment, list }` per `\n`-separated paragraph of `text`. `style` is `title`, `heading1`, `heading2`, `heading3`, `body`, or `caption`; `alignment` is `leading`, `center`, or `trailing`; `list` is `none`, `bullet`, or `numbered`. |
+| `spans` | Up to 256 `{ start, length, bold?, italic?, underline?, strikethrough? }` ranges in UTF-16 code units. A flag is `true` or absent, and each span sets at least one. |
+| `rendering` | `flat` draws on the panel; `extruded` draws 3D text. |
+| `extrusionDepth` | 1 mm–100 mm, always stored, so converting back and forth keeps it. |
+
+Version 3 also lets a text box take the `none` appearance, which draws no
+fill or outline and shows only the text. Its fill, outline, and width stay
+stored, and it adds no passes to the segment budget. Planar shapes and
+version-2 text boxes still accept only `outline`, `fill`, or `fillAndOutline`,
+and reject `none`.
+
+Spans must be sorted, must not overlap, must lie inside `text`, must not split
+a surrogate pair, and must not touch a neighbor with the same flags, so each
+formatting has one encoding. Clients scale the other styles from the Body
+size: Title 29/17, Heading 1 24/17, Heading 2 22/17, Heading 3 19/17, Body 1,
+and Caption 12/17. Title and headings are bold by style.
+
+A create may leave out any formatting field. The stored box then gets the
+`system` family at 12.5 mm, one `body`/`leading`/`none` paragraph per
+paragraph of text, no spans, `flat`, and 20 mm depth. An update replaces the
+formatting fields it carries. An update that changes `text` must also carry
+`paragraphs` and `spans`, or it returns `422 invalid_operation`. The backend
+checks the whole resulting box, so a paragraph count or span that no longer
+fits the text also returns `422 invalid_operation`. Undo restores every field
+an update replaced in one step.
+
+An extruded box holds at most 280 UTF-16 code units, and all extruded boxes in
+a document share 560. Exceeding either returns `422 limit_exceeded` with
+`extrudedTextCharacters` or `totalExtrudedTextCharacters`. World-bounds
+validation adds half the extrusion depth on each side of an extruded box's
+plane. Fill and outline stay stored on an extruded box and still count toward
+the segment budget.
+
+Version 1 and version 2 files read as version 3 in memory and are not
+rewritten. A version-2 text box gets the create defaults above. Stored undo
+history migrates the same way, including text updates, which gain the plain
+paragraphs for the text they set. The first successful commit, undo, or redo
+writes version 3. A version-2 file that already carries a version-3 field is
+refused as `invalid_document`. Version-2 backends refuse version-3 files with
+`newer_document_version` and leave them unchanged.
+
+### Operations and limits
+
+A commit applies one all-or-nothing batch of caller operations: `create`,
+`update`, `transform`, `delete`, `clear`, `group`, and `ungroup`. Transforms are
+absolute. Deleting a group removes its whole subtree. `{ "op": "clear" }`
+removes every object in one transaction, so a single undo restores them all.
+It returns `422 invalid_operation` on an empty sketch and
+`422 unsupported_object_kind` while any unknown-kind object is present, so it
+never discards content this backend cannot edit.
+
+```json
+{
+  "requestId": "gesture-42",
+  "baseRevision": 3,
+  "fileVersion": "9f2c…",
+  "label": "Draw the ridge line",
+  "operations": [
+    { "op": "create", "objectId": "route-2", "kind": "stroke", "points": [[0, 0, 0], [0.2, 0, -0.2]], "width": 0.005, "brush": "finePen", "lineStyle": "solid" }
+  ]
+}
+```
+
+Core caps: 128 objects, 2,048 points per stroke, 16,384 points in total,
+8,192 pattern segments, 8,192 shape segments, 1,000 text characters, 280
+characters per extruded text box and 560 across them, 256 spans per text box, four
+nested group levels, and a 10-meter cube centered on the sketch origin. A batch
+holds at most 32 operations and 256 KiB; a larger batch is refused `413` before
+parsing. Semantic refusals (unknown object, duplicate id, cycle, bounds,
+per-kind caps) return `422` with the core error code and, where applicable, the
+zero-based `opIndex`. History keeps 50 undo entries within 8 MiB, and receipts
+keep 256 request ids. Trimming history never removes current geometry.
+
+Undo applies the head history entry's inverse operations as a fresh
+compensating transaction. A new commit clears the redo stack. At either end the
+route returns `409 nothing_to_undo` or `409 nothing_to_redo`. Within a batch,
+undo reverses operation order while preserving each operation's inverse steps;
+redo reapplies the original order. The actor is always `human` for these routes;
+repository requests accept neither `actor` nor `turnId`.
+
+### Storage and recovery
+
+Deleting a session or unregistering a workspace never removes saved geometry.
+A renamed, moved, or deleted file returns `409 file_missing` at its old path;
+open it again at its new path or create a new sketch. The backend never scans
+by sketch id. Renaming or replacing a document invalidates its prior auxiliary
+undo history.
+
+Every new edit requires both revision and the opaque file-version token returned
+by the read. A changed token returns `409 file_changed`, even if an external edit
+reused the revision. A stale revision returns `409 stale_revision` with
+`currentRevision`; refresh and retry explicitly. A missing target returns
+`409 file_missing` and is never recreated by an edit. Unsupported schemas,
+invalid files, and symlinks are refused without altering the file. Unknown
+object kinds retain their fields. Edits to one file run one at a time, and
+every window on that file shares its lock. Edits to different files in the
+same workspace run independently. Creation holds a workspace-wide lock while
+it probes names. No geometry is merged or rebased.
+
+Success returns `{ receipt, revision, fileVersion, undoDepth, redoDepth }` after
+publication and receipt persistence. Identical retained requests return their
+original receipts, with the current file token. Changed request input returns
+`409 request_id_conflict`. A retry of a request id that has aged out of the
+receipt ring returns `409 outcome_unknown`; read the document and retry with a
+new id.
+
+Undo and bounded receipts live in auxiliary backend state, bound to the exact
+file version. External replacement returns `historyReset: true` and zero history.
+A durable write intent precedes publication. Recovery compares current bytes to
+the intended bytes and the previous version before acknowledging a retry.
+Unestablished outcomes refuse edits with `409 outcome_unknown`; reads still
+expose the authoritative document with `outcomeUnknown: true` for inspection.
+Explicit `/reset-history` permits a fresh start without changing geometry.
+A `503 storage_unavailable` can occur after publication, so retry the same
+request rather than assuming the gesture failed.
+
+Workspace publication uses a sibling exclusive temporary file, create-only link
+or atomic replacement, and a final identity check. These are optimistic checks,
+with the same external filesystem race limits as text PUT, not universal
+filesystem transactions. Publication emits metadata-only `workspace_file_written`
+and `sketch_document_changed` events with workspace id, relative path, and
+revision. Read geometry through authenticated routes.
+
+### Sketch turn context
+
+Sketches are not agent context. New `context.sketch` turn requests return `400`
+before starting a turn. Selections recorded in earlier transcripts still
+decode.
+
+### Sketch events
+
+`/api/events` carries metadata-only invalidation for sketches; content is
+re-read through the authenticated routes above. `sketch_document_changed`
+(fired after the revision is durable, and kept in the audit log) carries
+`workspaceId`, `path`, `sketchId`, `revision`, `kind`
+(`created` | `commit` | `undo` | `redo`), and `actorKind`. It never carries
+geometry, labels, text, or tokens.
 
 ## Auth
 

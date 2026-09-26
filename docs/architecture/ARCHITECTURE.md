@@ -27,9 +27,11 @@ Codex | Claude Code | DeepSeek | Cursor | admitted ACP agents
 | Sessions and turns | `apps/backend/src/agent/AgentSessionService.ts`, `apps/backend/src/routes/agentSessionRoutes.ts` |
 | Durable sessions and audit | `apps/backend/src/state` |
 | Runner admission and execution | `apps/backend/src/runner/registry.ts`, `apps/backend/src/runner` |
+| AgentRoom tool catalog and dispatch | `apps/backend/src/agentTools` |
 | Canonical coding activity | `apps/backend/src/protocol/coding` |
 | Broadcast events | `apps/backend/src/events` |
 | Editor, terminal, and spatial services | `apps/backend/src/editor`, `apps/backend/src/terminal`, `apps/backend/src/scene` |
+| Sketch documents and recovery | `apps/backend/src/sketch`, `apps/backend/src/routes/repositorySketchRoutes.ts` |
 | Shared Apple API contracts | `apps/shared/AgentRoomClient/Sources` |
 | Backend setup and supervision | `apps/macos/AgentRoomMac` |
 | Session and spatial interaction | `apps/visionos/AgentRoom` |
@@ -72,7 +74,9 @@ Workspace operations start from a registered workspace and bounded relative
 path. The backend enforces containment, symlink refusal, protected-name filters,
 and route-specific limits. Clients have no general filesystem or shell API.
 Attachments, artifacts, config, and sessions remain under backend state rather
-than a registered workspace.
+than a registered workspace. Human sketch documents live in bounded workspace
+`.sketch.json` files; session associations and auxiliary recovery/history stay
+in backend state.
 
 REST carries reads and mutations. `/api/events` is the only broadcast
 WebSocket. Terminal and language-service sockets are authenticated,

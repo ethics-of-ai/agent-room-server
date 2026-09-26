@@ -16,6 +16,7 @@ an event reaches `apps/backend/src/protocol/coding`.
 - `promptDelivery`
 - `turnDiffSource`
 - `clarifyingQuestions`
+- `agentTools`
 - `workspaceSkills`, `skillSourceDirs`, and `skillInvocationPrefix`
 - `settingsKeyPrefix` and runner-owned managed settings
 - `restoreStrategy`
@@ -36,13 +37,13 @@ downgrade guard and update its compatibility vocabulary with any new built-in.
 
 ## Current runner policies
 
-| Runner | Prompt | Turn diff | Questions | Workspace skills | Restore | Configured when |
-| --- | --- | --- | --- | --- | --- | --- |
-| `codex` | Per turn | Native runner diff | Native request | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
-| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
-| `deepseek` | Per turn | Settlement Git delta | Bounded prompt contract | None advertised | `unsupported` | Executable and Cordis composition are both configured |
-| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
-| `acp_*` | Descriptor-owned | Descriptor-owned | None in the current external adapter | Descriptor-owned | A restore path is required at admission | Its admitted executable definition is present |
+| Runner | Prompt | Turn diff | Questions | AgentRoom tools | Workspace skills | Restore | Configured when |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `codex` | Per turn | Native runner diff | Native request | None | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
+| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | None | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
+| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay; questions | None advertised | `unsupported` | Executable and Cordis composition are both configured |
+| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
+| `acp_*` | Descriptor-owned | Descriptor-owned | None in the current external adapter | None | Descriptor-owned | A restore path is required at admission | Its admitted executable definition is present |
 
 The registry and `apps/backend/test/runnerRegistry.test.ts` are the executable
 source for this table. Update the guide when a classification changes. Do not
@@ -159,11 +160,98 @@ Adapter paths:
   refuses every other server request it does not implement.
 - Claude Code handles `AskUserQuestion` through `canUseTool`. It refuses
   every other tool that reaches the callback with the CLI's headless behavior.
-- DeepSeek parses one valid, line-start, bounded
-  `<agentroom-question>` block. It continues the same AgentRoom turn through a
-  second Harness prompt.
+- DeepSeek's descriptor selects the native `questions.ask` relay in managed
+  composition mode. Custom mode parses one valid, line-start, bounded
+  `<agentroom-question>` block and continues through a second Harness prompt.
+  The managed path omits both the prompt instruction and legacy parser.
 - Cursor registers one `ask_user_question` custom tool and always disallows
-  the SDK's own `askQuestion`.
+  the SDK's own `askQuestion`. Since the AgentRoom tool extraction the tool is
+  the catalog's `questions.ask` definition, relayed through the generic
+  `tools/invoke` host request (see the next section); the original
+  `question/ask` request remains as a compatibility shim for the same call.
+
+## AgentRoom tools and dispatch
+
+`apps/backend/src/agentTools/` owns the catalog and the bound dispatcher for
+tools a runner's model calls through AgentRoom rather than the provider's own
+surface. A tool is defined once as serializable data — stable logical id,
+model-facing name, description, JSON-Schema input and output, unavailable text,
+required capability, and feature gate — and registered statically at module
+load; there is no runtime tool-definition loader. Handlers are never registered:
+each turn's binding
+injects them, because a handler closes over the session, the turn, and the
+pending stores that own its behavior. Validators, handlers, schemas, and
+results stay backend-owned; only the definitions cross to a runner host.
+
+The external interface is four operations:
+
+1. Compose a runner's stable catalog from its descriptor capabilities and the
+   global gates (`allowedAgentToolLogicalIds`). Separately narrow the turn's
+   allowed names from explicit context.
+2. Bind the allowed set to the originating turn (`bindAgentTools`), with a
+   turn handle whose liveness ("still the session's live turn") is revalidated
+   before every dispatch.
+3. Invoke a bound tool by its advertised name; the dispatcher owns the
+   allowlist, unavailable-tool refusals, call correlation ids, bounded string
+   results, misbehaving-handler containment, and safe-metadata telemetry.
+4. Dispose the binding at turn end; late relays are answered, never run, and
+   a handler that settles after its turn ended is discarded — the waiting
+   transport receives the tool's unavailable text, never the stale result.
+
+Dispatch imposes no timeout of its own — a question's human-wait clock belongs
+to its handler — and emits no generic lifecycle activity: the native transport
+already reports the call and the question pair reports its own resolution, so
+a generic emission would double them. Telemetry carries logical id, name,
+correlation id, outcome, and duration only; arguments and results never reach
+it. The correlation id is observability, not a durable mutation id.
+
+`RunnerDescriptor.agentTools` owns both transport mode and capabilities. Cursor
+uses `custom_tools` for the question capability. Its host registers every
+advertised definition as a custom tool
+whose `execute` sends one `tools/invoke` request carrying the tool's name and
+the host's current run id; that run id is the generation handle, so a late
+callback from a run that is no longer the live turn is answered with the
+tool's unavailable text instead of dispatching into whichever turn is active.
+The relay is an allowlist, not an executor: names outside the turn's bound set
+never reach a handler, and the envelope cannot run a shell command or hit a
+backend route. Runners that have not migrated keep their own question paths
+unchanged; `mode: "none"` records exactly that.
+
+DeepSeek uses `cordis_pipe` for managed-mode questions. The persistent Harness
+child receives the descriptor/gate-derived catalog once over an inherited,
+versioned, bounded pipe and registers it through Cordis's `tools` service.
+Every prompt gets a new `bind`/`unbind` generation. Catalog changes require a
+fresh child. Missing optional tool readiness leaves ordinary turns usable and
+reports a separate capability check; `AgentRunnerToolSet.required` can require
+tool readiness for callers that depend on it. Sketches do not supply tools or
+turn bindings. The relay never receives bearer auth or route authority. See the
+[DeepSeek runner guide](DEEPSEEK_HARNESS_RUNNER.md#agentroom-cordis-tools).
+
+The minimal recipe for adding a tool:
+
+1. Register a definition in `agentTools/` (or its owning module) with a stable
+   logical id, the model-facing name, description, bounded input schema,
+   unavailable text, required capability, and the feature gate that composes it.
+   A parity test
+   holds the advertised schema against the canonical validator.
+2. Add the capability to each descriptor whose native transport has proved it,
+   then inject the async handler keyed by logical id from the owning module's
+   per-turn factory.
+3. Nothing else: catalog advertisement, the transport relay, dispatcher, and
+   lifecycle binding stay generic. `test/agentTools.test.ts`,
+   `test/agentRunnerToolSet.test.ts`, and `test/deepseekToolRelay.test.ts`
+   cover composition, lifecycle, and transport reuse.
+
+The minimal recipe for adding a runner transport:
+
+1. Record its transport mode and supported capabilities in `RunnerDescriptor`;
+   code above the runner boundary must not switch on its id.
+2. Adapt the native registration/call protocol to `AgentRunnerInput.tools`.
+   Preserve the immutable catalog for a persistent child and correlate each
+   invocation to the supplied run id and call id.
+3. Reuse the shared dispatcher and owning handlers. Prove startup failure,
+   cancellation, late/refused calls, replay protection, clean rebinding, and a
+   second tool without adding tool-specific branches to the adapter.
 
 ## Images and turn settings
 

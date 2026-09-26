@@ -148,11 +148,17 @@ complete configured permission posture; the AgentRoom permission route has no
 pending request to answer.
 
 While clarifying questions are enabled, the host registers exactly one
-`ask_user_question` custom tool. Its schema is AgentRoom's bounded question
-vocabulary. Execution sends one `question/ask` request to the backend and waits
-for the shared answer or timeout. The model sees labels and invited text, never
-AgentRoom ids. Sensitive text is removed from shared events, transcript, logs,
-and audit. When the setting is off, the custom tool and prompt text are absent.
+`ask_user_question` custom tool — the AgentRoom catalog's `questions.ask`
+definition under its preserved native name. Its schema is AgentRoom's bounded
+question vocabulary. Execution sends one `tools/invoke` request to the backend
+(the original `question/ask` request remains a compatibility shim for the same
+call) stamped with the host's current run id, and waits for the shared answer
+or timeout. The model sees labels and invited text, never AgentRoom ids.
+Sensitive text is removed from shared events, transcript, logs, and audit.
+When the setting is off, the custom tool and prompt text are absent. Other
+catalog tools advertised at `agent/start` register through the same host loop
+and relay through the same envelope; see the AgentRoom tools section of
+[`RUNNERS.md`](RUNNERS.md).
 
 ## Capability discovery
 

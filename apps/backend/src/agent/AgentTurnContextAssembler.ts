@@ -1,4 +1,4 @@
-import type { AgentSession, AgentSessionMessageContext, AgentTurnContext } from "../domain/models";
+import type { AgentSession, AgentSessionMessageContext, AgentTurnContext, ServiceConfig } from "../domain/models";
 import type { AgentRunnerInputPart } from "../runner/AgentRunner";
 import { runnerDescriptor } from "../runner/registry";
 import { WorkspaceExplorer, WorkspaceExplorerError } from "../workspace/WorkspaceExplorer";
@@ -31,6 +31,7 @@ export class AgentTurnContextAssembler {
       // Kill switch for the descriptor-owned prompt contract. Native adapters
       // receive no copy: their own protocol supplies the ask mechanism.
       clarifyingQuestionsEnabled?: boolean;
+      runnerConfig?: ServiceConfig;
       // Standing spatial-diagram contract, prepended when the scene engine is
       // enabled; omitted (undefined) disables it. claude_code turns skip it
       // here because their runner delivers the same string once via the SDK
@@ -85,6 +86,7 @@ export class AgentTurnContextAssembler {
       const questionChannel = runnerDescriptor(input.session.runnerKind).clarifyingQuestions;
       const questionInstruction =
         this.deps.clarifyingQuestionsEnabled !== false && questionChannel.mode === "prompt_contract"
+          && !(this.deps.runnerConfig && questionChannel.nativeWhen?.(this.deps.runnerConfig))
           ? questionChannel.instruction
           : undefined;
       const instructions = [

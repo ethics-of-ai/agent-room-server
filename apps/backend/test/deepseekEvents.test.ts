@@ -95,6 +95,46 @@ describe("DeepSeek session event mapping", () => {
     });
   });
 
+  it("keeps sketch tool arguments and results out of generic activity", () => {
+    const ctx = context();
+    const geometryMarker = "SECRET_GEOMETRY_12.345";
+    const started = mapDeepSeekSessionEvent(
+      event("tool/call", {
+        turn: 1,
+        step: 1,
+        callId: "call-sketch",
+        name: "agentroom_sketch_propose",
+        arguments: JSON.stringify({ operations: [{ text: geometryMarker }] })
+      }),
+      ctx
+    );
+    const completed = mapDeepSeekSessionEvent(
+      event("tool/result", {
+        message: {
+          source: { kind: "tool", callId: "call-sketch" },
+          content: [{
+            type: "tool-result",
+            toolCallId: "call-sketch",
+            content: [{ type: "text", text: JSON.stringify({ ok: true, geometryMarker }) }]
+          }]
+        },
+        error: { name: "PrivateDetail", code: geometryMarker }
+      }),
+      ctx
+    );
+
+    const broadcastShape = JSON.stringify([...started.events, ...completed.events]);
+    expect(broadcastShape).not.toContain(geometryMarker);
+    expect(started.events[0]).toMatchObject({
+      type: "agent_activity",
+      activity: { content: { name: "agentroom_sketch_propose", callId: "call-sketch" } }
+    });
+    expect(completed.events[0]).toMatchObject({
+      type: "agent_activity",
+      activity: { content: { callId: "call-sketch" } }
+    });
+  });
+
   it("carries a failed tool's identity without inventing a canonical failure kind", () => {
     const result = mapDeepSeekSessionEvent(
       event("tool/result", {

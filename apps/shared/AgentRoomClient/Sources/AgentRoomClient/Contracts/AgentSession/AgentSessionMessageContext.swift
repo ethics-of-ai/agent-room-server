@@ -1,6 +1,8 @@
 import Foundation
 
 public struct AgentSessionMessageContext: Codable, Hashable {
+    /// Retained for historical transcripts; never attached to new turns.
+    public var sketch: AgentTurnSketchContext?
     public var paths: [String]?
     public var attachments: [AgentSessionMessageContextAttachment]?
     /// Set on the user message the backend records when a person answers a
@@ -11,8 +13,10 @@ public struct AgentSessionMessageContext: Codable, Hashable {
     public init(
         paths: [String]? = nil,
         attachments: [AgentSessionMessageContextAttachment]? = nil,
-        questionRequestId: String? = nil
+        questionRequestId: String? = nil,
+        sketch: AgentTurnSketchContext? = nil
     ) {
+        self.sketch = sketch
         self.paths = paths
         self.attachments = attachments
         self.questionRequestId = questionRequestId

@@ -115,6 +115,7 @@ export const serviceConfigSchema = z.object({
   claudeCodeLoadWorkspaceSkills: z.boolean().default(defaultClaudeCodeLoadWorkspaceSkills),
   deepseekExecutable: z.string().optional(),
   deepseekCordisConfig: z.string().optional(),
+  deepseekCompositionMode: z.enum(["custom", "managed"]).default("custom"),
   deepseekArgs: z.array(z.string()),
   deepseekModel: z.string().optional(),
   deepseekProvider: deepseekProviderSchema.optional(),
@@ -326,9 +327,20 @@ export const workspaceSearchSnapshotSchema = z.object({
   truncated: z.boolean()
 });
 
+export const agentTurnSketchContextSchema = z.object({
+  sketchId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  revision: z.number().int().nonnegative(),
+  objectIds: z.array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)).min(1).max(16)
+}).strict().superRefine((context, refinement) => {
+  if (new Set(context.objectIds).size !== context.objectIds.length) {
+    refinement.addIssue({ code: z.ZodIssueCode.custom, path: ["objectIds"], message: "Object ids must be unique" });
+  }
+});
+
 export const agentTurnContextSchema = z.object({
   paths: z.array(z.string().min(1)).max(8).optional(),
-  attachments: z.array(z.string().trim().min(1).regex(/^attachment-[0-9a-f-]{36}$/)).max(8).optional()
+  attachments: z.array(z.string().trim().min(1).regex(/^attachment-[0-9a-f-]{36}$/)).max(8).optional(),
+  sketch: z.never({ message: "Sketch context is no longer supported" }).optional()
 });
 
 export const agentSessionAttachmentSchema = z.object({
@@ -354,6 +366,7 @@ export const agentSessionMessageContextAttachmentSchema = z.object({
 export const agentSessionMessageContextSchema = z.object({
   paths: z.array(z.string().min(1)).max(8).optional(),
   attachments: z.array(agentSessionMessageContextAttachmentSchema).max(8).optional(),
+  sketch: agentTurnSketchContextSchema.optional(),
   // Set on the user message the backend records when a person answers a
   // clarifying-question batch, so a client can style it as that answer.
   questionRequestId: z.string().min(1).max(200).optional()

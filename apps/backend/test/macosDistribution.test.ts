@@ -280,9 +280,28 @@ describe("macOS distribution packaging", () => {
     expect(distribution.bundledResourcePaths("/Applications/AgentRoom.app")).toEqual({
       nodeExecutable: "/Applications/AgentRoom.app/Contents/Resources/node/bin/node",
       backendEntrypoint: "/Applications/AgentRoom.app/Contents/Resources/backend/dist/index.js",
+      deepseekCordisPlugin: "/Applications/AgentRoom.app/Contents/Resources/backend/dist/runner/deepseek/cordis/agentRoomToolsPlugin.js",
       backendPublic: "/Applications/AgentRoom.app/Contents/Resources/backend/public",
       backendCatalogAssets: "/Applications/AgentRoom.app/Contents/Resources/backend/catalog-assets"
     });
+  });
+
+  it("requires the compiled AgentRoom Cordis plugin to be a regular packaged file", async () => {
+    const distribution = await import(pathToFileURL(resolve(repoRoot, "scripts/package-macos.mjs")).href);
+    const root = await mkdtemp(join(tmpdir(), "agentroom-cordis-plugin-"));
+    const regular = resolve(root, "agentRoomToolsPlugin.js");
+    const target = resolve(root, "target.js");
+    const link = resolve(root, "linked.js");
+    try {
+      await writeFile(regular, "exports.name = 'agentroom-tools';\n");
+      await writeFile(target, "target\n");
+      await symlink(target, link);
+      await expect(distribution.assertPackagedAgentRoomCordisPlugin(regular)).resolves.toBe(regular);
+      await expect(distribution.assertPackagedAgentRoomCordisPlugin(link)).rejects.toThrow(/regular file/);
+      await expect(distribution.assertPackagedAgentRoomCordisPlugin(resolve(root, "missing.js"))).rejects.toThrow(/missing/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("passes version overrides to xcodebuild only when the release workflow sets them", async () => {

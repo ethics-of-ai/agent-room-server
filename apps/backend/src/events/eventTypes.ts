@@ -29,6 +29,7 @@ export type AgentRoomEventType =
   | "workspace_git_operation"
   | "config_reloaded"
   | "editor_catalog_changed"
+  | "sketch_document_changed"
   | "terminal_session_started"
   | "terminal_session_closed"
   | CodingAgentEventType;
@@ -146,6 +147,23 @@ export interface TerminalSessionStartedPayload {
   sessionId: string;
   workspaceId: string;
   workspacePath: string;
+}
+
+// Emitted after a sketch revision has been persisted, never before: the
+// announcement is the acknowledgment. Metadata-only by contract — ids, the
+// workspace-relative path, the new revision, the transaction kind, and the
+// authorship class. Strokes, labels, and any other sketch content never travel
+// on this ungated broadcast channel; clients re-read the sketch through its
+// authenticated route on receipt.
+export interface SketchDocumentChangedPayload {
+  workspaceId: string;
+  path: string;
+  sketchId: string;
+  revision: number;
+  /** `created`, `commit`, `undo`, or `redo`. */
+  kind: "created" | "commit" | "undo" | "redo";
+  /** `human` or `agent`; the authorship class, never a name. */
+  actorKind: "human" | "agent";
 }
 
 export interface TerminalSessionClosedPayload {

@@ -5,7 +5,18 @@ import {
   type CursorHostTransport
 } from "../src/runner/cursor/host";
 import { MAX_CURSOR_FORWARDED_DELTA_BYTES_PER_RUN } from "../src/runner/cursor/delta";
+import {
+  CURSOR_QUESTION_TOOL_DESCRIPTION,
+  CURSOR_QUESTION_INPUT_SCHEMA,
+  CURSOR_QUESTION_TOOL_NAME
+} from "../src/runner/cursor/questions";
 import type { CursorRun, CursorSdk, CursorSdkAgent } from "../src/runner/cursor/sdk";
+
+const questionToolAdvertisement = () => ({
+  name: CURSOR_QUESTION_TOOL_NAME,
+  description: CURSOR_QUESTION_TOOL_DESCRIPTION,
+  inputSchema: CURSOR_QUESTION_INPUT_SCHEMA
+});
 
 interface FakeRunOptions {
   messages?: Array<Record<string, unknown>>;
@@ -13,6 +24,8 @@ interface FakeRunOptions {
   result?: { status: "finished" | "error" | "cancelled"; result?: string; error?: { message: string } };
   /** When set, the model "calls" the custom question tool with these args. */
   askQuestion?: Record<string, unknown>;
+  /** When set, the model calls this advertised custom tool by name. */
+  callCustomTool?: { name: string; args: Record<string, unknown> };
   /** When set, the run stays in flight until `cancel()` settles it. */
   hangUntilCancel?: boolean;
 }
@@ -48,11 +61,17 @@ function fakeSdk(options: FakeSdkOptions = {}): {
       const run: CursorRun = {
         id: "run-fake-1",
         async *stream() {
+          const customTools = (agentOptions.local as { customTools?: Record<string, { execute: (a: Record<string, unknown>) => Promise<unknown> }> })?.customTools;
           const askArgs = options.run?.askQuestion;
           if (askArgs) {
-            const customTools = (agentOptions.local as { customTools?: Record<string, { execute: (a: Record<string, unknown>) => Promise<unknown> }> })?.customTools;
             const tool = customTools?.ask_user_question;
             const answer = tool ? await tool.execute(askArgs) : "no tool";
+            yield { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: `answer=${answer}` }] } };
+          }
+          const call = options.run?.callCustomTool;
+          if (call) {
+            const tool = customTools?.[call.name];
+            const answer = tool ? await tool.execute(call.args) : `no tool ${call.name}`;
             yield { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: `answer=${answer}` }] } };
           }
           for (const message of options.run?.messages ?? []) yield message;
@@ -133,7 +152,7 @@ describe("CursorHost", () => {
       sandbox: true,
       autoReview: false,
       disallowedTools: ["askQuestion"],
-      questionTool: true
+      tools: [questionToolAdvertisement()]
     });
     expect(start).toEqual({ agentId: "agent-created-1", resumed: false });
     expect(sdk.openedStores).toEqual([{ workspaceRef: "/workspace", stateRoot: "/state/cursor/agents" }]);
@@ -156,7 +175,7 @@ describe("CursorHost", () => {
       sandbox: true,
       autoReview: false,
       disallowedTools: ["askQuestion"],
-      questionTool: false
+      tools: []
     });
     expect(start).toEqual({ agentId: "agent-prior", resumed: true });
     expect(sdk.resumed[0].agentId).toBe("agent-prior");
@@ -191,7 +210,7 @@ describe("CursorHost", () => {
       sandbox: true,
       autoReview: false,
       disallowedTools: [],
-      questionTool: false
+      tools: []
     });
     const send = await host.handle("agent/send", { text: "go" });
     expect(send).toEqual({ runId: "run-fake-1" });
@@ -233,12 +252,19 @@ describe("CursorHost", () => {
       sandbox: true,
       autoReview: false,
       disallowedTools: ["askQuestion"],
-      questionTool: true
+      tools: [questionToolAdvertisement()]
     });
     await host.handle("agent/send", { text: "go" });
     await flush();
     expect(requests).toEqual([
-      { method: "question/ask", params: { input: { questions: [{ question: "Which?", options: [{ label: "A" }] }] } } }
+      {
+        method: "tools/invoke",
+        params: {
+          tool: "ask_user_question",
+          input: { questions: [{ question: "Which?", options: [{ label: "A" }] }] },
+          runId: "run-fake-1"
+        }
+      }
     ]);
     answer("The person answered: A");
     await flush();
@@ -246,6 +272,41 @@ describe("CursorHost", () => {
       (n) => n.method === "run/message" && ((n.params as { message: { type: string } }).message.type === "assistant")
     );
     expect(JSON.stringify(assistant)).toContain("answer=The person answered: A");
+  });
+
+  it("registers and relays a second advertised tool through the same loop, no new callback", async () => {
+    // The B04 property at the host boundary: a tool the host was never taught
+    // about rides the same customTools loop and the same `tools/invoke`
+    // envelope as the question tool. Nothing in host.ts names it.
+    const sdk = fakeSdk({
+      run: { callCustomTool: { name: "test_demo", args: { value: "hello" } }, result: { status: "finished" } }
+    });
+    const { transport, requests, notifications, answer } = recordingTransport();
+    const host = new CursorHost(sdk.sdk, transport);
+    await host.handle("initialize", { stateRoot: "/state" });
+    await host.handle("agent/start", {
+      cwd: "/w",
+      model: { id: "composer-2.5" },
+      settingSources: [],
+      sandbox: true,
+      autoReview: false,
+      disallowedTools: ["askQuestion"],
+      tools: [
+        questionToolAdvertisement(),
+        { name: "test_demo", description: "A test-only tool.", inputSchema: { type: "object" } }
+      ]
+    });
+    await host.handle("agent/send", { text: "go" });
+    await flush();
+    expect(requests).toEqual([
+      { method: "tools/invoke", params: { tool: "test_demo", input: { value: "hello" }, runId: "run-fake-1" } }
+    ]);
+    answer("demo saw hello");
+    await flush();
+    const assistant = notifications.find(
+      (n) => n.method === "run/message" && ((n.params as { message: { type: string } }).message.type === "assistant")
+    );
+    expect(JSON.stringify(assistant)).toContain("answer=demo saw hello");
   });
 
   it("cancels the active run and refuses an unknown method", async () => {
@@ -260,7 +321,7 @@ describe("CursorHost", () => {
       sandbox: true,
       autoReview: false,
       disallowedTools: [],
-      questionTool: false
+      tools: []
     });
     await host.handle("agent/send", { text: "go" });
     await flush();

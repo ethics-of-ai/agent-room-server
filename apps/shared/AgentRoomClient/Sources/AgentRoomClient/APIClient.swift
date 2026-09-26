@@ -588,10 +588,8 @@ public struct APIClient {
     ) async throws -> AgentSessionTurn {
         let context = (contextPaths.isEmpty && attachmentIds.isEmpty)
             ? nil
-            : AgentTurnContext(
-                paths: contextPaths.isEmpty ? nil : contextPaths,
-                attachments: attachmentIds.isEmpty ? nil : attachmentIds
-            )
+            : AgentTurnContext(paths: contextPaths.isEmpty ? nil : contextPaths,
+                               attachments: attachmentIds.isEmpty ? nil : attachmentIds)
         let payload = SendAgentTurnRequest(message: message, context: context, settings: settings)
         let response: AgentSessionTurnResponse = try await request(
             ["api", "agent-sessions", sessionId, "turns"],

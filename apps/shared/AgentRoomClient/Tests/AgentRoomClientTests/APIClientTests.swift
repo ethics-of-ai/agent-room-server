@@ -473,21 +473,17 @@ final class APIClientTests: XCTestCase {
         )
         RequestCapturingURLProtocol.response = HTTPURLResponse(
             url: try XCTUnwrap(URL(string: "http://example.test/agent-room/api/agent-sessions/session%201/turns")),
-            statusCode: 202,
-            httpVersion: nil,
-            headerFields: nil
+            statusCode: 202, httpVersion: nil, headerFields: nil
         )
         RequestCapturingURLProtocol.responseBody = Data("""
         {"turn":{"id":"turn-1","sessionId":"session 1","status":"running","startedAt":"2026-05-23T00:00:00.000Z","inputTokens":0,"outputTokens":0,"totalTokens":0}}
         """.utf8)
-
         _ = try await client.sendAgentTurn(
             sessionId: "session 1",
             message: "Describe this",
             contextPaths: ["README.md"],
             attachmentIds: ["attachment-00000000-0000-0000-0000-000000000001"]
         )
-
         let request = try XCTUnwrap(RequestCapturingURLProtocol.lastRequest)
         let body = try XCTUnwrap(RequestCapturingURLProtocol.lastRequestBody)
         let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
@@ -496,8 +492,8 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(request.url?.absoluteString, "http://example.test/agent-room/api/agent-sessions/session%201/turns")
         XCTAssertEqual(context["paths"] as? [String], ["README.md"])
         XCTAssertEqual(context["attachments"] as? [String], ["attachment-00000000-0000-0000-0000-000000000001"])
+        XCTAssertNil(context["sketch"])
     }
-
     func testUploadAgentSessionAttachmentUsesMultipartEndpoint() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RequestCapturingURLProtocol.self]

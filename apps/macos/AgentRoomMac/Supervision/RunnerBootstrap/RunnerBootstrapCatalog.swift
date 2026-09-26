@@ -192,28 +192,36 @@ enum RunnerBootstrapCatalog {
                 environmentName: "DEEPSEEK_ARGS",
                 title: "Arguments",
                 prompt: "e.g. ~/src/deepseek-harness/packages/examples/jsonrpc-demo/lib/bin.js",
-                // No probe checks this, so the failure it causes is worth
-                // naming where it is typed rather than leaving it to be met as
-                // a runtime error with no obvious cause.
                 note: RunnerBootstrapNote(
                     id: "entrypoint",
-                    text: "For a source build, the built entrypoint goes here and the interpreter above. Nothing checks this path — a wrong one fails when the backend starts the runner, not on Check.",
+                    text: "For a source build, put the absolute built SDK entrypoint here. Run its local check before starting the backend.",
                     systemImage: "terminal"
                 )
+            ),
+            RunnerBootstrapSlot(
+                id: "compositionMode",
+                kind: .arguments,
+                environmentName: "DEEPSEEK_COMPOSITION_MODE",
+                title: "Setup",
+                note: RunnerBootstrapNote(
+                    id: "compositionMode",
+                    text: "AgentRoom managed setup generates its tool configuration and refreshes installed plugin paths automatically. It selects workspace-write policy, file and shell tools, and no subagents. The selected composition locates installed Harness packages; your file stays unchanged. Custom setup runs your own graph.",
+                    systemImage: "gearshape"
+                ),
+                choices: [
+                    RunnerBootstrapChoice(id: "custom", title: "Custom composition"),
+                    RunnerBootstrapChoice(id: "managed", title: "AgentRoom managed")
+                ]
             ),
             RunnerBootstrapSlot(
                 id: "cordisConfig",
                 kind: .filePath,
                 environmentName: "DEEPSEEK_CORDIS_CONFIG",
                 title: "Composition",
-                // Required, not optional: the runtime demands an explicit
-                // composition and exits without one. AgentRoom ships none on
-                // purpose — the plugin graph decides which tools the agent has,
-                // which is the operator's deployment decision, not ours.
                 prompt: "e.g. ~/src/deepseek-harness/examples/jsonrpc-agent/cordis.yml",
                 note: RunnerBootstrapNote(
                     id: "composition",
-                    text: "This file decides which tools the agent gets and whether it can write outside the workspace. AgentRoom ships none and cannot inspect yours — read it first. See docs/safety/TRUST_AND_SAFETY.md.",
+                    text: "In custom setup, review this file's tools and execution policy before launching. In managed setup, its folder is used only to locate installed Harness packages. Runtime startup does not verify provider access or sandbox enforcement.",
                     systemImage: "lock.shield"
                 )
             ),
@@ -285,6 +293,22 @@ enum RunnerBootstrapCatalog {
                     blockingAbsent: "Set the DeepSeek Harness runtime path, then rerun the check.",
                     blockingFailed: "Resolve the DeepSeek Harness runtime check error.",
                     blockingUnchecked: "Set or check the DeepSeek Harness SDK runtime path."
+                )
+            ),
+            RunnerBootstrapProbe(
+                id: "entrypoint",
+                kind: .nodeEntrypoint(executableSlotID: "executable", argumentsSlotID: "arguments"),
+                requirement: .required,
+                actionTitle: "Check SDK entrypoint",
+                actionSymbol: "doc.badge.gearshape",
+                messages: RunnerBootstrapProbeMessages(
+                    satisfied: "SDK entrypoint is ready: %@.",
+                    detected: "SDK entrypoint is ready: %@.",
+                    absent: "Choose a built source checkout or set an absolute, readable SDK entrypoint in Arguments.",
+                    failure: "Could not check the SDK entrypoint: %@",
+                    blockingAbsent: "Build the Harness checkout and check its SDK entrypoint.",
+                    blockingFailed: "Resolve the SDK entrypoint check error.",
+                    blockingUnchecked: "Check the DeepSeek SDK entrypoint."
                 )
             ),
             RunnerBootstrapProbe(

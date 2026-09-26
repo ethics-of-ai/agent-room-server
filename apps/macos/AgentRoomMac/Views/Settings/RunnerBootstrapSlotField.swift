@@ -22,14 +22,17 @@ struct RunnerBootstrapSlotField: View {
             .frame(minWidth: 220)
             .focused($isFocused)
             .onSubmit { commit(text) }
-            .onAppear { text = storedValue }
+            .onAppear { text = displayValue(storedValue) }
             .onChange(of: isFocused) { _, focused in
                 guard !focused else { return }
                 commit(text)
             }
             .onChange(of: storedValue) { _, newValue in
                 guard !isFocused else { return }
-                text = newValue
+                text = displayValue(newValue)
+            }
+            .onChange(of: text) { _, value in
+                if !slot.choices.isEmpty, value != displayValue(storedValue) { commit(value) }
             }
     }
 
@@ -38,10 +41,20 @@ struct RunnerBootstrapSlotField: View {
     /// that decides when a value is written.
     @ViewBuilder
     private var field: some View {
-        if slot.kind == .secret {
+        if !slot.choices.isEmpty {
+            Picker(slot.title, selection: $text) {
+                ForEach(slot.choices) { choice in
+                    Text(choice.title).tag(choice.id)
+                }
+            }
+        } else if slot.kind == .secret {
             SecureField(slot.title, text: $text, prompt: slot.prompt.map(Text.init))
         } else {
             TextField(slot.title, text: $text, prompt: slot.prompt.map(Text.init))
         }
+    }
+
+    private func displayValue(_ value: String) -> String {
+        value.isEmpty ? slot.choices.first?.id ?? "" : value
     }
 }

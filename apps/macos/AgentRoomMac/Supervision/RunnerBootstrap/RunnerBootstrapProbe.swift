@@ -16,6 +16,8 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
         /// operator's decision, and the check only proves the saved answer is
         /// absolute, readable, and present.
         case filePath(slotID: String)
+        /// Check a Node SDK entrypoint without starting the backend or runtime.
+        case nodeEntrypoint(executableSlotID: String, argumentsSlotID: String)
         /// Presence-only Keychain lookup. It requests no item data and never
         /// reads, returns, or logs the credential — see
         /// `docs/safety/TRUST_AND_SAFETY.md`.
@@ -82,7 +84,7 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
             slotID
         case .filePath(let slotID):
             slotID
-        case .keychainPresence, .filePresence:
+        case .keychainPresence, .filePresence, .nodeEntrypoint:
             nil
         }
     }

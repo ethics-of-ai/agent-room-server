@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AgentToolCapability } from "../agentTools/catalog";
 import type { ServiceConfig } from "../domain/models";
 import type { ManagedSettingDefinition } from "../domain/managedSettings";
 import {
@@ -21,6 +22,7 @@ import {
   deepseekProviderSchema
 } from "../domain/settingValueSchemas";
 import type { RunnerRestoreStrategy } from "./shared/PersistentRunnerSessionHost";
+import { rebuildRunnerSettingScopes, runnerSettingKey } from "./settingScopes";
 import { loadsWorkspaceSettings } from "./claudeCode/settings";
 import { loadsCursorWorkspaceSettings } from "./cursor/settings";
 import { DEEPSEEK_QUESTION_PROMPT_INSTRUCTION } from "./deepseek/promptQuestions";
@@ -95,7 +97,7 @@ export type RunnerTurnDiffSource = "runner" | "settle_time_git";
  */
 export type RunnerClarifyingQuestions =
   | { readonly mode: "native" }
-  | { readonly mode: "prompt_contract"; readonly instruction: string }
+  | { readonly mode: "prompt_contract"; readonly instruction: string; readonly nativeWhen?: (config: ServiceConfig) => boolean }
   | { readonly mode: "none" };
 
 /**
@@ -120,6 +122,28 @@ export type RunnerWorkspaceSkills =
   | { readonly mode: "gated"; readonly gate: (config: ServiceConfig) => boolean };
 
 /**
+ * How a runner's transport carries AgentRoom tool calls from the model to the
+ * backend's bound dispatcher (`agentTools/`).
+ *
+ * - `custom_tools` — the adapter relays bound tool calls over its native
+ *   custom-tool callback envelope (Cursor's host `tools/invoke` request).
+ * - `cordis_pipe` — the adapter registers definitions in its persistent Cordis
+ *   child and relays calls over the private inherited pipe.
+ * - `none` — no AgentRoom tool transport. The runner keeps its own question
+ *   path untouched; no tool is advertised and none is dispatched.
+ *
+ * Dispatch policy only: which tools a turn actually gets is composed from the
+ * catalog's feature gates, never from this field. An unmigrated runner
+ * declaring `none` is exactly a runner whose question behavior did not move.
+ */
+export type RunnerAgentTools =
+  | {
+      readonly mode: "custom_tools" | "cordis_pipe";
+      readonly capabilities: readonly AgentToolCapability[];
+    }
+  | { readonly mode: "none" };
+
+/**
  * Everything the backend needs to know about a runner that is not the runner's
  * own protocol. Adding a runner is adding a row: the id joins
  * {@link registeredRunnerKinds} and the compiler then demands the descriptor.
@@ -137,6 +161,8 @@ export interface RunnerDescriptor {
   readonly turnDiffSource: RunnerTurnDiffSource;
   readonly clarifyingQuestions: RunnerClarifyingQuestions;
   readonly workspaceSkills: RunnerWorkspaceSkills;
+  /** AgentRoom tool transport; see {@link RunnerAgentTools}. */
+  readonly agentTools: RunnerAgentTools;
   /** Fixed committed skill directories this runner natively loads, in precedence order. */
   readonly skillSourceDirs: readonly string[];
   /** The token a client's composer inserts to invoke a skill (`/name`, `$name`). */
@@ -248,6 +274,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // Repo skills load natively with no isolation toggle; registering the
     // workspace is the trust decision (docs/safety/TRUST_AND_SAFETY.md).
     workspaceSkills: { mode: "native" },
+    agentTools: { mode: "none" },
     skillSourceDirs: [".codex/skills", ".agents/skills"],
     skillInvocationPrefix: "$",
     settingsKeyPrefix: "codex",
@@ -316,6 +343,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
       // only under `bypassPermissions`, and it stays the adapter's.
       gate: (config) => loadsWorkspaceSettings(config)
     },
+    agentTools: { mode: "none" },
     skillSourceDirs: [".claude/skills"],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "claudeCode",
@@ -378,10 +406,11 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     turnDiffSource: "settle_time_git",
     // The SDK wire has no server-to-client request. The adapter recognizes one
     // bounded line-start block in assistant text, then sends the person's
-    // answer as another SDK prompt while the same AgentRoom turn stays open.
+    // answer as another SDK prompt in custom mode. Managed mode uses the relay.
     clarifyingQuestions: {
       mode: "prompt_contract",
-      instruction: DEEPSEEK_QUESTION_PROMPT_INSTRUCTION
+      instruction: DEEPSEEK_QUESTION_PROMPT_INSTRUCTION,
+      nativeWhen: (config) => config.deepseekCompositionMode === "managed"
     },
     // `dsh` discovers skills through its own filesystem provider, but *whether*
     // a given composition loads one is the profile's answer and not something
@@ -389,6 +418,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // until that is verified against a real runtime: advertising invocations a
     // session would ignore is the failure the skills read exists to avoid.
     workspaceSkills: { mode: "none" },
+    agentTools: { mode: "cordis_pipe", capabilities: ["questions"] },
     skillSourceDirs: [],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "deepseek",
@@ -463,6 +493,9 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // Cursor loads all four under its `project` settings source and none of
     // the user-level directories (fact 6); the order is the vendor's documented
     // precedence.
+    // The one custom-tools transport: the host relays every advertised
+    // AgentRoom tool through its single `tools/invoke` request.
+    agentTools: { mode: "custom_tools", capabilities: ["questions"] },
     skillSourceDirs: [".cursor/skills", ".agents/skills", ".claude/skills", ".codex/skills"],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "cursor",
@@ -557,7 +590,7 @@ export function registerExternalRunnerDescriptors(descriptors: readonly RunnerDe
   const candidates = new Map<string, RunnerDescriptor>();
   const reject = (message: string): never => {
     externalRunnerDescriptors.clear();
-    rebuildRunnerSettingScopes();
+    rebuildRunnerSettingScopes(allRunnerDescriptors());
     throw new Error(message);
   };
 
@@ -596,7 +629,7 @@ export function registerExternalRunnerDescriptors(descriptors: readonly RunnerDe
 
   externalRunnerDescriptors.clear();
   for (const [id, descriptor] of candidates) externalRunnerDescriptors.set(id, descriptor);
-  rebuildRunnerSettingScopes();
+  rebuildRunnerSettingScopes(allRunnerDescriptors());
 }
 
 export function isRegisteredRunnerKind(value: string): boolean {
@@ -729,27 +762,6 @@ export function publicRunnerDescriptors(
 }
 
 /**
- * Where a managed setting lives in the version-2 settings document:
- * `global.<field>`, or `runners.<runnerKind>.<field>`.
- *
- * Resolving it here rather than from a hand-written table in `config/` is what
- * keeps the settings layer free of runner literals — a table there would be a
- * second admission list to maintain, and adding a runner would again mean
- * editing a file outside `runner/`.
- */
-export type ManagedSettingScope =
-  | { readonly scope: "global" }
-  | { readonly scope: "runner"; readonly runnerKind: string; readonly field: string };
-
-/** One runner-owned managed setting, with the version-1 flat key it answers to. */
-export interface RunnerManagedSetting {
-  readonly runnerKind: string;
-  /** The version-1 flat key: `settingsKeyPrefix` + the capitalized field name. */
-  readonly key: string;
-  readonly definition: ManagedSettingDefinition;
-}
-
-/**
  * Every runner-owned managed setting, in registration order and then descriptor
  * order. The settings layer walks this instead of a hand-written table, so a
  * registered runner's settings exist everywhere at once.
@@ -764,37 +776,17 @@ export function runnerManagedSettings(): RunnerManagedSetting[] {
   );
 }
 
-export function managedSettingScope(key: string): ManagedSettingScope {
-  const owned = runnerSettingScopes.get(key);
-  // A key no descriptor declares is global — including one that merely *looks*
-  // like a runner's (`codexish`), which belongs to nobody rather than silently
-  // becoming `runners.codex.ish`. Prefix arithmetic used to answer this; the
-  // declarations answer it exactly.
-  return owned ?? { scope: "global" };
+// The scope map and its rebuild live in `settingScopes.ts`, derived from this
+// table; re-exported here so the settings layer and tests keep one import site.
+export { managedSettingScope, rebuildRunnerSettingScopes, runnerSettingKey } from "./settingScopes";
+export type { ManagedSettingScope } from "./settingScopes";
+
+/** One runner-owned managed setting, with the version-1 flat key it answers to. */
+export interface RunnerManagedSetting {
+  readonly runnerKind: string;
+  /** The version-1 flat key: `settingsKeyPrefix` + the capitalized field name. */
+  readonly key: string;
+  readonly definition: ManagedSettingDefinition;
 }
 
-function runnerSettingKey(prefix: string, field: string): string {
-  return `${prefix}${field[0].toUpperCase()}${field.slice(1)}`;
-}
-
-/**
- * Flat version-1 key → the version-2 address that owns it. Rebuilt whenever the
- * external descriptor set changes, so a configured adapter's settings are
- * addressable the moment it is admitted.
- */
-const runnerSettingScopes = new Map<string, ManagedSettingScope>();
-
-function rebuildRunnerSettingScopes(): void {
-  runnerSettingScopes.clear();
-  for (const descriptor of allRunnerDescriptors()) {
-    for (const definition of descriptor.settings) {
-      runnerSettingScopes.set(runnerSettingKey(descriptor.settingsKeyPrefix, definition.field), {
-        scope: "runner",
-        runnerKind: descriptor.id,
-        field: definition.field
-      });
-    }
-  }
-}
-
-rebuildRunnerSettingScopes();
+rebuildRunnerSettingScopes(allRunnerDescriptors());

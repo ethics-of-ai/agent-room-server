@@ -73,7 +73,11 @@ environment-only and never enter that file. The macOS-only sidecar controls
 - `DEEPSEEK_EXECUTABLE`: path to the DeepSeek Harness **SDK runtime**
   (`dsh-jsonrpc-agent`, or the packaged single-file build) — not the `dsh`
   launcher, which boots profiles and serves no SDK protocol.
-- `DEEPSEEK_CORDIS_CONFIG`: path to the Cordis composition that runtime boots.
+- `DEEPSEEK_COMPOSITION_MODE`: local `custom` default or explicit `managed`
+  opt-in. Managed mode generates the standard graph and resolves installed
+  packages from the selected composition directory. See the
+  [DeepSeek setup guide](../engineering/DEEPSEEK_HARNESS_RUNNER.md#managed-setup-and-readiness).
+- `DEEPSEEK_CORDIS_CONFIG`: custom composition or managed package-resolution source.
   Required alongside the executable: the runtime exits nonzero without one, so
   `GET /api/runners` reports `configured: false` until both are set.
 - `CODEX_MODEL`: optional default Codex model.

@@ -63,6 +63,8 @@ declare module "../domain/models" {
     /** `REMOTE_SETTINGS_ADMIN`: env-only master switch for remote tier-2 edits. */
     remoteSettingsAdmin?: boolean;
   }
+}
+declare module "../domain/publicServiceConfig" {
   interface PublicServiceConfig {
     settings?: PublicManagedSettings;
     remoteSettingsAdmin?: boolean;

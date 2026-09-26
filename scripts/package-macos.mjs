@@ -45,6 +45,7 @@ export function bundledResourcePaths(appPath) {
   return {
     nodeExecutable: resolve(resources, "node/bin/node"),
     backendEntrypoint: resolve(resources, "backend/dist/index.js"),
+    deepseekCordisPlugin: resolve(resources, "backend/dist/runner/deepseek/cordis/agentRoomToolsPlugin.js"),
     backendPublic: resolve(resources, "backend/public"),
     backendCatalogAssets: resolve(resources, "backend/catalog-assets")
   };
@@ -133,6 +134,19 @@ export async function assertPackagedCursorSandboxHelper({
   }
 
   return { helperPath, resolvedPath };
+}
+
+export async function assertPackagedAgentRoomCordisPlugin(pluginPath) {
+  let pluginStats;
+  try {
+    pluginStats = await lstat(pluginPath);
+  } catch (error) {
+    throw new Error(`Packaged AgentRoom Cordis plugin is missing at ${pluginPath}.`, { cause: error });
+  }
+  if (!pluginStats.isFile()) {
+    throw new Error(`Packaged AgentRoom Cordis plugin is not a regular file at ${pluginPath}.`);
+  }
+  return pluginPath;
 }
 
 /** True when `version` (with or without a leading `v`) is at least `floor`. */
@@ -340,6 +354,9 @@ async function packageBackendResources(repoRoot, destinationRoot, env) {
     recursive: true,
     dereference: true
   });
+  await assertPackagedAgentRoomCordisPlugin(
+    resolve(backendDestination, "dist/runner/deepseek/cordis/agentRoomToolsPlugin.js")
+  );
   await cp(resolve(backendRoot, "public"), resolve(backendDestination, "public"), {
     recursive: true,
     dereference: true

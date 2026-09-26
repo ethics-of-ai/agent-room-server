@@ -23,6 +23,17 @@ export interface CodingAgentRoutesInput {
 }
 
 export async function registerCodingAgentRoutes(app: FastifyInstance, input: CodingAgentRoutesInput): Promise<void> {
+  app.post("/api/coding-agent/connection-test", async (request, reply) => {
+    const parsed = capabilitiesQuerySchema.strict().safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Expected only an optional runnerKind" });
+    const runnerKind = parsed.data.runnerKind ?? input.defaultRunnerKind;
+    const runner = input.runners[runnerKind];
+    const testConnection = runner?.testConnection?.bind(runner);
+    if (!testConnection) return reply.code(400).send({ error: "This runner does not support connection tests" });
+    const test = await input.readiness.testConnection(runnerKind, testConnection);
+    if (test.running) return reply.code(409).send({ error: "A connection test is already running" });
+    return test.result;
+  });
   app.get("/api/coding-agent/capabilities", async (request, reply) => {
     const parsed = capabilitiesQuerySchema.safeParse(request.query);
     if (!parsed.success) {

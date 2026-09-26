@@ -150,6 +150,8 @@ export function deepseekSessionRoot(config: ServiceConfig): string {
 export function deepseekChildEnv(config: ServiceConfig, agentCwd: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.AUTH_TOKEN;
+  delete env.AGENTROOM_DEEPSEEK_CORDIS_PLUGIN;
+  delete env.AGENTROOM_DEEPSEEK_TOOLS_FD;
   if (config.deepseekCordisConfig) {
     env.DSH_CORDIS_CONFIG = config.deepseekCordisConfig;
   }

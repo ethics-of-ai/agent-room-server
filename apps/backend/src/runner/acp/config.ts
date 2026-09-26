@@ -214,6 +214,9 @@ export function acpRunnerDescriptor(adapter: AcpAdapterConfig): RunnerDescriptor
       }
     ],
     restoreStrategy: "native_resume",
+    // No AgentRoom tool transport: an external adapter has no verified tool
+    // relay, and its question posture stays whatever the adapter itself does.
+    agentTools: { mode: "none" },
     // Configured means the operator's allowlisted binary is actually spawnable.
     // This spawns nothing: it is the same statement `configured` makes for
     // Codex's executable, and runtime readiness stays the separate authority.

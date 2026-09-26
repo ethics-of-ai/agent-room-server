@@ -90,6 +90,20 @@ struct RunnerBootstrapProber {
                 resolvedSlot: Outcome.ResolvedSlot(slotID: slotID, path: normalized)
             )
 
+        case .nodeEntrypoint(let executableSlotID, let argumentsSlotID):
+            let executable = storedValue(executableSlotID) ?? ""
+            guard !executable.isEmpty else { return Outcome(status: .absent, resolvedSlot: nil) }
+            guard URL(fileURLWithPath: executable).lastPathComponent == "node" else {
+                return Outcome(status: .satisfied(detail: "Standalone SDK runtime"), resolvedSlot: nil)
+            }
+            let entrypoint = (storedValue(argumentsSlotID) ?? "")
+                .split(separator: ",", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+            guard NSString(string: entrypoint).isAbsolutePath,
+                  let normalized = normalizedReadableFilePath(entrypoint) else {
+                return Outcome(status: .absent, resolvedSlot: nil)
+            }
+            return Outcome(status: .satisfied(detail: normalized), resolvedSlot: nil)
+
         case .keychainPresence(let service):
             switch keychain.presence(ofService: service) {
             case .present:

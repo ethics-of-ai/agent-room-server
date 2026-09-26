@@ -70,4 +70,6 @@ struct RunnerBootstrapSlot: Equatable, Identifiable {
     /// that outlives filling it in. Section-level notes on the descriptor cover
     /// what belongs to no single slot.
     var note: RunnerBootstrapNote? = nil
+    /// Fixed, bundled choices. The first is the display default for an unset slot.
+    var choices: [RunnerBootstrapChoice] = []
 }

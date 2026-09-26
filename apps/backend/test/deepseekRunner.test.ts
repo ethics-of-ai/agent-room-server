@@ -85,7 +85,7 @@ describe("DeepSeekHarnessRunner", () => {
     await runner.dispose();
 
     // The session's own id is what the runtime was handed, which is also what
-    // continues the conversation after a child is gone.
+    // identifies the conversation while this child remains alive.
     expect(events).toContainEqual({
       type: "agent_activity",
       activity: expect.objectContaining({
@@ -413,6 +413,28 @@ describe("DeepSeekHarnessRunner", () => {
     // The catalog is still served: a client renders the picker and the error
     // beside it rather than an empty control with no explanation.
     expect(capabilities.settings.models.length).toBeGreaterThan(0);
+  });
+
+  it("keeps ordinary turns usable without tools and refuses required tools when the custom plugin is missing", async () => {
+    const runtime = await writeFakeRuntime();
+    const serviceConfig = await config({ deepseekArgs: [runtime] });
+    const runner = new DeepSeekHarnessRunner(serviceConfig);
+    const catalog = [{ name: "test_probe", description: "read", inputSchema: { type: "object" }, outputSchema: { type: "string" } }];
+    try {
+      const capabilities = await runner.getCapabilities();
+      expect(capabilities.error).toBeUndefined();
+      expect(capabilities.checks).toContainEqual(expect.objectContaining({ id: "agent_tools", status: "not_checked" }));
+      const base = { sessionId: "optional", workspacePath: serviceConfig.workspaceRoot, prompt: "Hello" };
+      const ordinary = await collect(runner.run({ ...base, runId: "plain", tools: {
+        required: false, catalog, binding: { runId: "plain", allowedNames: [], invoke: async () => "unavailable" }
+      } }));
+      expect(ordinary.at(-1)).toEqual({ type: "run_succeeded" });
+      const explicit = await collect(runner.run({ ...base, runId: "required-tools", tools: {
+        required: true, catalog, binding: { runId: "required-tools", allowedNames: ["test_probe"], invoke: async () => "unavailable" }
+      } }));
+      expect(explicit.at(-1)).toMatchObject({ type: "run_failed" });
+      expect(assistantText(explicit)).toBe("");
+    } finally { await runner.dispose(); }
   });
 
   it("proves readiness by completing the handshake, and keeps an operator's own model in the catalog", async () => {

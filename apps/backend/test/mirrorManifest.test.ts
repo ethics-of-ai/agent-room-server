@@ -118,6 +118,7 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       "docs/engineering/VISIONOS_LANGUAGE_INTELLIGENCE.md",
       "docs/engineering/VISIONOS_LANGUAGE_DEPENDENCY_UPDATES.md",
       "docs/engineering/VISIONOS_PROFILE_SELECTION.md",
+      "docs/plans/SKETCH_TEXT_TOOL_PLAN.md",
       // The grammar importer writes into the visionOS tree the mirror denies,
       // and its test scaffolds that tree; both stay with the private checkout.
       "apps/backend/scripts/import-editor-grammars.mjs",

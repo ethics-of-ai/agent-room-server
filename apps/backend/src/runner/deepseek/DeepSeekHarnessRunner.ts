@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
+import type { Duplex } from "node:stream";
 import type { CodingAgentCapabilities, ServiceConfig } from "../../domain/models";
 import { logger } from "../../logging/logger";
-import { redactSecrets } from "../../util/redactSecrets";
 import type {
   AgentRunner,
   AgentRunnerActivity,
@@ -29,6 +29,11 @@ import {
   runnerStreamTimingAudit
 } from "../shared/streamTiming";
 import { runnerDescriptor } from "../registry";
+import { DeepSeekToolRelay } from "./cordis/DeepSeekToolRelay";
+import { AGENTROOM_DEEPSEEK_TOOLS_FD } from "./cordis/runtime";
+import { prepareDeepSeekNativeTools } from "./nativeTools";
+import { testDeepSeekConnection } from "./connectionTest";
+import { prepareDeepSeekBootstrap } from "./bootstrap";
 import { deepseekCapabilities } from "./capabilities";
 import {
   DEEPSEEK_SDK_SERVER_NAME,
@@ -49,7 +54,6 @@ import {
 } from "./promptQuestions";
 import {
   DEEPSEEK_RUNTIME_BINARY,
-  deepseekChildEnv,
   deepseekCommandAudit,
   deepseekContentBlocks,
   deepseekInitializeParams,
@@ -57,6 +61,13 @@ import {
   effectiveDeepSeekSettings,
   type DeepSeekEffectiveSettings
 } from "./settings";
+import {
+  appendStderrTail,
+  collectStderrTail,
+  settled,
+  waitForExit,
+  wrongServerMessage
+} from "./runtimeLifecycle";
 
 interface DeepSeekActiveTurn {
   runId: string;
@@ -87,6 +98,8 @@ interface DeepSeekRunnerSession {
   key: string;
   client: JsonRpcLineClient;
   child: ChildProcessWithoutNullStreams;
+  toolRelay?: DeepSeekToolRelay;
+  toolCatalogSignature?: string;
   stderrTail: () => string | undefined;
   /** The session id this child was handed — AgentRoom's own, see below. */
   sdkSessionId: string;
@@ -129,6 +142,7 @@ const CLIENT_LABEL = "DeepSeek Harness runtime";
 // events. Composing a plugin graph is real work, so the bound is generous.
 const INITIALIZE_TIMEOUT_MS = 30_000;
 const PROMPT_TIMEOUT_MS = 30_000;
+const TOOLS_READY_TIMEOUT_MS = 10_000;
 
 // The teardown ladder, in the order the protocol documents and the vendor's own
 // client walks it: ask for `shutdown` and let the plugin flush and dispose to
@@ -143,8 +157,6 @@ const SIGTERM_GRACE_MS = 3_000;
 // It remains explicit so enabling a verified restore path later does not invent
 // a runner-specific lifecycle default.
 const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-
-const STDERR_TAIL_LIMIT_CHARS = 2_048;
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000;
 
@@ -166,11 +178,9 @@ const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000;
  *   refused rather than silently starting fresh under the same session id.
  * - **There are no server-to-client requests.** So there is no interactive
  *   permission channel to expose and no `answerPermissionRequest` hook.
- *   Clarifying questions use the descriptor-declared prompt contract instead:
- *   a bounded assistant block opens the shared question wait, and its answer
- *   becomes a second Harness prompt inside the same AgentRoom turn. What the
- *   agent may do is still its own configured posture (`DSH_PERMISSION_MODE`, a
- *   tier-2 managed setting).
+ *   Managed clarifying questions use the Cordis tool relay; custom graphs use
+ *   the descriptor's bounded prompt contract. Both open the shared question
+ *   wait without granting execution permission.
  */
 export class DeepSeekHarnessRunner implements AgentRunner {
   private readonly activeTurns = new Map<string, { session: DeepSeekRunnerSession; turn: DeepSeekActiveTurn }>();
@@ -180,6 +190,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   private readonly initializeTimeoutMs: number;
   private readonly questions: PendingQuestionRequests;
   private disposing = false;
+  private readonly terminations = new Set<Promise<void>>();
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
 
   constructor(
@@ -196,15 +207,9 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       // can restore, so the value is a declared capability, not a local constant.
       restoreStrategy: runnerDescriptor("deepseek").restoreStrategy,
       idleSessionTimeoutMs: deps.idleSessionTimeoutMs ?? IDLE_SESSION_TIMEOUT_MS,
-      // The host's teardown is synchronous, but a correct one is not: the
-      // ladder below waits on the child between rungs. Releasing the session
-      // slot immediately and letting the process end in the background is the
-      // right trade — the host's invariant is that the slot is free, and a
-      // caller blocked for up to eleven seconds on a wedged child would be a
-      // worse answer than one that exits a moment after its session did.
       teardown: (session) => {
         this.questions.releaseSession(session.key);
-        void this.terminateRuntime(session);
+        this.trackTermination(session);
       },
       isBusy: (session) => session.activeTurn !== undefined,
       isReusable: (session) => session.child.exitCode === null && !session.child.killed,
@@ -230,22 +235,23 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     const entry = { promise: this.probeCapabilities(), expiresAtMs: now + CAPABILITIES_CACHE_TTL_MS };
     this.capabilitiesCache = entry;
     void entry.promise.then((capabilities) => {
-      if (capabilities.error && this.capabilitiesCache === entry) {
+      if ((capabilities.error || capabilities.checks?.some((check) => check.status === "unavailable")) && this.capabilitiesCache === entry) {
         this.capabilitiesCache = undefined;
       }
     });
     return entry.promise;
   }
 
-  /**
-   * The bootstrap this runner cannot start without, as a message or nothing.
-   *
-   * Both halves are checked because the runtime treats them differently and
-   * both failures are otherwise opaque: a missing executable is an ENOENT on
-   * spawn, while a missing composition is a child that prints one line of usage
-   * to stderr and exits 1 before answering anything. Neither reads as "you have
-   * not finished setting this runner up" unless we say so.
-   */
+  private nativeQuestionsEnabled(): boolean {
+    const policy = runnerDescriptor("deepseek").clarifyingQuestions;
+    return this.config.clarifyingQuestionsEnabled !== false && policy.mode === "prompt_contract"
+      && policy.nativeWhen?.(this.config) === true;
+  }
+
+  testConnection(): Promise<{ ok: boolean; message: string }> {
+    return testDeepSeekConnection(this.config);
+  }
+
   private missingBootstrap(): string | undefined {
     if (!this.config.deepseekExecutable) {
       return `DeepSeek Harness runner requires DEEPSEEK_EXECUTABLE (the ${DEEPSEEK_RUNTIME_BINARY} runtime, not the dsh launcher)`;
@@ -281,15 +287,21 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     let child: ChildProcessWithoutNullStreams | undefined;
     let client: JsonRpcLineClient | undefined;
     let stderrTail: () => string | undefined = () => undefined;
+    let toolRelay: DeepSeekToolRelay | undefined;
     try {
       // The probe runs in the backend's own cwd, never a registered workspace:
       // it exists to prove the runtime starts and answers, and it must not load
       // or execute a workspace's configuration merely to do that.
+      const bootstrap = await prepareDeepSeekBootstrap(this.config, process.cwd(), this.nativeQuestionsEnabled());
+      const { pluginPath } = bootstrap;
       child = spawn(this.config.deepseekExecutable as string, this.config.deepseekArgs, {
         cwd: process.cwd(),
-        stdio: ["pipe", "pipe", "pipe"],
-        env: deepseekChildEnv(this.config, process.cwd())
+        stdio: pluginPath ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
+        env: bootstrap.env
       });
+      if (pluginPath) {
+        toolRelay = new DeepSeekToolRelay(child.stdio[AGENTROOM_DEEPSEEK_TOOLS_FD] as Duplex, []);
+      }
       stderrTail = collectStderrTail(child);
       client = new JsonRpcLineClient(child, CLIENT_LABEL);
       const response = await withTimeout(
@@ -311,7 +323,20 @@ export class DeepSeekHarnessRunner implements AgentRunner {
         // serves profiles and never this protocol.
         return deepseekCapabilities(this.config, wrongServerMessage(parsed.data.serverInfo.name));
       }
-      return deepseekCapabilities(this.config);
+      let toolsError = bootstrap.toolsError;
+      try { await toolRelay?.waitUntilReady(TOOLS_READY_TIMEOUT_MS); } catch {
+        toolsError = "AgentRoom tools did not become ready. Repair the composition and create a new session to use tools.";
+      }
+      return {
+        ...deepseekCapabilities(this.config),
+        connectionTestAvailable: this.config.deepseekCompositionMode === "managed",
+        checks: [
+          { id: "runtime", status: "ready", message: "The runtime completed its handshake." },
+          { id: "provider", status: "not_checked", message: "Provider access is checked when you send a turn; this check sends no model prompt." },
+          { id: "agent_tools", status: toolsError ? "unavailable" : pluginPath ? "ready" : "not_checked",
+            message: toolsError ?? (pluginPath ? "AgentRoom tools are ready." : "AgentRoom tools are disabled.") }
+        ]
+      };
     } catch (error) {
       return deepseekCapabilities(
         this.config,
@@ -321,7 +346,8 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       // The probe proved what it came to prove; it never prompted, so there is
       // nothing to flush and the ladder starts at EOF.
       if (client && child) {
-        void this.terminateRuntime({ key: "capability-probe", client, child, terminateImmediately: true });
+        toolRelay?.close();
+        this.trackTermination({ key: "capability-probe", client, child, terminateImmediately: true });
       } else {
         client?.dispose();
       }
@@ -355,11 +381,20 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       completedByProtocol: false,
       state: createDeepSeekTurnState(),
       sawRunning: false,
-      ...(this.config.clarifyingQuestionsEnabled !== false
+      ...(this.config.clarifyingQuestionsEnabled !== false && !this.nativeQuestionsEnabled()
         ? { questionParser: new DeepSeekPromptQuestionStreamParser() }
         : {})
     };
     let session: DeepSeekRunnerSession | undefined;
+    const nativeTools = this.nativeQuestionsEnabled() ? prepareDeepSeekNativeTools({
+      turn: input,
+      questions: this.questions,
+      isLive: () => session?.activeTurn === activeTurn && !activeTurn.finalEvent,
+      emit: (activity) => {
+        if (session) activeTurn.queue.push({ type: "agent_activity", activity: this.questionActivity(session, activeTurn, activity) });
+      }
+    }) : undefined;
+    if (nativeTools) input = { ...input, tools: nativeTools.tools };
 
     logger.info({
       runId: input.runId,
@@ -376,6 +411,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       const settings = effectiveDeepSeekSettings(this.config, input.settings);
       session = await this.getOrCreateSession(input, activeTurn, settings);
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
+      if (input.tools) session.toolRelay?.bind(input.tools.binding);
 
       const contentBlocks = await deepseekContentBlocks(input.prompt, input.inputParts);
       // From this point onward the runtime may have accepted model-visible state.
@@ -409,8 +445,10 @@ export class DeepSeekHarnessRunner implements AgentRunner {
         error: error instanceof Error ? error.message : String(error)
       };
     } finally {
+      nativeTools?.dispose();
       this.activeTurns.delete(input.runId);
       if (session) {
+        session.toolRelay?.unbind(input.runId);
         this.sessions.touch(session);
         if (session.activeTurn === activeTurn) session.activeTurn = undefined;
       }
@@ -452,6 +490,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     const active = this.activeTurns.get(runId);
     if (!active) return;
     this.cancelPendingQuestion(active.session, active.turn, "Questions cancelled");
+    active.session.toolRelay?.unbind(runId);
     active.turn.completedByProtocol = true;
     active.turn.finalEvent = { type: "run_failed", error: "DeepSeek Harness turn interrupted" };
     this.questions.releaseSession(active.session.key);
@@ -487,6 +526,13 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     this.sessions.disposeAll();
     this.activeTurns.clear();
     this.uncontinuableSessionIds.clear();
+    await Promise.allSettled([...this.terminations]);
+  }
+
+  private trackTermination(session: TerminableRuntime): void {
+    const termination = this.terminateRuntime(session);
+    this.terminations.add(termination);
+    void termination.finally(() => this.terminations.delete(termination)).catch(() => undefined);
   }
 
   private async getOrCreateSession(
@@ -506,6 +552,13 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       // child rather than to the prompt. A different selection requires a new
       // runtime, which is allowed only when the descriptor proves restoration.
       if (existing.model === settings.model && existing.provider === settings.provider) {
+        const signature = input.tools ? JSON.stringify(input.tools.catalog) : undefined;
+        if (existing.toolCatalogSignature !== signature) {
+          throw new Error("DeepSeek Harness tool catalog changed; create a new AgentRoom session");
+        }
+        if ((input.tools?.required ?? Boolean(input.tools?.binding.allowedNames.length)) && !existing.toolRelay) {
+          throw new Error("AgentRoom tools are unavailable in this session. Repair setup and create a new session to use tools.");
+        }
         existing.activeTurn = activeTurn;
         return existing;
       }
@@ -523,17 +576,25 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     }
 
     this.ensureSessionRoot();
+    const bootstrap = await prepareDeepSeekBootstrap(this.config, input.workspacePath, Boolean(input.tools));
+    const { pluginPath } = bootstrap;
+    if ((input.tools?.required ?? Boolean(input.tools?.binding.allowedNames.length)) && !pluginPath) throw new Error(bootstrap.toolsError);
     const child = spawn(this.config.deepseekExecutable as string, this.config.deepseekArgs, {
       cwd: input.workspacePath,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: deepseekChildEnv(this.config, input.workspacePath)
+      stdio: pluginPath ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
+      env: bootstrap.env
     });
     const stderrTail = collectStderrTail(child);
     const client = new JsonRpcLineClient(child, CLIENT_LABEL);
+    const toolRelay = pluginPath && input.tools
+      ? new DeepSeekToolRelay(child.stdio[AGENTROOM_DEEPSEEK_TOOLS_FD] as Duplex, input.tools.catalog)
+      : undefined;
     const session: DeepSeekRunnerSession = {
       key,
       client,
       child,
+      toolRelay,
+      toolCatalogSignature: input.tools ? JSON.stringify(input.tools.catalog) : undefined,
       stderrTail,
       // AgentRoom's own session id is the runtime's in-process session id. An
       // unknown id lazily creates the pair; that does not prove a new process
@@ -549,6 +610,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
 
     client.onNotification((notification) => this.handleNotification(session, notification));
     child.on("close", (code, signal) => {
+      session.toolRelay?.close();
       this.markSessionUncontinuable(session);
       this.sessions.release(session);
       const active = session.activeTurn;
@@ -568,6 +630,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       active.queue.close();
     });
     child.on("error", (error) => {
+      session.toolRelay?.close();
       this.markSessionUncontinuable(session);
       this.sessions.release(session);
       const active = session.activeTurn;
@@ -595,6 +658,13 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       }
       if (parsed.data.serverInfo.name !== DEEPSEEK_SDK_SERVER_NAME) {
         throw new Error(wrongServerMessage(parsed.data.serverInfo.name));
+      }
+      try { await session.toolRelay?.waitUntilReady(TOOLS_READY_TIMEOUT_MS); } catch {
+        session.toolRelay?.close();
+        session.toolRelay = undefined;
+        if (input.tools?.required ?? Boolean(input.tools?.binding.allowedNames.length)) {
+          throw new Error("AgentRoom tools did not become ready. Repair the composition before sending a turn that requires tools.");
+        }
       }
     } catch (error) {
       // Registration precedes the handshake so close/error notifications can be
@@ -907,19 +977,6 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     });
   }
 
-  /**
-   * End a runtime process the way its protocol documents.
-   *
-   * `shutdown` is a request, not a signal: the plugin answers it, flushes the
-   * response, disposes the root context so SDK-owned agents, subscriptions, and
-   * persistence reach quiescence, and exits 0. Skipping it — which the previous
-   * SIGTERM-only teardown did — ends the child mid-flush, so a composition with
-   * JSONL persistence can lose the tail of the session it was writing.
-   *
-   * Every later rung exists because the one before it can fail to land, and the
-   * ladder ends in `SIGKILL` because a teardown that can hang is not a teardown.
-   * Cancellation enters at the second rung: see `terminateImmediately`.
-   */
   private async terminateRuntime(session: TerminableRuntime): Promise<void> {
     const exited = waitForExit(session.child);
     try {
@@ -948,6 +1005,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       "DeepSeek Harness runtime ignored SIGTERM; sending SIGKILL"
     );
     session.child.kill("SIGKILL");
+    await exited;
   }
 
   private markSessionUncontinuable(session: DeepSeekRunnerSession): void {
@@ -976,71 +1034,4 @@ export class DeepSeekHarnessRunner implements AgentRunner {
         : {})
     };
   }
-}
-
-// The runtime writes diagnostics to stderr, and that pipe must always be
-// drained: left unconsumed, the OS pipe buffer fills and blocks the child
-// mid-write, silently wedging the session. Draining also keeps a bounded tail so
-// startup and crash failures carry the child's own explanation.
-/** Resolves once the child has actually gone, whatever ended it. */
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  return new Promise((resolve) => {
-    child.once("close", () => resolve());
-    child.once("error", () => resolve());
-  });
-}
-
-/** Whether `exited` won the race against `ms`, without leaving a live timer. */
-async function settled(exited: Promise<void>, ms: number): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
-  const elapsed = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), ms);
-    timer.unref?.();
-  });
-  try {
-    return await Promise.race([exited.then(() => true), elapsed]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-/**
- * Why a child that completed the handshake is still not our runtime.
- *
- * Named as its own helper because both the probe and the session path answer
- * it, and because the cause is worth stating rather than leaving to the
- * operator: `dsh` is the obvious binary to reach for and it can never work here.
- */
-function wrongServerMessage(reportedName: string): string {
-  return (
-    `Expected the DeepSeek Harness SDK runtime (${DEEPSEEK_SDK_SERVER_NAME}) but the child identified as "${reportedName}". ` +
-    `DEEPSEEK_EXECUTABLE must be ${DEEPSEEK_RUNTIME_BINARY}, the packaged single-file runtime, or the interpreter that runs a source build's entrypoint — the dsh launcher boots profiles and serves no SDK protocol. ` +
-    // The other way to land here has nothing to do with the launcher: a source
-    // checkout tracks a developer-preview master with no version negotiation,
-    // so a renamed server is drift rather than misconfiguration, and an
-    // operator reading only the sentence above would go looking for a mistake
-    // they did not make.
-    `If this is a source build, the runtime may have renamed its server on a newer commit`
-  );
-}
-
-function collectStderrTail(child: ChildProcessWithoutNullStreams): () => string | undefined {
-  let tail = "";
-  child.stderr.on("data", (chunk: Buffer) => {
-    tail = (tail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT_CHARS);
-  });
-  return () => {
-    const text = tail.trim();
-    return text.length > 0 ? text : undefined;
-  };
-}
-
-// The tail is the child's own text, not ours: a boot failure can quote a
-// composition file or a plugin's diagnostics, so it is redacted before being
-// appended to an error that reaches `/api/coding-agent/capabilities`,
-// turn-failure events, and `/api/logs` — reads the mutating-method preHandler
-// does not gate.
-function appendStderrTail(message: string, stderrTail: string | undefined): string {
-  return stderrTail ? `${message} (stderr: ${redactSecrets(stderrTail)})` : message;
 }

@@ -104,6 +104,27 @@ export type QuestionAnswerResult =
   | "discussion_required"
   | "empty_answer";
 
+// The one message per way a batch answer can be refused. The agent decides
+// what it is willing to be told — a set or option it did not offer, a second
+// choice on a single-select set, free text where none was invited — and each
+// refusal names the rule rather than forwarding the answer. It lives beside
+// the result vocabulary it maps, so the answer route and the session service
+// render refusals with the same words.
+export const questionAnswerRefusal: Record<
+  Exclude<QuestionAnswerResult, "answered" | "unknown_request">,
+  string
+> = {
+  empty_batch: "Question answer needs at least one answered set",
+  unknown_set: "Question set was not offered for this request",
+  duplicate_set: "Question set was answered more than once",
+  unknown_option: "Question option was not offered for this set",
+  duplicate_option: "Question option was selected more than once",
+  selection_limit: "Question set accepts a single selection",
+  discussion_not_offered: "Question set does not accept free text",
+  discussion_required: "Question set requires free text",
+  empty_answer: "Question set answer needs a selection or free text"
+};
+
 interface QuestionEntry {
   readonly sets: readonly QuestionRequestSet[];
 }

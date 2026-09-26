@@ -121,7 +121,9 @@ function collector(): {
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // Audit writes can finish as a fixture closes. Bound retries for transient
+  // ENOTEMPTY during teardown without weakening any protocol assertion.
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })));
 });
 
 describe("editor language-service routes", () => {

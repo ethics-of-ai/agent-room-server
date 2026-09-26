@@ -1,16 +1,11 @@
 import { JsonRpcMethodNotFoundError } from "../shared/JsonRpcLineClient";
 import {
-  CURSOR_QUESTION_INPUT_SCHEMA,
-  CURSOR_QUESTION_TOOL_DESCRIPTION,
-  CURSOR_QUESTION_TOOL_NAME
-} from "./questions";
-import {
   agentSendParamsSchema,
   agentStartParamsSchema,
   cursorHostIncomingFrameSchema,
   initializeParamsSchema,
-  questionAskResultSchema,
   runCancelParamsSchema,
+  toolInvokeResultSchema,
   type CursorHostIncomingFrame
 } from "./protocol";
 import {
@@ -25,8 +20,8 @@ import { loadCursorSdk } from "./sdk";
  * (docs/engineering/CURSOR_SDK_RUNNER.md). The backend spawns one per AgentRoom
  * session with a scrubbed environment and drives it over newline-delimited
  * JSON-RPC on stdio. This module holds one `SDKAgent`, serves the backend's
- * requests, forwards the run stream, and relays the clarifying-question custom
- * tool's callback back to the backend as one `question/ask` request.
+ * requests, forwards the run stream, and relays every advertised AgentRoom
+ * custom tool's callback back to the backend as one `tools/invoke` request.
  *
  * `CursorHost` is transport-agnostic and injectable so `cursorHost.test.ts` can
  * drive it against a fake SDK and a fake transport; the stdio wiring and the
@@ -46,6 +41,12 @@ export class CursorHost {
   private store?: unknown;
   private agent?: CursorSdkAgent;
   private readonly runs = new Map<string, CursorRun>();
+  /**
+   * The run currently streaming, from `send` to `run/result`. Tool callbacks
+   * carry it as their generation handle, so the backend can refuse a late
+   * callback from a run that is no longer the session's live turn.
+   */
+  private activeRunId?: string;
 
   constructor(
     private readonly sdk: CursorSdk,
@@ -91,7 +92,7 @@ export class CursorHost {
       sandboxOptions: { enabled: parsed.sandbox },
       autoReview: parsed.autoReview,
       store: this.store,
-      ...(parsed.questionTool ? { customTools: this.customTools() } : {})
+      ...(parsed.tools.length > 0 ? { customTools: this.customTools(parsed.tools) } : {})
     };
     const options = {
       model: parsed.model,
@@ -132,6 +133,7 @@ export class CursorHost {
       }
     );
     this.runs.set(run.id, run);
+    this.activeRunId = run.id;
     void this.consumeRun(run);
     return { runId: run.id };
   }
@@ -158,6 +160,7 @@ export class CursorHost {
       });
     } finally {
       this.runs.delete(run.id);
+      if (this.activeRunId === run.id) this.activeRunId = undefined;
     }
   }
 
@@ -178,18 +181,38 @@ export class CursorHost {
     return {};
   }
 
-  /** The one custom tool: it relays the model's question to the backend. */
-  private customTools() {
-    return {
-      [CURSOR_QUESTION_TOOL_NAME]: {
-        description: CURSOR_QUESTION_TOOL_DESCRIPTION,
-        inputSchema: CURSOR_QUESTION_INPUT_SCHEMA,
-        execute: async (args: Record<string, unknown>): Promise<string> => {
-          const answer = await this.transport.request("question/ask", { input: args });
-          return questionAskResultSchema.parse(answer).result;
-        }
+  /**
+   * Every advertised AgentRoom tool as one custom tool. The loop is the whole
+   * story: registering another backend tool is another entry in `tools`, never
+   * another callback here — each `execute` relays the same bounded
+   * `tools/invoke` envelope carrying its tool's own name.
+   */
+  private customTools(
+    tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>
+  ) {
+    const customTools: Record<
+      string,
+      {
+        description: string;
+        inputSchema: Record<string, unknown>;
+        execute: (args: Record<string, unknown>) => Promise<string>;
       }
-    };
+    > = {};
+    for (const tool of tools) {
+      customTools[tool.name] = {
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        execute: async (args): Promise<string> => {
+          const answer = await this.transport.request("tools/invoke", {
+            tool: tool.name,
+            input: args,
+            ...(this.activeRunId ? { runId: this.activeRunId } : {})
+          });
+          return toolInvokeResultSchema.parse(answer).result;
+        }
+      };
+    }
+    return customTools;
   }
 }
 

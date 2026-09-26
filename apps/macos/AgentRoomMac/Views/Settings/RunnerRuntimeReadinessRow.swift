@@ -13,11 +13,37 @@ struct RunnerRuntimeReadinessRow: View {
 
     var body: some View {
         StatusMessageRow(message: message, style: style)
+        if supervisor.connectionState == .reachable,
+           let result = supervisor.runnerCapabilityResults[runnerKind] {
+            if let error = result.error {
+                Text(error).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let notice = result.sessionNotice {
+                Text(notice).font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(result.checks ?? []) { check in
+                Label(check.message, systemImage: check.status == "ready" ? "checkmark.circle" : "info.circle")
+                    .foregroundStyle(.secondary)
+            }
+            if result.connectionTestAvailable == true {
+                Button("Test provider connection", systemImage: "network", action: testConnection)
+                    .disabled(supervisor.runnerConnectionTests.contains(runnerKind))
+                Text("Sends one short prompt to your configured model and may incur API charges. No workspace files or tools are included.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let message = supervisor.runnerConnectionMessages[runnerKind] {
+                    Text(message).foregroundStyle(.secondary)
+                }
+            }
+        }
         Button("Check with backend", systemImage: "stethoscope") {
             Task { await supervisor.checkRunnerRuntimeReadiness(runnerKind: runnerKind) }
         }
         .buttonStyle(.bordered)
         .disabled(supervisor.connectionState != .reachable)
+    }
+
+    private func testConnection() {
+        Task { await supervisor.testRunnerConnection(runnerKind: runnerKind) }
     }
 
     private var ready: Bool? {
@@ -27,7 +53,7 @@ struct RunnerRuntimeReadinessRow: View {
     private var message: String {
         switch ready {
         case true:
-            "The backend started this runner and read its model list."
+            "The backend started this runner and discovered its capabilities."
         case false:
             "The backend could not start this runner. Check its capabilities response for the reason."
         default:

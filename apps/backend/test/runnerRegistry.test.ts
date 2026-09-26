@@ -59,6 +59,23 @@ describe("runner registry", () => {
     }
   });
 
+  it("declares the AgentRoom tool transport for every runner", () => {
+    // Cursor is the one custom-tools relay; every other runner's question path
+    // is untouched by the tool catalog, which is what `none` records. Shared
+    // code reads this policy rather than a runner id.
+    expect(runnerDescriptor("cursor").agentTools).toEqual({
+      mode: "custom_tools",
+      capabilities: ["questions"]
+    });
+    expect(runnerDescriptor("deepseek").agentTools).toEqual({
+      mode: "cordis_pipe",
+      capabilities: ["questions"]
+    });
+    for (const kind of ["codex", "claude_code"] as const) {
+      expect(runnerDescriptor(kind).agentTools).toEqual({ mode: "none" });
+    }
+  });
+
   it("is the single source of the runner-id schema the domain re-exports", () => {
     // Not two schemas that agree — the same schema. A second hand-maintained
     // enum is the leak this phase retires.

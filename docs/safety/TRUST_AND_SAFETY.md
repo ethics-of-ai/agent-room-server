@@ -194,11 +194,16 @@ Codex enables only its `request_user_input` path per thread and refuses every
 other unexpected server-to-client request. Claude Code handles
 `AskUserQuestion` in `canUseTool` and refuses any other tool reaching that
 callback. Cursor registers one `ask_user_question` custom tool and always
-disallows the SDK's `askQuestion`. DeepSeek accepts one line-start
-`<agentroom-question>` JSON block, capped at 64 KiB; malformed, inline,
-incomplete, oversized, or later blocks remain prose. A valid DeepSeek answer
-continues through a second Harness prompt while the same public turn remains
-open.
+disallows the SDK's `askQuestion`; the host relays tool calls over one
+bounded, allowlisted envelope (`tools/invoke`) that can reach only a tool
+bound to the originating turn — matched on the host's run id — and can never
+execute an arbitrary tool name, shell command, or backend route. Managed
+DeepSeek uses the shared question catalog and pending store over its bounded
+Cordis pipe. Generic tool activity excludes question arguments and results.
+Custom-mode DeepSeek accepts one line-start `<agentroom-question>` JSON block, capped at 64 KiB;
+malformed, inline, incomplete, oversized, or later blocks remain prose. A
+valid DeepSeek answer continues through a second Harness prompt while the same
+public turn remains open.
 
 `clarifyingQuestionsEnabled`, env `CLARIFYING_QUESTIONS_ENABLED`, is a tier-1
 preference and defaults on. When off, no runner receives a question channel and
@@ -283,9 +288,26 @@ as `bypassPermissions`-class. The tier-2 `permissionMode` is passed through to
 the composition's own vocabulary and is not claimed as a backend-enforced enum.
 There is no protocol approval callback.
 
+`DEEPSEEK_COMPOSITION_MODE=managed` is an explicit local tier-3 opt-in. The
+backend generates a fixed v1 graph with workspace-write policy, sandbox file
+and shell services, no background jobs or subagents, no workspace context or
+skill discovery, and state-rooted JSONL persistence. The selected composition
+folder resolves installed packages; custom YAML is not executed during generation
+or merged into that graph. Installed runtime code remains trusted. Generation
+contains environment variable references rather than credentials, uses private
+immutable files, and refreshes absolute plugin paths after relocation. Existing
+custom graphs remain unchanged. Managed policy does not prove containment or
+change the bypass-permission classification.
+
+A provider connection test is an authenticated explicit mutation. Its generated
+graph has no tools, uses a temporary scratch root and bounded prompt/token budget,
+and returns a fixed safe summary rather than provider errors or credentials.
+Passive readiness performs no model prompt. API details belong to
+[the capabilities contract](../api/API.md#coding-agent-capabilities).
+
 The backend pins `DSH_CWD` to the registered workspace and
 `DSH_SESSION_ROOT` under `STATE_DIR`, preventing the common relative persistence
-default from dirtying the workspace. The Harness may start subagents and other
+default from dirtying the workspace. Custom graphs may start subagents and other
 processes that inherit its environment; AgentRoom does not separately observe
 or contain them. The runtime has no provable resume path, so it stays resident
 while idle and the session becomes uncontinuable after cancellation or loss.
@@ -378,7 +400,7 @@ leaves and escaping intermediate symlinks are refused. Secret-named paths,
 generated directories, hidden metadata such as `.DS_Store`, and internal
 `.agentroom-tmp` staging names are excluded consistently.
 
-There are exactly seven workspace mutations:
+The generic workspace API permits seven mutations:
 
 1. text-file PUT;
 2. regular-file DELETE;
@@ -387,6 +409,10 @@ There are exactly seven workspace mutations:
 5. same-workspace move;
 6. same-workspace copy;
 7. recursive directory DELETE.
+
+The sketch API additionally permits publication of validated `.sketch.json`
+documents, capped at 2 MiB after formatting. This bounded writer does not widen
+generic text PUT or accept arbitrary bytes.
 
 All are bearer-gated when configured. They use `node:fs`, not a shell or Git.
 Events carry relative paths, types, counts, and byte counts, never file content.
@@ -738,6 +764,102 @@ Scale preset and remembered document identity are device-local preferences.
 The physical placement is not stored. Relaunch performs a new surface search.
 No room data, preset, or memory reaches a workspace file, route, event, or
 backend contract.
+
+## Repository sketches
+
+Repository sketches are ordinary workspace `.sketch.json` files, available
+without a runner. Every read and mutation requires bearer auth when configured.
+`repositorySketches: true` advertises the contract. No setting gates sketches,
+and no private sketch store exists in `STATE_DIR`.
+
+The dedicated writer accepts only core-validated documents and bounds the final
+formatted UTF-8 bytes to 2 MiB. It enforces registered-workspace containment,
+protected-name filtering, the suffix, regular-file identity, and symlink refusal
+for all path components below the registered root. It creates no directories.
+Creation prefers `docs/sketches` when present, otherwise root, and uses a bounded
+create-only suffix ladder through `-5`. Atomic replacement uses an exclusive
+sibling temporary file and rechecks identity at publication. An external process
+can still race the final check, as with generic text PUT; this is not a universal
+filesystem transaction. Generic PUT's 256 KiB limit is unchanged.
+
+The repository document is the source of geometry. It contains no session or
+turn ids, receipts, proposals, or undo journals, and no session record points
+at it. Every request names the registered workspace and the relative path.
+Session deletion, workspace unregistration, and startup never delete repository
+geometry. Explicit workspace deletion remains the way to remove saved repository
+documents. A renamed or deleted file is refused at its old path, never located
+by guessing from its sketch id.
+
+Edits to one repository file run one at a time, and creation holds a
+workspace-wide lock while it probes names. Every edit requires revision plus a content
+and file-identity token. Changed or missing files refuse edits without recreation
+or merging. Unknown object kinds survive validation; unsupported versions remain
+untouched. External replacement invalidates auxiliary undo history and reports
+that reset. Reads always load geometry from the workspace, not auxiliary state.
+
+`STATE_DIR/sketch-repository` retains bounded evaluator history and receipts for
+the exact document version. A write intent precedes publication. After a crash,
+recovery compares intended bytes, actual bytes, and the prior token. Ambiguous
+outcomes refuse edits with `409 outcome_unknown` while permitting inspection.
+An explicit token-checked history reset discards auxiliary recovery evidence,
+never geometry. Failed persistence may follow publication; clients retry the
+same request id rather than applying another gesture.
+
+Repository content is human readable. Dedicated agent tools are absent, but
+ordinary workspace tools can read or modify repository documents just as they
+can diagrams.
+
+REST edits derive the human actor and reject caller-supplied authorship.
+Repository requests accept no turn attribution. The core enforces geometry, batch, and history caps;
+receipts retain 256 request ids. Retrying an evicted id returns
+`409 outcome_unknown`, requiring inspection and a new request id.
+
+Sketch document version 2 adds stroke styles, planar shapes, and text boxes.
+Their fields, enums, and numeric bounds are defined once in
+[Repository documents](../api/API.md#repository-documents). The trust rules for
+them are:
+
+- Every new field has a strict schema and a bound in the backend core. The
+  evaluator counts patterned stroke segments and planar fill and outline
+  segments against document-wide budgets, so a small document cannot demand
+  unbounded mesh work. Transformed planar extents, including the visible
+  outline, must stay inside the document cube.
+- Opening a version-1 file never rewrites it. The first successful edit, undo,
+  or redo writes version 2 under the normal revision and file-version checks.
+  Valid undo history and receipts migrate. A history that cannot migrate stays
+  intact, and edits refuse until an explicit reset, so nothing is silently
+  dropped.
+- A version-1 object whose unknown kind became a version-2 kind must match the
+  version-2 definition. If it does not, the read fails and names the object,
+  and the file is left unchanged.
+- Older backends refuse version-2 files without changing them. Unknown kinds
+  keep their raw fields, and a reader cannot edit a kind it does not know.
+- Version 3 adds text box formatting and extruded text. The backend checks
+  formatting against the text it describes, rejects a text change that does
+  not carry its formatting, and caps extruded characters per box and per
+  document, because extruded glyphs cost mesh work. Version-2 files and
+  history migrate in memory the way version-1 files do, and version-2
+  backends refuse version-3 files unchanged.
+- Appearance and text edits use the same bounded commit, revision, receipt,
+  and undo rules as geometry edits.
+- `clear` removes every object in one transaction and refuses while any
+  unknown-kind object is present, so it cannot discard content the backend
+  cannot edit. Undo restores the cleared objects.
+
+Sketches have no agent tools or turn binding. New `context.sketch` requests are
+refused before starting a turn; old transcript metadata remains readable. The generic Cordis relay remains available for native questions and
+still supplies no bearer token or HTTP route authority to the child.
+
+`/api/events` carries only metadata invalidation: `sketch_document_changed`
+(ids, workspace-relative path, revision, transaction kind, actor kind, durable
+in the audit log). Strokes, labels, text, and captures
+never travel on the broadcast channel;
+clients re-read through the authenticated workspace routes. Native
+DeepSeek tool activities retain generic name/call-id lifecycle metadata but
+filter catalog-tool arguments, results, errors, and geometry before broadcast or
+logging. Retired sketch tool names remain redacted for older runtime events.
+There is no sketch WebSocket, shell route, or
+public tool callback route.
 
 ## macOS supervision and updates
 

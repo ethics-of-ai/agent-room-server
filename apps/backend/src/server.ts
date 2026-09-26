@@ -36,6 +36,10 @@ import { AgentAttachmentStore } from "./agent/AgentAttachmentStore";
 import { AgentTurnContextAssembler } from "./agent/AgentTurnContextAssembler";
 import { ArtifactStore } from "./artifact/ArtifactStore";
 import { ARTIFACT_PROMPT_INSTRUCTION } from "./artifact/artifactPrompt";
+import { RepositorySketchService } from "./sketch/RepositorySketchService";
+import { SketchWorkspaceFiles } from "./sketch/SketchWorkspaceFiles";
+import { SketchRepositoryJournal } from "./sketch/SketchRepositoryJournal";
+import { registerRepositorySketchRoutes } from "./routes/repositorySketchRoutes";
 import { SpatialSceneService } from "./scene/SpatialSceneService";
 import { registerSpatialSceneRoutes } from "./routes/spatialSceneRoutes";
 import { DIAGRAM_PROMPT_INSTRUCTION } from "./scene/diagram/prompt";
@@ -162,6 +166,7 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     attachments: agentAttachments,
     ...(artifactsEnabled ? { artifactInstruction: ARTIFACT_PROMPT_INSTRUCTION } : {}),
     clarifyingQuestionsEnabled: input.config.clarifyingQuestionsEnabled !== false,
+    runnerConfig: input.config,
     ...(sceneEngineEnabled ? { diagramInstruction: DIAGRAM_PROMPT_INSTRUCTION } : {}),
     ...(diagramHumanEdits ? { diagramHumanEdits } : {}),
     ...(diagramRenderFeedback ? { diagramRenderFeedback } : {})
@@ -184,6 +189,13 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     durableSessions
   });
   await agentSessions.initialize();
+  const repositorySketches = new RepositorySketchService({
+    files: new SketchWorkspaceFiles(localWorkspaceRegistry),
+    journal: new SketchRepositoryJournal(input.config.stateDir),
+    eventBus,
+    invalidate: (id) => workspaceExplorer.invalidateFileIndex(id)
+  });
+  await registerRepositorySketchRoutes(app, { sketches: repositorySketches, config: input.config });
   app.addHook("onClose", async () => {
     await durableSessions.flush();
   });

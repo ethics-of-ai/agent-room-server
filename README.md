@@ -63,6 +63,9 @@ sketches; and composition of
 `*.diagram.json` and `*.scene.json` spatial documents with their human override
 layers.
 
+The repository sketch API saves human edits in workspace `.sketch.json` files,
+with undo/redo and conflict checks. Saved files survive session deletion.
+
 ## Download
 
 Each versioned release on the [Releases page](https://github.com/ethics-of-ai/agent-room-server/releases)

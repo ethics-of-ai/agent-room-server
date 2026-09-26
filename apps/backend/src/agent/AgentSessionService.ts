@@ -25,7 +25,7 @@ import {
   type AgentRunnerInputPart,
   type CanonicalQuestionAnswer
 } from "../runner/AgentRunner";
-import type { QuestionAnswerResult } from "../runner/shared/PendingQuestionRequests";
+import { questionAnswerRefusal, type QuestionAnswerResult } from "../runner/shared/PendingQuestionRequests";
 import { isRegisteredRunnerKind, runnerDescriptor } from "../runner/registry";
 import type { DurableAgentSessionStore } from "../state/DurableAgentSessionStore";
 import {
@@ -53,22 +53,6 @@ export class AgentSessionError extends Error {
     super(message);
   }
 }
-
-// The one message per way a batch answer can be refused. The agent decides
-// what it is willing to be told — a set or option it did not offer, a second
-// choice on a single-select set, free text where none was invited — and each
-// refusal names the rule rather than forwarding the answer.
-const questionAnswerRefusal: Record<Exclude<QuestionAnswerResult, "answered" | "unknown_request">, string> = {
-  empty_batch: "Question answer needs at least one answered set",
-  unknown_set: "Question set was not offered for this request",
-  duplicate_set: "Question set was answered more than once",
-  unknown_option: "Question option was not offered for this set",
-  duplicate_option: "Question option was selected more than once",
-  selection_limit: "Question set accepts a single selection",
-  discussion_not_offered: "Question set does not accept free text",
-  discussion_required: "Question set requires free text",
-  empty_answer: "Question set answer needs a selection or free text"
-};
 
 export interface CreateAgentSessionInput {
   workspaceId: string;
@@ -103,20 +87,9 @@ export class AgentSessionService {
   private readonly turnGitDiffs: AgentTurnGitDiffTracker;
   private readonly cancelledTurnIds = new Set<string>();
   private readonly countedCancelledTurnIds = new Set<string>();
-  /**
-   * Hydrated sessions whose runner declares no restore path but which had a
-   * native conversation. Their next turn is refused rather than started as a
-   * fresh conversation under the old thread's id. Derived from the document
-   * and the descriptor at every hydration, never persisted.
-   */
+  /** Hydrated non-restorable sessions that must refuse a fresh conversation. */
   private readonly uncontinuableSessionIds = new Set<string>();
-  /**
-   * The native id each hydrated session was seeded with, held until its
-   * runner reports a session start. A reported id that differs means the
-   * resume did not take and the agent is in a fresh conversation, which the
-   * person is told rather than left to discover. Consumed on first report,
-   * so the comparison runs once per hydrated session.
-   */
+  /** Native ids awaiting their one-time post-hydration resume check. */
   private readonly hydratedSeeds = new Map<string, string>();
   private completedTurns = 0;
   private failedTurns = 0;
@@ -124,7 +97,6 @@ export class AgentSessionService {
   private inputTokens = 0;
   private outputTokens = 0;
   private totalTokens = 0;
-
   constructor(
     private readonly deps: {
       registry: LocalWorkspaceRegistry;
@@ -136,10 +108,7 @@ export class AgentSessionService {
       attachments?: {
         deleteSessionAttachments(session: Pick<AgentSession, "workspaceId" | "id">): Promise<void>;
       };
-      /**
-       * Where session records outlive this process. Absent, the list is
-       * process-scoped exactly as it was before the store existed.
-       */
+      /** Optional durable session store; absent keeps sessions process-scoped. */
       durableSessions?: Pick<DurableAgentSessionStore, "initialize" | "schedule" | "remove">;
     }
   ) {
@@ -166,23 +135,7 @@ export class AgentSessionService {
     });
   }
 
-  /**
-   * Read every session record the durable store holds and restore it as if
-   * its mutations had happened in this process. Awaited before any route
-   * registers, so the first request sees the restored list.
-   *
-   * Three things happen per record beyond populating the maps. A turn that was
-   * running when the previous process ended settles through the ordinary
-   * failure path with a fixed reason, publishing at boot on purpose: the audit
-   * store is attached before this service is built, so the interruption reaches
-   * durable audit. A session with a native conversation id is seeded into its
-   * runner through the optional `rememberResumableId` hook, so the next turn
-   * resumes that conversation; a runner without the hook is left alone. And a
-   * session whose runner declares no restore path is marked uncontinuable, so
-   * a restart never begins a fresh conversation under an existing thread's id.
-   * None of it reads which runner a session belongs to — only the descriptor
-   * field and the hook's presence.
-   */
+  /** Hydrate before routes open, fail interrupted turns, and seed verified resume ids. */
   async initialize(): Promise<void> {
     const store = this.deps.durableSessions;
     if (!store) return;
@@ -194,9 +147,7 @@ export class AgentSessionService {
   }
 
   private hydrate(document: DurableAgentSessionDocument): void {
-    // The document validated `runnerKind` as a string so a thread from a
-    // runner this process does not register stays readable; the record type
-    // narrows it, and `requireRunner` is what refuses a turn on it.
+    // Unknown persisted runner ids stay readable; requireRunner refuses use.
     const session = document.session as AgentSession;
     if (this.sessions.has(session.id)) return;
     this.sessions.set(session.id, session);
@@ -325,6 +276,9 @@ export class AgentSessionService {
   }
 
   async startTurn(input: StartAgentTurnInput): Promise<AgentSessionTurn> {
+    if (input.context?.sketch !== undefined) {
+      throw new AgentSessionError("Sketch context is no longer supported. Open the sketch to edit it directly.", 400);
+    }
     const requestStartedAtMs = Date.now();
     const session = this.requireSession(input.sessionId);
     if (session.activeTurnId) {
@@ -407,7 +361,14 @@ export class AgentSessionService {
       workspacePath: session.workspacePath,
       runnerKind: session.runnerKind
     });
-    void this.consumeTurn(runner, session, turn, runnerInput.prompt, runnerInput.inputParts, session.settings);
+    void this.consumeTurn(
+      runner,
+      session,
+      turn,
+      runnerInput.prompt,
+      runnerInput.inputParts,
+      session.settings
+    );
     return turn;
   }
 
@@ -611,11 +572,7 @@ export class AgentSessionService {
         ? telemetry.runnerStartedAtMs - telemetry.requestStartedAtMs
         : undefined
     }, "Agent turn runner consumption started");
-    // A runner whose descriptor reports no turn diff of its own (Claude Code —
-    // the SDK stream has no `turn/diff/updated` analog) gets a Git status
-    // snapshot before the runner starts, and the settle-time delta becomes this
-    // turn's coding_diff_updated. A `runner` source reports its own diffs; a
-    // second source would double-report the same turn.
+    // Runners without native turn diffs get one settle-time Git delta.
     if (runnerDescriptor(session.runnerKind).turnDiffSource === "settle_time_git") {
       await this.turnGitDiffs.beginTurn(turn.id, session.workspaceId);
     }

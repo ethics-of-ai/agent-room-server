@@ -131,8 +131,9 @@ export function cursorModelSelection(
  *
  * `disallowedTools` always carries `askQuestion`: fact 3 showed the built-in
  * tool is absent from the headless catalog already, so this is belt-and-braces
- * against a future SDK adding it without an answer path. The question custom
- * tool is registered only when the clarifying-question channel is on.
+ * against a future SDK adding it without an answer path. The AgentRoom tools
+ * advertised at start — the question tool among them when the channel is on —
+ * are composed by the caller from the catalog's gates.
  */
 export function cursorAgentStartPosture(
   config: ServiceConfig,
@@ -144,15 +145,13 @@ export function cursorAgentStartPosture(
   sandbox: boolean;
   autoReview: boolean;
   disallowedTools: string[];
-  questionTool: boolean;
 } {
   return {
     model,
     settingSources: settings.loadWorkspaceSettings ? ["project"] : [],
     sandbox: settings.sandbox,
     autoReview: settings.autoReview,
-    disallowedTools: ["askQuestion"],
-    questionTool: config.clarifyingQuestionsEnabled !== false
+    disallowedTools: ["askQuestion"]
   };
 }
 

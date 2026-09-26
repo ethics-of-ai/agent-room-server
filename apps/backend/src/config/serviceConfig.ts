@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
-import type { PublicServiceConfig, ServiceConfig } from "../domain/models";
+import type { ServiceConfig } from "../domain/models";
+import type { PublicServiceConfig } from "../domain/publicServiceConfig";
 import { CODING_EVENT_CONTRACT_VERSION } from "../protocol/coding/eventSchemas";
 import {
   defaultClaudeCodeLoadWorkspaceSkills,
@@ -121,6 +122,7 @@ export function getServiceConfig(): ServiceConfig {
     // told to rename it: the child inherits that value either way, so refusing
     // to see it would report an unconfigured runner that in fact works.
     deepseekCordisConfig: optionalEnv("DEEPSEEK_CORDIS_CONFIG") ?? optionalEnv("DSH_CORDIS_CONFIG"),
+    deepseekCompositionMode: optionalEnv("DEEPSEEK_COMPOSITION_MODE") ?? "custom",
     // Extra fixed arguments for the runtime. Unlike CODEX_ARGS this selects
     // nothing by itself — the composition above is what decides which plugins,
     // and therefore which tools, the agent has.
@@ -173,6 +175,7 @@ export function toPublicConfig(config: ServiceConfig, onDiskSettings?: ManagedSe
     claudeCodeLoadWorkspaceSkills:
       config.claudeCodeLoadWorkspaceSkills ?? defaultClaudeCodeLoadWorkspaceSkills,
     sceneEngineEnabled: config.sceneEngineEnabled ?? true,
+    repositorySketches: true,
     languageServicesEnabled: config.languageServicesEnabled ?? false,
     terminalEnabled: config.terminalEnabled ?? false,
     // Additive metadata: the flat fields above keep their meaning (the values

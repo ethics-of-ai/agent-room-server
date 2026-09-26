@@ -53,6 +53,7 @@ export interface ServiceConfig extends LanguageServiceExecutableConfig {
   // DEEPSEEK_CORDIS_CONFIG, else an operator-exported DSH_CORDIS_CONFIG, and
   // handed to the child as DSH_CORDIS_CONFIG.
   deepseekCordisConfig?: string;
+  deepseekCompositionMode?: "custom" | "managed";
   deepseekArgs: string[];
   deepseekModel?: string;
   deepseekProvider?: string;
@@ -129,34 +130,6 @@ export interface ReleaseCompatibility {
     macos: ClientCompatibility;
     visionos: ClientCompatibility;
   };
-}
-
-export interface PublicServiceConfig {
-  release: ReleaseCompatibility;
-  runnerKind: ServiceConfig["runnerKind"];
-  /**
-   * Which `coding_*` event contract this backend speaks. A client compares it
-   * against the minimum it accepts, so an independently upgraded headset and an
-   * older backend can each tell what the other carries instead of assuming the
-   * apps shipped together. Non-secret: it is a shape, not a posture.
-   */
-  codingEventContractVersion: number;
-  agentRoomHome?: string;
-  host: string;
-  port: number;
-  workspaceRoot: string;
-  stateDir: string;
-  requireAuth: boolean;
-  codexRunnerProtocol: "exec" | "jsonrpc";
-  codexApprovalPolicy: CodexApprovalPolicy;
-  codexSandboxMode: CodexSandboxMode;
-  codexWorkspaceNetworkAccess: boolean;
-  claudeCodePermissionMode: ClaudeCodePermissionMode;
-  claudeCodeInheritProviderAuth: boolean;
-  claudeCodeLoadWorkspaceSkills: boolean;
-  sceneEngineEnabled?: boolean;
-  languageServicesEnabled?: boolean;
-  terminalEnabled: boolean;
 }
 
 export interface HarnessSource {
@@ -452,6 +425,14 @@ export interface WorkspaceSkillsSnapshot {
 export interface AgentTurnContext {
   paths?: string[];
   attachments?: string[];
+  /** Retained for explicit refusal of legacy callers; never grants agent access. */
+  sketch?: AgentTurnSketchContext;
+}
+
+export interface AgentTurnSketchContext {
+  sketchId: string;
+  revision: number;
+  objectIds: string[];
 }
 
 /**
@@ -519,6 +500,10 @@ export interface CodingAgentCapabilities {
   runnerKind: AgentRunnerKind;
   settings: CodingAgentSettingsDescriptor;
   error?: string;
+  checks?: Array<{ id: string; status: "ready" | "unavailable" | "not_checked"; message: string }>;
+  connectionTestAvailable?: boolean;
+  sessionNotice?: string;
+  modelSelectionScope?: "turn" | "session";
 }
 
 export type AgentSessionStatus = "idle" | "running" | "failed" | "cancelled";
@@ -640,6 +625,7 @@ export interface AgentSessionMessageContextAttachment {
 export interface AgentSessionMessageContext {
   paths?: string[];
   attachments?: AgentSessionMessageContextAttachment[];
+  sketch?: AgentTurnSketchContext;
   // The clarifying-question batch this user message answers, when it is the
   // backend's record of a human answer rather than a turn message.
   questionRequestId?: string;

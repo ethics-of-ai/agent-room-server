@@ -97,6 +97,13 @@ describe("agent turn context assembler", () => {
     expect(assembled.prompt).toBe("Plan this work.");
   });
 
+  it("omits the legacy instruction when the descriptor selects native DeepSeek questions", async () => {
+    const fixture = await createAssemblerFixture({ runnerConfig: { ...await config(), deepseekCompositionMode: "managed" } });
+    fixture.session.runnerKind = "deepseek";
+    const assembled = await fixture.assembler.assemble({ session: fixture.session, message: "Plan this work." });
+    expect(assembled.prompt).toBe("Plan this work.");
+  });
+
   it("appends the human-edit summary after the standing diagram contract", async () => {
     const { assembler, session } = await createAssemblerFixture({
       diagramInstruction: "diagram contract",
@@ -272,6 +279,20 @@ describe("agent turn context assembler", () => {
     ]);
   });
 
+  it("does not project retired sketch selection into new message context", async () => {
+    const { assembler, session } = await createAssemblerFixture();
+    const sketch = { sketchId: "sketch-1", revision: 4, objectIds: ["box-1"] };
+
+    const assembled = await assembler.assemble({
+      session,
+      message: "Adjust the selection.",
+      context: { sketch }
+    });
+
+    expect(assembled.prompt).toBe("Adjust the selection.");
+    expect(assembled.messageContext).toBeUndefined();
+  });
+
   it("fails with a 404-style domain error when an attachment id is missing", async () => {
     const { assembler, session } = await createAssemblerFixture();
 
@@ -316,6 +337,7 @@ describe("agent turn context assembler", () => {
 
 async function createAssemblerFixture(instructions: {
   artifactInstruction?: string;
+  runnerConfig?: ServiceConfig;
   clarifyingQuestionsEnabled?: boolean;
   diagramInstruction?: string;
   diagramHumanEdits?: {

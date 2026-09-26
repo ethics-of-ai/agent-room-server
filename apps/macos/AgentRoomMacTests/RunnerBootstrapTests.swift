@@ -129,6 +129,22 @@ final class RunnerBootstrapTests: XCTestCase {
         XCTAssertNil(configured.resolvedSlot)
     }
 
+    func testDeepSeekNodeEntrypointCheckWorksWithBackendStopped() throws {
+        let entrypoint = temporaryURL(named: "SDK runtime.js")
+        try FileManager.default.createDirectory(at: entrypoint.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "// not executed".write(to: entrypoint, atomically: true, encoding: .utf8)
+        let descriptor = RunnerBootstrapTestSupport.descriptor("deepseek")
+        let probe = try XCTUnwrap(descriptor.probe("entrypoint"))
+        let prober = RunnerBootstrapTestSupport.prober()
+        for argument in ["", "relative.js", entrypoint.deletingLastPathComponent().path] {
+            let outcome = prober.run(probe, of: descriptor) { $0 == "executable" ? "/usr/bin/node" : argument }
+            XCTAssertEqual(outcome.status, .absent)
+        }
+        let ready = prober.run(probe, of: descriptor) { $0 == "executable" ? "/usr/bin/node" : entrypoint.path }
+        XCTAssertEqual(ready.status, .satisfied(detail: entrypoint.path))
+        XCTAssertEqual(descriptor.slot("compositionMode")?.choices.map(\.id), ["custom", "managed"])
+    }
+
     func testKeychainProbeReadsPresenceAndNeverTheCredential() throws {
         let descriptor = RunnerBootstrapTestSupport.descriptor("claude_code")
         let probe = try XCTUnwrap(descriptor.probe("signIn"))

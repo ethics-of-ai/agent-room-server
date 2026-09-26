@@ -56,8 +56,21 @@ export const agentStartParamsSchema = z.object({
   sandbox: z.boolean(),
   autoReview: z.boolean(),
   disallowedTools: z.array(z.string()),
-  /** When true the host registers the one clarifying-question custom tool. */
-  questionTool: z.boolean()
+  /**
+   * The AgentRoom tools this session's turns may call: serializable
+   * definitions only. The host registers each one as a custom tool whose
+   * `execute` relays `tools/invoke`; no tool has its own callback or flag.
+   */
+  tools: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(200),
+        description: z.string(),
+        inputSchema: z.record(z.string(), z.unknown())
+      })
+    )
+    .max(16)
+    .default([])
 });
 
 export const agentStartResultSchema = z.object({
@@ -122,7 +135,37 @@ export const runResultNotificationSchema = z.object({
   durationMs: z.number().nonnegative().optional()
 });
 
-// Host → backend request: the custom question tool's callback, relayed.
+// Host → backend requests: AgentRoom tool calls, relayed.
+
+/** The generic relay: one bounded envelope for every registered custom tool. */
+export const HOST_TOOLS_INVOKE_METHOD = "tools/invoke";
+
+export const toolInvokeParamsSchema = z.object({
+  /** The advertised tool name the model called. */
+  tool: z.string().min(1).max(200),
+  /** The raw custom-tool arguments the model produced. */
+  input: z.unknown(),
+  /**
+   * The host's own run id — the generation handle binding this call to the
+   * turn that originated it. A call whose run is no longer the session's live
+   * turn is answered with the tool's unavailable text, never dispatched into
+   * whichever turn is active now. Absent only on the legacy shim.
+   */
+  runId: z.string().min(1).max(200).optional()
+});
+
+export const toolInvokeResultSchema = z.object({
+  /** The model-facing text the tool returns. */
+  result: z.string()
+});
+
+/**
+ * The first relay's original method, kept as a compatibility shim: it carries
+ * the same call for the `ask_user_question` tool and funnels into the same
+ * bound dispatch, so a host from either side of the generalization answers
+ * identically.
+ */
+export const HOST_QUESTION_METHOD = "question/ask";
 
 export const questionAskParamsSchema = z.object({
   /** The raw custom-tool arguments the model produced; the backend mints ids. */
@@ -159,5 +202,5 @@ export type CursorHostRequestMethod =
   | "models/list"
   | "shutdown";
 
-/** The one request the host makes of the backend. */
-export const HOST_QUESTION_METHOD = "question/ask";
+/** The requests the host makes of the backend, both served by the tool relay. */
+export type CursorHostCallbackMethod = typeof HOST_TOOLS_INVOKE_METHOD | typeof HOST_QUESTION_METHOD;

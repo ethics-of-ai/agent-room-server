@@ -1,4 +1,6 @@
 import type { AgentRunnerActivity, AgentRunnerEvent, RunnerMetadata } from "../AgentRunner";
+import { agentToolByName } from "../../agentTools/catalog";
+import "../../agentTools/questionAsk";
 import { compactDisplayText, displayTextValue } from "../shared/displayText";
 import { labelFromIdentifier } from "../shared/jsonValues";
 import {
@@ -44,10 +46,18 @@ export interface DeepSeekTurnState {
   outputTokens: number;
   reasoningOutputTokens: number;
   cachedInputTokens: number;
+  /** Calls whose arguments and results must never enter broadcast activity. */
+  privateToolCallIds: Set<string>;
 }
 
 export function createDeepSeekTurnState(): DeepSeekTurnState {
-  return { inputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0, cachedInputTokens: 0 };
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningOutputTokens: 0,
+    cachedInputTokens: 0,
+    privateToolCallIds: new Set()
+  };
 }
 
 /** How a turn ended, when this event ended it. */
@@ -108,7 +118,12 @@ export function mapDeepSeekSessionEvent(
     case "tool/call": {
       const data = toolCallDataSchema.safeParse(event.data);
       if (!data.success) return { events: [] };
-      const description = compactDisplayText(data.data.arguments) ?? undefined;
+      // Retired names remain private when replayed by an older custom runtime.
+      const privateTool = agentToolByName(data.data.name) !== undefined
+        || data.data.name === "agentroom_sketch_read"
+        || data.data.name === "agentroom_sketch_propose";
+      if (privateTool) context.state.privateToolCallIds.add(data.data.callId);
+      const description = privateTool ? undefined : compactDisplayText(data.data.arguments) ?? undefined;
       return {
         events: [
           activityEvent({
@@ -126,13 +141,16 @@ export function mapDeepSeekSessionEvent(
     case "tool/result": {
       const data = toolResultDataSchema.safeParse(event.data);
       if (!data.success) return { events: [] };
+      const callId = data.data.message?.source?.callId
+        ?? data.data.message?.content?.find((block) => block.toolCallId)?.toolCallId;
+      const privateTool = callId !== undefined && context.state.privateToolCallIds.delete(callId);
       // The result's model-facing content can be large and is already the tool's
       // own output; only its display summary and any failure identity travel as
       // an activity, and the canonical mapper bounds what does.
-      const description = displayTextValue(data.data.message)
-        ?? (data.data.error?.code ? `Failed: ${data.data.error.code}` : undefined);
-      const callId = data.data.message?.source?.callId
-        ?? data.data.message?.content?.find((block) => block.toolCallId)?.toolCallId;
+      const description = privateTool
+        ? undefined
+        : displayTextValue(data.data.message)
+          ?? (data.data.error?.code ? `Failed: ${data.data.error.code}` : undefined);
       return {
         events: [
           activityEvent({
@@ -141,7 +159,7 @@ export function mapDeepSeekSessionEvent(
             ...(description ? { description } : {}),
             content: {
               ...(callId ? { callId } : {}),
-              ...(data.data.error ? { error: data.data.error } : {})
+              ...(!privateTool && data.data.error ? { error: data.data.error } : {})
             },
             canonical: { kind: "tool_completed", ...(callId ? { toolId: callId } : {}) },
             runner: { ...runner, ...(callId ? { nativeItemId: callId } : {}) }

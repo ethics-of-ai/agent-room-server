@@ -40,8 +40,8 @@ pull-request template, public CI, and public release workflow.
 
 The mirror excludes:
 
-- `apps/visionos` and private visionOS design, client, language, and generated
-  evidence documents;
+- `apps/visionos` and private visionOS design, client, experiment, language,
+  and generated evidence documents;
 - Apple reference indexes;
 - private agent guidance and skills;
 - private mirror, Release Please, and RC workflows;

@@ -1,31 +1,25 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { extname, resolve } from "node:path";
 import type { CodingAgentCapabilities, ServiceConfig } from "../../domain/models";
 import { logger } from "../../logging/logger";
 import { redactSecrets } from "../../util/redactSecrets";
 import type {
   AgentRunner,
-  AgentRunnerActivity,
   AgentRunnerEvent,
   AgentRunnerInput,
   AgentRunnerInputPart,
-  CanonicalQuestionAnswer,
-  RunnerMetadata
+  CanonicalQuestionAnswer
 } from "../AgentRunner";
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { withTimeout } from "../shared/asyncUtils";
 import {
   JsonRpcLineClient,
-  JsonRpcMethodNotFoundError,
-  type JsonRpcNotification,
-  type JsonRpcRequest
+  type JsonRpcNotification
 } from "../shared/JsonRpcLineClient";
 import { PersistentRunnerSessionHost } from "../shared/PersistentRunnerSessionHost";
 import {
   PendingQuestionRequests,
-  type QuestionAnswerResult,
-  type QuestionWaitOutcome
+  type QuestionAnswerResult
 } from "../shared/PendingQuestionRequests";
 import {
   createRunnerStreamTiming,
@@ -33,6 +27,8 @@ import {
   runnerStreamTimingAudit
 } from "../shared/streamTiming";
 import { runnerDescriptor } from "../registry";
+import { advertisedAgentTools, type AgentToolHandler } from "../../agentTools/dispatch";
+import { allowedAgentToolLogicalIds } from "../../agentTools/catalog";
 import {
   cursorCapabilities,
   cursorCatalogFromModels,
@@ -43,21 +39,13 @@ import {
 import {
   createCursorTurnState,
   mapCursorDelta,
-  mapCursorMessage,
-  type CursorTurnState
+  mapCursorMessage
 } from "./messageMapper";
-import {
-  cursorQuestionBatch,
-  cursorQuestionToolResult,
-  type CursorQuestionBatch
-} from "./questions";
 import {
   agentStartResultSchema,
   agentSendResultSchema,
-  HOST_QUESTION_METHOD,
   initializeResultSchema,
   modelsListResultSchema,
-  questionAskParamsSchema,
   runMessageNotificationSchema,
   runResultNotificationSchema,
   runDeltaNotificationSchema
@@ -73,32 +61,13 @@ import {
   effectiveCursorSettings,
   type CursorEffectiveSettings
 } from "./settings";
-
-interface CursorActiveTurn {
-  runId: string;
-  cursorRunId?: string;
-  sendAttempted: boolean;
-  queue: AsyncEventQueue<AgentRunnerEvent>;
-  finalEvent?: AgentRunnerEvent;
-  completed: boolean;
-  state: CursorTurnState;
-  base: RunnerMetadata;
-  pendingQuestionRequestId?: string;
-  /** Resolved when the turn settles, so the cancel ladder can wait on it. */
-  onSettled?: () => void;
-}
-
-interface CursorRunnerSession {
-  key: string;
-  client: JsonRpcLineClient;
-  child: ChildProcessWithoutNullStreams;
-  stderrTail: () => string | undefined;
-  agentId?: string;
-  base: RunnerMetadata;
-  activeTurn?: CursorActiveTurn;
-  sessionStartedEmitted: boolean;
-  explicitlyClosed: boolean;
-}
+import {
+  bindCursorTurnTools,
+  cancelCursorPendingQuestion,
+  disposeCursorTurnTools,
+  serveCursorHostRequest
+} from "./toolRelay";
+import type { CursorActiveTurn, CursorRunnerSession } from "./types";
 
 const CLIENT_LABEL = "Cursor SDK host";
 
@@ -130,10 +99,12 @@ const STDERR_TAIL_LIMIT_CHARS = 2_048;
  *
  * Three properties shape the adapter:
  *
- * - **Questions are a real callback.** The host registers one custom tool whose
- *   `execute` sends `question/ask` to the backend; the adapter's `onRequest`
- *   handler opens the shared question wait and answers with the person's own
- *   words. No parser, no grammar the model can get wrong.
+ * - **AgentRoom tools ride one callback.** The host registers every advertised
+ *   catalog tool and relays each call to the backend as one `tools/invoke`
+ *   request; `toolRelay.ts` dispatches it through the turn's bound AgentRoom
+ *   tool dispatcher. The clarifying-question channel crosses it unchanged —
+ *   same native name, wait, events, and answer text — as the `questions.ask`
+ *   catalog tool.
  * - **There is no permission channel.** The SDK exposes no approval callback, so
  *   the runner implements no `answerPermissionRequest` and the permissions
  *   route's `404` reads the absence of a channel rather than the runner's name.
@@ -148,6 +119,15 @@ export class CursorSdkRunner implements AgentRunner {
   private readonly hostModulePath: string;
   private readonly usesDefaultHost: boolean;
   private readonly initializeTimeoutMs: number;
+  /** The registry owns whether this runner's transport carries AgentRoom tools. */
+  private readonly agentToolsEnabled: boolean;
+  /**
+   * Handlers for catalog tools beyond `questions.ask`, keyed by logical id and
+   * injected by their owning modules. The question handler is wired here; a
+   * future tool module contributes its own without touching the
+   * relay or the host.
+   */
+  private readonly extraToolHandlers: Readonly<Record<string, AgentToolHandler>>;
   /** Sessions whose persisted agent may still record an active run after a killed host. */
   private readonly forceNextSends = new Set<string>();
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
@@ -170,11 +150,15 @@ export class CursorSdkRunner implements AgentRunner {
       questionTimeoutMs?: number;
       /** A fake host module for tests; defaults to the compiled `host.js` beside this file. */
       hostModulePath?: string;
+      /** Handlers for bound catalog tools beyond `questions.ask`, by logical id. */
+      toolHandlers?: Readonly<Record<string, AgentToolHandler>>;
     } = {}
   ) {
     this.initializeTimeoutMs = deps.initializeTimeoutMs ?? INITIALIZE_TIMEOUT_MS;
     this.usesDefaultHost = deps.hostModulePath === undefined;
     this.hostModulePath = deps.hostModulePath ?? resolve(__dirname, `host${extname(__filename)}`);
+    this.agentToolsEnabled = runnerDescriptor("cursor").agentTools.mode === "custom_tools";
+    this.extraToolHandlers = deps.toolHandlers ?? {};
     this.questions = new PendingQuestionRequests(
       deps.questionTimeoutMs !== undefined ? { timeoutMs: deps.questionTimeoutMs } : {}
     );
@@ -295,6 +279,15 @@ export class CursorSdkRunner implements AgentRunner {
       const settings = effectiveCursorSettings(this.config, input.settings, this.catalog);
       session = await this.getOrCreateSession(input, activeTurn, settings);
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
+      // The turn's tool binding: relays arriving while this turn is the
+      // session's live turn dispatch; after settle they are answered, not run.
+      bindCursorTurnTools({
+        session,
+        turn: activeTurn,
+        allowed: this.turnToolLogicalIds(),
+        questions: this.questions,
+        extraHandlers: this.extraToolHandlers
+      });
       // Against the catalog the session learned at start, so a turn's effort or
       // speed rides the parameter name this model actually declares. A value
       // the model does not offer is refused here, before anything is sent.
@@ -332,6 +325,7 @@ export class CursorSdkRunner implements AgentRunner {
     } finally {
       this.activeTurns.delete(input.runId);
       if (session) {
+        disposeCursorTurnTools(session);
         this.sessions.touch(session);
         if (session.activeTurn === activeTurn) session.activeTurn = undefined;
         // A question belongs to the turn that asked it; nothing stays open once
@@ -375,7 +369,7 @@ export class CursorSdkRunner implements AgentRunner {
     const active = this.activeTurns.get(runId);
     if (!active) return;
     const { session, turn } = active;
-    this.cancelPendingQuestion(session, turn);
+    cancelCursorPendingQuestion(session, turn, this.questions);
 
     const settled = new Promise<void>((resolveSettled) => {
       turn.onSettled = resolveSettled;
@@ -464,7 +458,7 @@ export class CursorSdkRunner implements AgentRunner {
     };
 
     client.onNotification((notification) => this.handleNotification(session, notification));
-    client.onRequest((request) => this.handleHostRequest(session, request));
+    client.onRequest((request) => serveCursorHostRequest(session, request));
     child.on("close", () => this.handleChildGone(session, "The Cursor SDK host exited", stderrTail));
     child.on("error", (error) => this.handleChildGone(session, error.message, stderrTail));
 
@@ -486,7 +480,10 @@ export class CursorSdkRunner implements AgentRunner {
         client.request("agent/start", {
           cwd: input.workspacePath,
           ...(resumeAgentId ? { agentId: resumeAgentId } : {}),
-          ...cursorAgentStartPosture(this.config, settings, model)
+          ...cursorAgentStartPosture(this.config, settings, model),
+          tools: this.agentToolsEnabled
+            ? advertisedAgentTools(this.turnToolLogicalIds())
+            : []
         }),
         AGENT_START_TIMEOUT_MS,
         "Timed out starting the Cursor agent"
@@ -521,6 +518,20 @@ export class CursorSdkRunner implements AgentRunner {
       });
     }
     return session;
+  }
+
+  /**
+   * The logical ids a turn binds. Composed from the catalog's feature gates —
+   * the same composition that advertised the tools at `agent/start`. A gate
+   * that flips between turns leaves the host's registration stable while
+   * dispatch refuses the now-unavailable call, per the tool contract.
+   */
+  private turnToolLogicalIds(): string[] {
+    const policy = runnerDescriptor("cursor").agentTools;
+    return allowedAgentToolLogicalIds({
+      gates: { clarifyingQuestions: this.config.clarifyingQuestionsEnabled !== false },
+      capabilities: policy.mode === "none" ? [] : policy.capabilities
+    });
   }
 
   private handleNotification(session: CursorRunnerSession, notification: JsonRpcNotification): void {
@@ -582,104 +593,6 @@ export class CursorSdkRunner implements AgentRunner {
         session.stderrTail()
       )
     });
-  }
-
-  /** Serve the host's one request: the clarifying-question custom tool's callback. */
-  private async handleHostRequest(session: CursorRunnerSession, request: JsonRpcRequest): Promise<{ result: string }> {
-    if (request.method !== HOST_QUESTION_METHOD) {
-      // The shared client refuses an unknown method with -32601 when the handler
-      // throws; do the same by name so a future host method is not silently
-      // answered.
-      throw new JsonRpcMethodNotFoundError(request.method);
-    }
-    const params = questionAskParamsSchema.parse(request.params);
-    const batch = cursorQuestionBatch(params.input);
-    if ("error" in batch) return { result: batch.error };
-
-    const turn = session.activeTurn;
-    const requestId = `question-${randomUUID()}`;
-    const wait = turn && !turn.finalEvent
-      ? this.questions.wait({ sessionKey: session.key, requestId, sets: batch.sets })
-      : undefined;
-    this.pushQuestionRequested(session, turn, batch, wait ? requestId : undefined);
-    if (!wait || !turn) {
-      this.pushQuestionResolved(session, turn, batch, requestId, { status: "cancelled" }, false);
-      return { result: cursorQuestionToolResult(batch, { status: "unavailable" }) };
-    }
-
-    turn.pendingQuestionRequestId = requestId;
-    const outcome = await wait;
-    if (turn.pendingQuestionRequestId === requestId) turn.pendingQuestionRequestId = undefined;
-    this.pushQuestionResolved(session, turn, batch, requestId, outcome, true);
-    return { result: cursorQuestionToolResult(batch, outcome) };
-  }
-
-  private pushQuestionRequested(
-    session: CursorRunnerSession,
-    turn: CursorActiveTurn | undefined,
-    batch: CursorQuestionBatch,
-    requestId: string | undefined
-  ): void {
-    const target = turn ?? session.activeTurn;
-    if (!target || target.finalEvent) return;
-    target.queue.push({
-      type: "agent_activity",
-      activity: this.questionActivity(session, {
-        kind: "cursor_question_requested",
-        title: "Questions for you",
-        content: { questionCount: batch.sets.length },
-        canonical: { kind: "question_requested", ...(requestId ? { requestId } : {}), questionSets: batch.sets }
-      })
-    });
-  }
-
-  private pushQuestionResolved(
-    session: CursorRunnerSession,
-    turn: CursorActiveTurn | undefined,
-    batch: CursorQuestionBatch,
-    requestId: string,
-    outcome: QuestionWaitOutcome | { status: "cancelled" },
-    withRequestId: boolean
-  ): void {
-    const target = turn ?? session.activeTurn;
-    if (!target || target.finalEvent) return;
-    target.queue.push({
-      type: "agent_activity",
-      activity: this.questionActivity(session, {
-        kind: "cursor_question_resolved",
-        title:
-          outcome.status === "answered" ? "Questions answered" : outcome.status === "timeout" ? "Questions timed out" : "Questions cancelled",
-        content: { status: outcome.status, ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}) },
-        canonical: {
-          kind: "question_resolved",
-          ...(withRequestId ? { requestId } : {}),
-          status: outcome.status,
-          ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}),
-          ...(outcome.status === "answered"
-            ? {
-                // A sensitive set's text reaches only the tool result. Ordinary
-                // invited discussion remains in the canonical event and thread.
-                questionAnswers: outcome.answers.map((answer) =>
-                  batch.sets.find((set) => set.setId === answer.setId)?.sensitive
-                    ? { setId: answer.setId, selectedOptionIds: answer.selectedOptionIds }
-                    : answer
-                )
-              }
-            : {})
-        }
-      })
-    });
-  }
-
-  private cancelPendingQuestion(session: CursorRunnerSession, turn: CursorActiveTurn): void {
-    const requestId = turn.pendingQuestionRequestId;
-    if (!requestId) return;
-    turn.pendingQuestionRequestId = undefined;
-    this.questions.cancel(session.key, requestId);
-  }
-
-  private questionActivity(session: CursorRunnerSession, activity: Omit<AgentRunnerActivity, "runner">): AgentRunnerActivity {
-    return { ...activity, runner: session.base };
   }
 
   private turnStartedEvent(session: CursorRunnerSession, cursorRunId: string): AgentRunnerEvent {

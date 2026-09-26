@@ -36,6 +36,7 @@ import type { AgentRunner } from "./AgentRunner";
  */
 export class RunnerRuntimeReadiness {
   private readonly observed = new Map<string, boolean>();
+  private readonly testingConnection = new Set<string>();
 
   /**
    * What the last discovery proved, or `undefined` when none has run in this
@@ -67,6 +68,24 @@ export class RunnerRuntimeReadiness {
     } catch (error) {
       this.observed.set(runnerKind, false);
       throw error;
+    }
+  }
+
+  /**
+   * Runs the adapter's connection test, one at a time per runner kind. A
+   * test can spawn a runtime and spend provider tokens, so an overlapping
+   * request is refused rather than queued.
+   */
+  async testConnection(
+    runnerKind: AgentRunnerKind,
+    test: () => Promise<{ ok: boolean; message: string }>
+  ): Promise<{ running: true } | { running: false; result: { ok: boolean; message: string } }> {
+    if (this.testingConnection.has(runnerKind)) return { running: true };
+    this.testingConnection.add(runnerKind);
+    try {
+      return { running: false, result: await test() };
+    } finally {
+      this.testingConnection.delete(runnerKind);
     }
   }
 }

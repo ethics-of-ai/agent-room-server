@@ -13,8 +13,11 @@ public struct PublicServiceConfig: Codable, Hashable {
     public var requireAuth: Bool
     public var terminalEnabled: Bool?
     public var sceneEngineEnabled: Bool?
-    /// Managed-settings metadata keyed by setting name. Optional so a backend
-    /// that predates the shared settings store still decodes.
+    /// Whether this backend serves repository `.sketch.json` editing. Optional
+    /// so a backend that predates the field decodes as `nil`, read as unsupported.
+    public var repositorySketches: Bool?
+    /// Managed-settings metadata keyed by setting name. Optional so a
+    /// backend that predates the shared settings store still decodes.
     public var settings: [String: PublicManagedSetting]?
     /// The Mac-side master switch for remote tier-2 edits (`REMOTE_SETTINGS_ADMIN`).
     public var remoteSettingsAdmin: Bool?
@@ -34,6 +37,7 @@ public struct PublicServiceConfig: Codable, Hashable {
         requireAuth: Bool,
         terminalEnabled: Bool?,
         sceneEngineEnabled: Bool? = nil,
+        repositorySketches: Bool? = nil,
         settings: [String: PublicManagedSetting]? = nil,
         remoteSettingsAdmin: Bool? = nil
     ) {
@@ -42,6 +46,7 @@ public struct PublicServiceConfig: Codable, Hashable {
         self.requireAuth = requireAuth
         self.terminalEnabled = terminalEnabled
         self.sceneEngineEnabled = sceneEngineEnabled
+        self.repositorySketches = repositorySketches
         self.settings = settings
         self.remoteSettingsAdmin = remoteSettingsAdmin
     }

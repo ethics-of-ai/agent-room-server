@@ -97,10 +97,14 @@ backend appear as pending and offer restart. Paired-client changes arrive as a
 value-free `config_reloaded` event, after which the app rereads the API metadata
 and file.
 
-The Advanced pane owns tier-2 terminal, language-service, and spatial-engine
-controls plus `REMOTE_SETTINGS_ADMIN`. The last remains an environment-only,
-default-off Mac decision. Paired clients can change tier-1 preferences without
-it; they can change trust settings only while it is on.
+The Advanced pane owns the spatial-engine preference, the
+tier-2 terminal and language-service controls, plus `REMOTE_SETTINGS_ADMIN`.
+The last remains an environment-only, default-off Mac decision. Paired clients
+can change tier-1 preferences without it; they can change trust settings only
+while it is on.
+
+Sketches have no Mac setting. Supporting clients find repository sketches
+through the `repositorySketches` capability.
 
 The Codex network toggle writes both `codexWorkspaceNetworkAccess` and the
 required sandbox mode. It does not rewrite runner protocol or arguments.
@@ -126,14 +130,28 @@ informational executable path because the SDK includes a CLI, plus a required
 presence-only lookup for the `claude login` Keychain item. The lookup requests
 no secret data.
 
-DeepSeek requires an executable, Cordis composition, optional fixed arguments,
-and a provider key. Executable and composition are probed; arguments and the
-secret are not. The key is masked and stored in Keychain. A source checkout can
+DeepSeek requires an executable, composition source, fixed arguments for Node,
+and a provider key. Local checks validate executable, composition, and Node SDK
+entrypoint while the backend is stopped. They do not validate provider access.
+The key is masked and stored in Keychain. A source checkout can
 populate Node, entrypoint, and composition through **Use a source checkout**.
 The chooser reads without executing, resolves paths, confines files to the
 checkout, and rejects comma-containing entrypoints. Review the selected Cordis
 graph before launch. Full setup is in the
 [DeepSeek guide](../engineering/DEEPSEEK_HARNESS_RUNNER.md).
+The packaged backend includes the compiled AgentRoom Cordis-tools plugin; the
+packaging script refuses a missing, non-regular, or symlinked plugin resource.
+Select **AgentRoom managed** to generate the standard graph and refresh plugin
+paths automatically. Custom is the default for existing configurations and
+preserves the operator's YAML. Custom tool compositions still need an explicit
+plugin entry. The setup choice is bundled and Keychain-held, outside remotely
+managed settings. Changes apply after backend restart.
+
+Backend checks display runtime and optional-tool readiness separately, with
+repair text and the session-continuation notice. The provider stays unverified
+until an explicit **Test provider connection** action returns a response. The
+button discloses possible API usage, disables while pending, and reports a safe
+result. It sends no workspace files or tool requests.
 
 Cursor has no bootstrap slot because its SDK is bundled and its default
 credential file is SDK-owned. Its required `filePresence` probe stats

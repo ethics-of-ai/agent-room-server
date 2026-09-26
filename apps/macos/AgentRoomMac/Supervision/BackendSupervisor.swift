@@ -57,6 +57,9 @@ final class BackendSupervisor {
     /// Keyed by runner kind: one source-checkout walk per runner, unlike probe
     /// statuses, which are per probe.
     private(set) var sourceCheckoutOutcomes: [String: RunnerBootstrapSourceCheckoutOutcome] = [:]
+    private(set) var runnerCapabilityResults: [String: CodingAgentCapabilitiesResponse] = [:]
+    private(set) var runnerConnectionTests: Set<String> = []
+    private(set) var runnerConnectionMessages: [String: String] = [:]
     var editorCatalogStatus: EditorCatalogStatus?
     var editorCatalogActionStatus: EditorCatalogActionStatus?
     var languageServiceCatalog: LanguageServiceCatalog?
@@ -629,8 +632,9 @@ final class BackendSupervisor {
     /// why the catalog is re-read afterwards.
     func checkRunnerRuntimeReadiness(runnerKind: String) async {
         do {
-            _ = try await apiClient.fetchCodingAgentCapabilities(runnerKind: runnerKind)
+            runnerCapabilityResults[runnerKind] = try await apiClient.fetchCodingAgentCapabilities(runnerKind: runnerKind)
         } catch {
+            runnerCapabilityResults.removeValue(forKey: runnerKind)
             // The readiness observer records a server-side discovery failure
             // before the capabilities route rethrows it, so the catalog still
             // needs to be re-read. A transport failure is also followed by the
@@ -638,6 +642,17 @@ final class BackendSupervisor {
             appendDiagnostic("warning", "Runner readiness check failed: \(error.localizedDescription)")
         }
         await refreshRunnerCatalog()
+    }
+
+    func testRunnerConnection(runnerKind: String) async {
+        guard runnerConnectionTests.insert(runnerKind).inserted else { return }
+        defer { runnerConnectionTests.remove(runnerKind) }
+        do {
+            let response = try await apiClient.testCodingAgentConnection(runnerKind: runnerKind)
+            runnerConnectionMessages[runnerKind] = response.message
+        } catch {
+            runnerConnectionMessages[runnerKind] = "Connection test failed: \(error.localizedDescription)"
+        }
     }
 
     /// Store one tier-3 slot value. A blank value clears the slot, so an emptied

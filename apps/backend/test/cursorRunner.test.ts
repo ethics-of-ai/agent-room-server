@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ServiceConfig } from "../src/domain/models";
 import type { AgentRunnerEvent } from "../src/runner/AgentRunner";
+import { registerAgentTool, unregisterAgentTool } from "../src/agentTools/catalog";
 import { CursorSdkRunner } from "../src/runner/cursor/CursorSdkRunner";
 import { fallbackCursorCapabilities } from "../src/runner/cursor/capabilities";
 import { buildServer } from "../src/server";
@@ -211,6 +212,110 @@ describe("CursorSdkRunner", () => {
     expect(canonicalOf(events, "question_resolved")[0]).toMatchObject({ status: "timeout", decidedBy: "timeout" });
     expect(assistantText(events)).toContain("chose: (timeout)");
     expect(events.at(-1)).toMatchObject({ type: "run_succeeded" });
+  });
+
+  it("still serves the legacy question/ask shim with the same behavior", async () => {
+    // The relay's first method remains answered: an older host's `question/ask`
+    // funnels into the same bound dispatch as `tools/invoke`.
+    const host = await writeFakeHost({ askQuestion: true, useLegacyQuestionAsk: true });
+    const serviceConfig = await config();
+    const runner = new CursorSdkRunner(serviceConfig, { hostModulePath: host });
+    const collected: AgentRunnerEvent[] = [];
+    const settling = (async () => {
+      for await (const event of runner.run({
+        runId: "agentroom-turn-shim",
+        sessionId: "agent-session-shim",
+        workspacePath: serviceConfig.workspaceRoot,
+        prompt: "Which client first?"
+      })) {
+        collected.push(event);
+      }
+    })();
+
+    await waitFor(() => canonicalOf(collected, "question_requested").length > 0);
+    const requestId = canonicalOf(collected, "question_requested")[0].requestId as string;
+    expect(
+      runner.answerQuestionRequest({
+        sessionId: "agent-session-shim",
+        requestId,
+        answers: [{ setId: "set-1", selectedOptionIds: ["opt-2"], discussion: "macOS please" }]
+      })
+    ).toBe("answered");
+    await settling;
+    await runner.dispose();
+
+    expect(assistantText(collected)).toContain("chose: macOS");
+    expect(canonicalOf(collected, "question_resolved")[0]).toMatchObject({ status: "answered", decidedBy: "human" });
+    expect(collected.at(-1)).toMatchObject({ type: "run_succeeded" });
+  });
+
+  it("binds a second registered tool and handler with no new host callback or per-tool boolean", async () => {
+    // The B04 recipe end to end: one catalog registration plus one injected
+    // handler. The host was never taught this tool; it registered the
+    // advertised definition and relayed `tools/invoke` like any other.
+    registerAgentTool({
+      logicalId: "test.hello",
+      name: "test_hello",
+      description: "A test-only tool.",
+      inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+      outputSchema: { type: "string" },
+      unavailableResult: "The hello tool is unavailable right now.",
+      requiredCapability: "questions"
+    });
+    try {
+      const host = await writeFakeHost({ callExtraTool: "test_hello" });
+      const serviceConfig = await config();
+      const runner = new CursorSdkRunner(serviceConfig, {
+        hostModulePath: host,
+        toolHandlers: {
+          "test.hello": async (input) => `hello tool saw ${(input as { value: string }).value}`
+        }
+      });
+      const events = await collect(runner.run({
+        runId: "agentroom-turn-extra",
+        sessionId: "agent-session-extra",
+        workspacePath: serviceConfig.workspaceRoot,
+        prompt: "Use the hello tool"
+      }));
+      await runner.dispose();
+
+      // Questions stayed advertised beside the new tool, sketches off or on.
+      expect(assistantText(events)).toContain('advertised=["ask_user_question","test_hello"]');
+      expect(assistantText(events)).toContain("extra=hello tool saw hi");
+      expect(events.at(-1)).toMatchObject({ type: "run_succeeded" });
+    } finally {
+      unregisterAgentTool("test.hello");
+    }
+  });
+
+  it("answers a late tool call stamped with a prior run instead of dispatching it", async () => {
+    // The generation handle: a relayed call whose host run is not the live
+    // turn's run is refused with the tool's unavailable text, and nothing from
+    // it reaches the live turn's stream.
+    const markerRoot = await mkdtemp(join(tmpdir(), "agentroom-cursor-late-"));
+    const record = join(markerRoot, "late.txt");
+    const host = await writeFakeHost({ lateStaleToolCall: true, lateCallRecordPath: record });
+    const serviceConfig = await config();
+    const runner = new CursorSdkRunner(serviceConfig, { hostModulePath: host });
+    const first = await collect(runner.run({
+      runId: "agentroom-turn-late-1",
+      sessionId: "agent-session-late",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "first"
+    }));
+    const second = await collect(runner.run({
+      runId: "agentroom-turn-late-2",
+      sessionId: "agent-session-late",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "second"
+    }));
+    await runner.dispose();
+
+    expect(first.at(-1)).toMatchObject({ type: "run_succeeded" });
+    expect(second.at(-1)).toMatchObject({ type: "run_succeeded" });
+    expect(canonicalOf(second, "question_requested")).toHaveLength(0);
+    expect(canonicalOf(second, "question_resolved")).toHaveLength(0);
+    expect(await readFile(record, "utf8")).toContain("could not be put to the person");
   });
 
   it("leaves no question channel when clarifying questions are disabled", async () => {
@@ -443,6 +548,13 @@ describe("Cursor fallback catalog", () => {
  */
 async function writeFakeHost(options: {
   askQuestion?: boolean;
+  /** Relay the question over the legacy `question/ask` shim instead of `tools/invoke`. */
+  useLegacyQuestionAsk?: boolean;
+  /** The model calls this advertised custom tool by name through the generic relay. */
+  callExtraTool?: string;
+  /** At each turn after the first, relay a tool call stamped with the prior run id. */
+  lateStaleToolCall?: boolean;
+  lateCallRecordPath?: string;
   hangAfterSend?: boolean;
   dieOnSend?: boolean;
   dieOnceMarkerPath?: string;
@@ -457,7 +569,9 @@ const readline = require("node:readline");
 const fs = require("node:fs");
 const rl = readline.createInterface({ input: process.stdin });
 const options = ${JSON.stringify(options)};
-let cwd, model, sendModel, agentId, resumed, questionTool, sendForce;
+let cwd, model, sendModel, agentId, resumed, sendForce;
+let advertisedTools = [];
+let lastRunId;
 let nextRunId = 0;
 let nextRequestId = 0;
 const pending = new Map();
@@ -469,19 +583,41 @@ function backendRequest(method, params) {
   return new Promise((resolve) => { const id = "h" + nextRequestId++; pending.set(id, resolve); send({ jsonrpc: "2.0", id, method, params }); });
 }
 
-async function runTurn(runId) {
-  message(runId, { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "session=" + agentId + " cwd=" + cwd + " model=" + model.id + " resumed=" + resumed + " force=" + sendForce + " startParams=" + JSON.stringify(model.params || []) + " sendParams=" + JSON.stringify((sendModel && sendModel.params) || []) } ] } });
+async function runTurn(runId, priorRunId) {
+  // A stale relay: a tool call whose run is no longer the live turn. It must
+  // be answered, never dispatched into this turn.
+  if (options.lateStaleToolCall && priorRunId) {
+    const stale = await backendRequest("tools/invoke", { tool: "ask_user_question", input: { questions: [
+      { header: "Stale", question: "A question from a run that already ended", selection: "single", options: [ { label: "A" } ], discussion: "optional" }
+    ] }, runId: priorRunId });
+    if (options.lateCallRecordPath) fs.writeFileSync(options.lateCallRecordPath, String((stale && stale.result) || ""));
+  }
+
+  message(runId, { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "session=" + agentId + " cwd=" + cwd + " model=" + model.id + " resumed=" + resumed + " force=" + sendForce + " startParams=" + JSON.stringify(model.params || []) + " sendParams=" + JSON.stringify((sendModel && sendModel.params) || []) + " advertised=" + JSON.stringify(advertisedTools) } ] } });
   message(runId, { type: "tool_call", call_id: "call-1", name: "shell", status: "running", args: { command: "ls" } });
   message(runId, { type: "tool_call", call_id: "call-1", name: "shell", status: "completed", result: "ok" });
 
   if (options.hangAfterSend) return; // never settles; the adapter must cancel and kill.
 
+  if (options.callExtraTool) {
+    if (advertisedTools.indexOf(options.callExtraTool) !== -1) {
+      const answer = await backendRequest("tools/invoke", { tool: options.callExtraTool, input: { value: "hi" }, runId: runId });
+      const text = (answer && answer.result) || "";
+      message(runId, { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "extra=" + text }] } });
+    } else {
+      message(runId, { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "extra tool not advertised" }] } });
+    }
+  }
+
   if (options.askQuestion) {
-    if (questionTool) {
-      const answer = await backendRequest("question/ask", { input: { questions: [
+    if (advertisedTools.indexOf("ask_user_question") !== -1) {
+      const input = { questions: [
         { header: "Target", question: "Which client first?", selection: "single", options: [ { label: "visionOS" }, { label: "macOS" } ], discussion: "optional" },
         { header: "Secret", question: "Add a private note", selection: "single", options: [], discussion: "required", sensitive: true }
-      ] } });
+      ] };
+      const answer = options.useLegacyQuestionAsk
+        ? await backendRequest("question/ask", { input: input })
+        : await backendRequest("tools/invoke", { tool: "ask_user_question", input: input, runId: runId });
       const text = (answer && answer.result) || "";
       const chose = text.includes("macOS") ? "macOS" : text.includes("away") || text.includes("time") ? "(timeout)" : "unknown";
       message(runId, { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "chose: " + chose }] } });
@@ -507,7 +643,8 @@ rl.on("line", (line) => {
       if (options.malformedInitialize) { respond({ sdkVersion: 12 }); return; }
       respond({ sdkVersion: "fake-1.0.0" }); return;
     case "agent/start":
-      cwd = msg.params.cwd; model = msg.params.model; questionTool = msg.params.questionTool;
+      cwd = msg.params.cwd; model = msg.params.model;
+      advertisedTools = (msg.params.tools || []).map(function (tool) { return tool.name; });
       agentId = msg.params.agentId || "agent-fake-1"; resumed = Boolean(msg.params.agentId);
       respond({ agentId, resumed }); return;
     case "agent/send":
@@ -517,7 +654,7 @@ rl.on("line", (line) => {
         process.stderr.write("cursor host: crashed with an active run\\n");
         process.exit(3);
       }
-      { sendModel = msg.params.model; sendForce = Boolean(msg.params.force); const runId = "run-" + (++nextRunId); respond({ runId }); void runTurn(runId); } return;
+      { sendModel = msg.params.model; sendForce = Boolean(msg.params.force); const runId = "run-" + (++nextRunId); respond({ runId }); void runTurn(runId, lastRunId); lastRunId = runId; } return;
     case "run/cancel":
       // A hung run is never settled here; the adapter's ladder kills the child.
       respond({}); return;

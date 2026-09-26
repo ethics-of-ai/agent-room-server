@@ -254,19 +254,20 @@ describe("Cursor capability descriptor", () => {
 });
 
 describe("Cursor agent-start posture", () => {
-  it("always disallows askQuestion and registers the question tool only when enabled", () => {
+  it("always disallows askQuestion; AgentRoom tools are composed from the catalog, not the posture", () => {
     const settings = effectiveCursorSettings(config(), undefined);
     const model = cursorModelSelection(fallbackCursorCatalog, settings);
     const on = cursorAgentStartPosture(config(), settings, model);
     expect(on.model).toEqual({ id: "default" });
     expect(on.disallowedTools).toEqual(["askQuestion"]);
-    expect(on.questionTool).toBe(true);
     expect(on.settingSources).toEqual(["project"]);
 
     const off = cursorAgentStartPosture(config({ clarifyingQuestionsEnabled: false }), settings, model);
-    expect(off.questionTool).toBe(false);
-    // Belt-and-braces: the built-in tool stays disallowed even with the channel off.
+    // Belt-and-braces: the built-in tool stays disallowed even with the channel
+    // off. The question tool's presence rides the `tools` list the adapter
+    // composes from the catalog's gate (test/agentTools.test.ts).
     expect(off.disallowedTools).toEqual(["askQuestion"]);
+    expect("questionTool" in off).toBe(false);
   });
 
   it("forces settingSources empty when workspace settings are off", () => {

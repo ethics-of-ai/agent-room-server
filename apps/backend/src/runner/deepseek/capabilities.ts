@@ -47,6 +47,8 @@ export function deepseekCapabilities(config: ServiceConfig, error?: string): Cod
   const resolved = models.map((candidate) => ({ ...candidate, isDefault: candidate.id === defaultModelId }));
   return {
     runnerKind: "deepseek",
+    modelSelectionScope: "session",
+    sessionNotice: "Stopping a turn or restarting the backend ends this thread's ability to continue. Its transcript stays available. Start a new thread to continue working or choose a different model.",
     settings: {
       models: resolved,
       defaultSettings: defaultSettings(defaultModelId)

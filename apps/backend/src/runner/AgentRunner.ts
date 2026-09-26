@@ -1,4 +1,5 @@
 import type { AgentRunnerKind, CodingAgentCapabilities, CodingAgentTurnSettings } from "../domain/models";
+import type { AgentToolAdvertisement } from "../agentTools/dispatch";
 import type {
   PermissionAnswerResult,
   PermissionDecisionAuthority,
@@ -35,6 +36,29 @@ export class AgentRunnerInputError extends Error {
   }
 }
 
+export interface AgentRunnerToolInvocation {
+  readonly callId: string;
+  readonly name: string;
+  readonly arguments: unknown;
+  readonly signal: AbortSignal;
+}
+
+/** Turn-scoped tool authority. The session layer retains disposal ownership. */
+export interface AgentRunnerToolBinding {
+  readonly runId: string;
+  readonly allowedNames: readonly string[];
+  invoke(invocation: AgentRunnerToolInvocation): Promise<string>;
+}
+
+export interface AgentRunnerToolSet {
+  /** Explicit turn context requires these tools; optional native helpers may degrade. */
+  readonly required?: boolean;
+  /** Stable serializable definitions installed once for a persistent child. */
+  readonly catalog: readonly AgentToolAdvertisement[];
+  /** The narrower names and live invocation operation for this exact turn. */
+  readonly binding: AgentRunnerToolBinding;
+}
+
 export interface AgentRunnerInput {
   runId: string;
   sessionId?: string;
@@ -43,6 +67,7 @@ export interface AgentRunnerInput {
   inputParts?: AgentRunnerInputPart[];
   title?: string;
   settings?: CodingAgentTurnSettings;
+  tools?: AgentRunnerToolSet;
 }
 
 export interface RunnerAudit {
@@ -274,6 +299,8 @@ export type AgentRunnerEvent =
 
 export interface AgentRunner {
   getCapabilities(): Promise<CodingAgentCapabilities>;
+  /** Explicit provider call using a fixed prompt and no workspace/tool authority. */
+  testConnection?(): Promise<{ ok: boolean; message: string }>;
   validateInputParts(inputParts: AgentRunnerInputPart[] | undefined): void;
   run(input: AgentRunnerInput): AsyncIterable<AgentRunnerEvent>;
   cancel(runId: string): Promise<void>;
