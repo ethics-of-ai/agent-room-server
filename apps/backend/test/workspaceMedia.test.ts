@@ -219,6 +219,37 @@ describe("workspace media read admission", () => {
     await expect(failing.read(target, { path: "bad.png" })).rejects.toThrow("failure");
     await expect(failing.read(target, { path: "bad-again.png" })).rejects.toThrow("failure");
   });
+
+  it("frees a slot when its stream ends, before the file handle finishes closing", async () => {
+    // A FileHandle stream emits `close` only after the handle closes on the
+    // thread pool, which a loaded machine can delay past the next request.
+    const lateClosing: Readable[] = [];
+    const reader = new WorkspaceMediaReader(async () => {
+      const stream = new Readable({
+        autoDestroy: false,
+        read() {
+          this.push(pngHeader);
+          this.push(null);
+        }
+      });
+      lateClosing.push(stream);
+      return { ...fakeMedia(), stream };
+    });
+    const target: WorkspaceTarget = { workspaceId: "workspace-test", workspacePath: "/tmp", workspaceRoot: "/tmp" };
+
+    for (const path of ["first.png", "second.png", "third.png"]) {
+      const media = await reader.read(target, { path });
+      media.stream.resume();
+      await finished(media.stream);
+    }
+
+    // A close after the end must not free the same slot twice.
+    for (const stream of lateClosing) stream.destroy();
+    await Promise.all(lateClosing.map((stream) => finished(stream).catch(() => undefined)));
+    const held = [await reader.read(target, { path: "held-1.png" }), await reader.read(target, { path: "held-2.png" })];
+    await expect(reader.read(target, { path: "over.png" })).rejects.toMatchObject({ code: "media_busy" });
+    for (const media of held) media.stream.destroy();
+  });
 });
 
 async function setupWorkspace(overrides: Partial<ServiceConfig> = {}) {

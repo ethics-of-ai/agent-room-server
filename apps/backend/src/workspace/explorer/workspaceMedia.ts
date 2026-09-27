@@ -51,7 +51,19 @@ export class WorkspaceMediaReader {
     this.activeReads += 1;
     try {
       const media = await this.operation(target, input);
-      media.stream.once("close", () => { this.activeReads -= 1; });
+      // Free the slot at `end`, not only on `close`. A FileHandle stream emits
+      // `close` after the handle closes on the thread pool, which can land after
+      // the response has finished and the client's next request has arrived.
+      // A stream that errors or is cancelled never ends but is destroyed, so
+      // `close` still covers it. Whichever comes first frees the slot, once.
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        this.activeReads -= 1;
+      };
+      media.stream.once("end", release);
+      media.stream.once("close", release);
       return media;
     } catch (error) {
       this.activeReads -= 1;
