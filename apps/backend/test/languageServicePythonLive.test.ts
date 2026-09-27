@@ -78,5 +78,6 @@ describe("production Pyright language-service descriptor", () => {
     expect(harness.diagnosticsFor("django")).toEqual([]);
 
     expect(harness.registry.projection()).toMatchObject([{ ready: true }]);
-  }, 30_000);
+    // Room for each open to use the harness's full diagnostics wait.
+  }, 90_000);
 });

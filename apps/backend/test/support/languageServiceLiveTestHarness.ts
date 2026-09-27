@@ -25,6 +25,11 @@ interface LiveTestHarnessOptions {
   workspaceName: string;
   descriptor: LanguageServiceDescriptor;
   configOverrides?: Partial<ServiceConfig>;
+  /**
+   * How long `open` waits for a document's first diagnostics. The TypeScript
+   * live test takes about 3 s end to end on the public mirror's CI runner, yet
+   * one open there waited over 5 s while the rest of the suite ran alongside.
+   */
   diagnosticsTimeoutMs?: number;
   awaitDiagnostics?: boolean;
 }
@@ -81,7 +86,7 @@ export class LanguageServiceLiveTestHarness {
         workspace,
         config,
         options.descriptor,
-        options.diagnosticsTimeoutMs ?? 5_000,
+        options.diagnosticsTimeoutMs ?? 20_000,
         options.awaitDiagnostics ?? true
       );
     } catch (error) {

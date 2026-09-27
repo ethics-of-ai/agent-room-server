@@ -82,5 +82,6 @@ describe("production TypeScript language-service descriptor", () => {
     expect(harness.diagnosticsFor("next")).toEqual([]);
 
     expect(harness.registry.projection()).toMatchObject([{ ready: true }]);
-  }, 30_000);
+    // Room for each open to use the harness's full diagnostics wait.
+  }, 90_000);
 });
