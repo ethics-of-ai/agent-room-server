@@ -6,7 +6,7 @@ import SwiftUI
 struct ModelCatalogSettingsPane: View {
     @Environment(BackendSupervisor.self) private var supervisor
     @State private var store = ModelCatalogEditorStore()
-    @State private var runner = ModelCatalogRunner.claudeCode
+    @State private var runner = ModelCatalogRunner.codex
 
     var body: some View {
         Form {

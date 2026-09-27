@@ -74,6 +74,18 @@ describe("model catalog file", () => {
     expect(() => parseModelCatalog(value)).toThrow(/defaultValue/);
   });
 
+  it("rejects a Codex default effort outside the model's own levels", () => {
+    const value = document();
+    value.runners.codex.fallbackModels[0].defaultReasoningEffort = "extreme";
+    expect(() => parseModelCatalog(value)).toThrow(/defaultReasoningEffort/);
+  });
+
+  it("rejects more than one Codex default", () => {
+    const value = document();
+    value.runners.codex.fallbackModels[1].isDefault = true;
+    expect(() => parseModelCatalog(value)).toThrow(/default/);
+  });
+
   it("rejects more than one Cursor default", () => {
     const value = document();
     value.runners.cursor.fallbackModels[1].isDefault = true;

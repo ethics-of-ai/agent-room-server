@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ServiceConfig } from "../src/domain/models";
-import { capabilitiesFromModelList } from "../src/runner/codex/capabilities";
+import { capabilitiesFromModelList, fallbackCapabilities } from "../src/runner/codex/capabilities";
 
 const efforts = (...ids: string[]) => ids.map((reasoningEffort) => ({ reasoningEffort, description: reasoningEffort }));
 
@@ -26,5 +26,21 @@ describe("Codex model list mapping", () => {
     expect(model.reasoningEfforts.map((effort) => effort.id)).toEqual(["low", "xhigh", "max", "ultra"]);
     expect(model.defaultReasoningEffort).toBe("max");
     expect(capabilities.settings.defaultSettings).toMatchObject({ model: "gpt-6-astra", reasoningEffort: "max" });
+  });
+
+  it("falls back to the model catalog's Codex list through the same mapping", () => {
+    const capabilities = fallbackCapabilities({} as ServiceConfig);
+    const [first] = capabilities.settings.models;
+
+    expect(first).toMatchObject({ id: "gpt-6-astra", isDefault: true, defaultReasoningEffort: "medium", defaultServiceTier: "standard" });
+    expect(first.reasoningEfforts.map((effort) => effort.id)).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    expect(first.serviceTiers.map((tier) => tier.id)).toEqual(["standard", "fast"]);
+    expect(capabilities.settings.defaultSettings).toEqual({ model: "gpt-6-astra", reasoningEffort: "medium", serviceTier: "standard" });
+  });
+
+  it("keeps an operator's Codex model as the fallback default", () => {
+    const capabilities = fallbackCapabilities({ codexModel: "gpt-6-sol", codexReasoningEffort: "high" } as ServiceConfig);
+
+    expect(capabilities.settings.defaultSettings).toMatchObject({ model: "gpt-6-sol", reasoningEffort: "high" });
   });
 });

@@ -6,6 +6,7 @@ import { buildServer } from "../src/server";
 import { CodexAppServerRunner } from "../src/runner/codex/CodexAppServerRunner";
 import type { ServiceConfig } from "../src/domain/models";
 import type { AgentRunnerEvent } from "../src/runner/AgentRunner";
+import { bundledModelCatalog } from "../src/runner/modelCatalog";
 
 const config = async (overrides: Partial<ServiceConfig> = {}): Promise<ServiceConfig> => {
   const root = await mkdtemp(join(tmpdir(), "agentroom-coding-agent-settings-"));
@@ -193,7 +194,9 @@ describe("coding agent settings", () => {
     const capabilities = await runner.getCapabilities();
 
     expect(performance.now() - startedAt).toBeLessThan(3_500);
-    expect(capabilities.settings.models).toEqual([]);
+    // The catalog's offline list stands in, with the reason discovery failed.
+    expect(capabilities.settings.models.map((model) => model.id))
+      .toEqual(bundledModelCatalog.runners.codex.fallbackModels.map((model) => model.id));
     expect(capabilities.error).toBe("Timed out reading Codex model list");
 
     await runner.dispose();

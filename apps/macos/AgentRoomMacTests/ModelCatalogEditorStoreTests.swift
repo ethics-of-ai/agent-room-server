@@ -94,6 +94,23 @@ final class ModelCatalogEditorStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: localFileURL.path))
     }
 
+    func testEditingCodexWritesOnlyTheCodexSection() throws {
+        let store = loadedStore()
+        store.makeCodexDefault(store.codex.fallbackModels[1].rowID)
+        store.codex.fallbackModels[0].efforts = ["low", "high"]
+
+        XCTAssertTrue(store.isCustomized(.codex))
+        store.save(backendIsRunning: false)
+
+        let written = try XCTUnwrap(ModelCatalogFileStore().read(at: localFileURL)?.runners)
+        XCTAssertNil(written.claudeCode)
+        let codex = try XCTUnwrap(written.codex)
+        XCTAssertEqual(codex.fallbackModels.filter(\.isDefault).map(\.id), [store.codex.fallbackModels[1].id])
+        // Dropping the default level also dropped the default.
+        XCTAssertEqual(codex.fallbackModels[0].reasoningEfforts, ["low", "high"])
+        XCTAssertNil(codex.fallbackModels[0].defaultReasoningEffort)
+    }
+
     func testClaudeCodeEffortTogglesKeepTheShortForm() {
         let vocabulary = ["low", "medium", "high", "xhigh"]
         var model = ClaudeCodeCatalogModel(id: "opus", label: "Opus")

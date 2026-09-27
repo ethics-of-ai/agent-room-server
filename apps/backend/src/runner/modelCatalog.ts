@@ -9,8 +9,9 @@ import catalogDocument from "./modelCatalog.json";
  *
  * Live discovery wins wherever a runner has it (Codex `model/list`, Claude Code
  * `supportedModels()`, Cursor `models/list`). This file supplies what those
- * calls cannot: the offline fallback lists, Claude Code's effort vocabulary, and
- * DeepSeek's whole list, since its wire has no list method. Model ids stay open
+ * calls cannot: the Codex, Claude Code, and Cursor offline fallback lists,
+ * Claude Code's effort vocabulary, and DeepSeek's whole list, since its wire
+ * has no list method. Model ids stay open
  * bounded strings, so an operator-configured id the file does not list is still
  * honored by each runner.
  *
@@ -66,6 +67,24 @@ const cursorModelSchema = z
   })
   .strict();
 
+const codexModelSchema = z
+  .object({
+    id: codingAgentModelIdSchema,
+    label: labelSchema,
+    description: descriptionSchema.optional(),
+    /** Codex names its own levels, including `max` and `ultra` on newer models. */
+    reasoningEfforts: z.array(codingAgentReasoningEffortIdSchema).max(12),
+    defaultReasoningEffort: codingAgentReasoningEffortIdSchema.optional(),
+    /** Whether the model offers Codex's fast service tier beside standard speed. */
+    fast: z.boolean().default(false),
+    isDefault: z.boolean().default(false)
+  })
+  .strict()
+  .refine(
+    (model) => model.defaultReasoningEffort === undefined || model.reasoningEfforts.includes(model.defaultReasoningEffort),
+    { message: "defaultReasoningEffort must be one of reasoningEfforts" }
+  );
+
 const deepseekModelSchema = z
   .object({ id: codingAgentModelIdSchema, label: labelSchema, description: descriptionSchema.optional() })
   .strict();
@@ -82,6 +101,12 @@ function uniqueIds<T extends { id: string }>(schema: z.ZodType<T, z.ZodTypeDef, 
 
 const runnersSchema = z
   .object({
+    codex: z
+      .object({ fallbackModels: uniqueIds(codexModelSchema, 64) })
+      .strict()
+      .refine((runner) => runner.fallbackModels.filter((model) => model.isDefault).length <= 1, {
+        message: "at most one model may be the default"
+      }),
     claude_code: z
       .object({
         reasoningEfforts: uniqueIds(claudeCodeEffortSchema, 8),

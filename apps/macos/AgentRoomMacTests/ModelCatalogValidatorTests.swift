@@ -42,4 +42,14 @@ final class ModelCatalogValidatorTests: XCTestCase {
         XCTAssertTrue(issues.contains("Cursor: only one model can be the default."))
         XCTAssertTrue(issues.contains("Cursor: a's default effort is not one of its values."))
     }
+
+    func testRejectsACodexDefaultEffortOutsideItsLevels() {
+        var model = CodexCatalogModel(id: "gpt-6-sol", label: "GPT-6-Sol")
+        model.reasoningEfforts = ["low", "high"]
+        model.defaultReasoningEffort = "max"
+
+        let issues = ModelCatalogValidator.issues(in: ModelCatalogDocument.Runners(codex: CodexModelCatalog(fallbackModels: [model])))
+
+        XCTAssertEqual(issues, ["Codex: gpt-6-sol's default effort is not one of its levels."])
+    }
 }

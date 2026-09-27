@@ -14,6 +14,9 @@ enum ModelCatalogValidator {
 
     static func issues(in runners: ModelCatalogDocument.Runners) -> [String] {
         var issues: [String] = []
+        if let codex = runners.codex {
+            issues += self.issues(in: codex)
+        }
         if let claudeCode = runners.claudeCode {
             issues += self.issues(in: claudeCode)
         }
@@ -36,6 +39,25 @@ enum ModelCatalogValidator {
         }
         for model in catalog.fallbackModels where model.reasoningEfforts?.contains(where: { !vocabulary.contains($0) }) == true {
             issues.append("Claude Code: \(name(model)) uses an effort level the section does not define.")
+        }
+        return issues
+    }
+
+    private static func issues(in catalog: CodexModelCatalog) -> [String] {
+        var issues = rowIssues(catalog.fallbackModels, runner: .codex, max: 64)
+        if catalog.fallbackModels.filter(\.isDefault).count > 1 {
+            issues.append("Codex: only one model can be the default.")
+        }
+        for model in catalog.fallbackModels {
+            if model.reasoningEfforts.count > 12 {
+                issues.append("Codex: \(name(model)) lists more than 12 effort levels.")
+            }
+            if model.reasoningEfforts.contains(where: { $0.wholeMatch(of: effortIDPattern) == nil }) {
+                issues.append("Codex: \(name(model)) has an effort level with spaces or symbols.")
+            }
+            if let defaultEffort = model.defaultReasoningEffort, !model.reasoningEfforts.contains(defaultEffort) {
+                issues.append("Codex: \(name(model))'s default effort is not one of its levels.")
+            }
         }
         return issues
     }

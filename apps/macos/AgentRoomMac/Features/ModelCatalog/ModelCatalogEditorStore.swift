@@ -11,6 +11,7 @@ import Observation
 @MainActor
 @Observable
 final class ModelCatalogEditorStore {
+    var codex = CodexModelCatalog(fallbackModels: [])
     var claudeCode = ClaudeCodeModelCatalog(reasoningEfforts: [], fallbackModels: [])
     var cursor = CursorModelCatalog(fallbackModels: [])
     var deepseek = DeepSeekModelCatalog(models: [])
@@ -43,6 +44,7 @@ final class ModelCatalogEditorStore {
 
     func isCustomized(_ runner: ModelCatalogRunner) -> Bool {
         switch runner {
+        case .codex: normalized.codex != nil
         case .claudeCode: normalized.claudeCode != nil
         case .cursor: normalized.cursor != nil
         case .deepseek: normalized.deepseek != nil
@@ -54,6 +56,7 @@ final class ModelCatalogEditorStore {
         saveIssue = nil
         guard let bundledCatalogURL,
               let document = try? fileStore.read(at: bundledCatalogURL),
+              let codex = document.runners.codex,
               let claudeCode = document.runners.claudeCode,
               let cursor = document.runners.cursor,
               let deepseek = document.runners.deepseek else {
@@ -71,6 +74,7 @@ final class ModelCatalogEditorStore {
         } catch {
             localFileIssue = "models.json \(error.localizedDescription). The backend ignores it and uses the bundled catalog. Saving replaces it."
         }
+        self.codex = local.codex ?? codex
         self.claudeCode = local.claudeCode ?? claudeCode
         self.cursor = local.cursor ?? cursor
         self.deepseek = local.deepseek ?? deepseek
@@ -103,6 +107,7 @@ final class ModelCatalogEditorStore {
     func resetToBundled(_ runner: ModelCatalogRunner) {
         guard let bundled else { return }
         switch runner {
+        case .codex: bundled.codex.map { codex = $0 }
         case .claudeCode: bundled.claudeCode.map { claudeCode = $0 }
         case .cursor: bundled.cursor.map { cursor = $0 }
         case .deepseek: bundled.deepseek.map { deepseek = $0 }
@@ -116,6 +121,7 @@ final class ModelCatalogEditorStore {
 
     func addModel(to runner: ModelCatalogRunner) {
         switch runner {
+        case .codex: codex.fallbackModels.append(CodexCatalogModel(id: "", label: ""))
         case .claudeCode: claudeCode.fallbackModels.append(ClaudeCodeCatalogModel(id: "", label: ""))
         case .cursor: cursor.fallbackModels.append(CursorCatalogModel(id: "", label: ""))
         case .deepseek: deepseek.models.append(DeepSeekCatalogModel(id: "", label: ""))
@@ -124,6 +130,7 @@ final class ModelCatalogEditorStore {
 
     func removeModel(_ rowID: UUID, from runner: ModelCatalogRunner) {
         switch runner {
+        case .codex: codex.fallbackModels.removeAll { $0.rowID == rowID }
         case .claudeCode: claudeCode.fallbackModels.removeAll { $0.rowID == rowID }
         case .cursor: cursor.fallbackModels.removeAll { $0.rowID == rowID }
         case .deepseek: deepseek.models.removeAll { $0.rowID == rowID }
@@ -134,6 +141,7 @@ final class ModelCatalogEditorStore {
     /// first Claude Code model is the fallback default.
     func moveModel(_ rowID: UUID, by offset: Int, in runner: ModelCatalogRunner) {
         switch runner {
+        case .codex: Self.move(rowID, by: offset, in: &codex.fallbackModels)
         case .claudeCode: Self.move(rowID, by: offset, in: &claudeCode.fallbackModels)
         case .cursor: Self.move(rowID, by: offset, in: &cursor.fallbackModels)
         case .deepseek: Self.move(rowID, by: offset, in: &deepseek.models)
@@ -142,6 +150,7 @@ final class ModelCatalogEditorStore {
 
     func canMoveModel(_ rowID: UUID, by offset: Int, in runner: ModelCatalogRunner) -> Bool {
         let rowIDs: [UUID] = switch runner {
+        case .codex: codex.fallbackModels.map(\.rowID)
         case .claudeCode: claudeCode.fallbackModels.map(\.rowID)
         case .cursor: cursor.fallbackModels.map(\.rowID)
         case .deepseek: deepseek.models.map(\.rowID)
@@ -157,17 +166,39 @@ final class ModelCatalogEditorStore {
         }
     }
 
+    /// Makes one Codex model the default and clears the flag on the others.
+    func makeCodexDefault(_ rowID: UUID) {
+        for index in codex.fallbackModels.indices {
+            codex.fallbackModels[index].isDefault = codex.fallbackModels[index].rowID == rowID
+        }
+    }
+
     /// The sections that differ from the bundled catalog, trimmed the way the
     /// backend's schema trims them, so they are what a save would write.
     private var normalized: ModelCatalogDocument.Runners {
+        let codex = Self.normalized(codex)
         let claudeCode = Self.normalized(claudeCode)
         let cursor = Self.normalized(cursor)
         let deepseek = Self.normalized(deepseek)
         return ModelCatalogDocument.Runners(
+            codex: codex == bundled?.codex ? nil : codex,
             claudeCode: claudeCode == bundled?.claudeCode ? nil : claudeCode,
             cursor: cursor == bundled?.cursor ? nil : cursor,
             deepseek: deepseek == bundled?.deepseek ? nil : deepseek
         )
+    }
+
+    private static func normalized(_ catalog: CodexModelCatalog) -> CodexModelCatalog {
+        var catalog = catalog
+        for index in catalog.fallbackModels.indices {
+            var model = catalog.fallbackModels[index]
+            model.id = trimmed(model.id)
+            model.label = trimmed(model.label)
+            model.description = trimmed(model.description)
+            model.efforts = model.efforts.map(trimmed).filter { !$0.isEmpty }
+            catalog.fallbackModels[index] = model
+        }
+        return catalog
     }
 
     private static func normalized(_ catalog: ClaudeCodeModelCatalog) -> ClaudeCodeModelCatalog {

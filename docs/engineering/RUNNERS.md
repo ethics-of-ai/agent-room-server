@@ -284,17 +284,19 @@ widen the agent's sandbox without the tier-2 settings gate.
 ## Model catalog
 
 `apps/backend/src/runner/modelCatalog.json` holds the static model data. It has
-the Claude Code effort vocabulary and offline fallback list, the Cursor offline
-fallback list with each model's depth parameter name, and the whole DeepSeek
-list. `runner/modelCatalog.ts` validates it with zod when the backend loads, so
+the Codex offline fallback list with each model's effort levels and fast-mode
+flag, the Claude Code effort vocabulary and offline fallback list, the Cursor
+offline fallback list with each model's depth parameter name, and the whole
+DeepSeek list. `runner/modelCatalog.ts` validates it with zod when the backend loads, so
 a bad edit fails startup and `modelCatalog.test.ts` rather than a turn.
 
 Live discovery wins wherever a runner has it: Codex `model/list`, Claude Code
-`supportedModels()`, and Cursor `models/list`. Codex and ACP take nothing from
-the file. An operator-configured model is always the default. Without one,
-DeepSeek uses the `DEFAULT_DEEPSEEK_MODEL` constant, the Cursor fallback uses
-its `isDefault` entry, which the test pins to `DEFAULT_CURSOR_MODEL`, and the
-Claude Code fallback uses its first entry. The file is hand-edited and mirrored
+`supportedModels()`, and Cursor `models/list`. The Codex fallback is converted
+to `model/list` entries and mapped by the same code as a live reply. ACP takes
+nothing from the file. An operator-configured model is always the default.
+Without one, DeepSeek uses the `DEFAULT_DEEPSEEK_MODEL` constant, the Codex and
+Cursor fallbacks use their `isDefault` entry (the test pins Cursor's to
+`DEFAULT_CURSOR_MODEL`), and the Claude Code fallback uses its first entry. The file is hand-edited and mirrored
 with the rest of `apps/backend`.
 
 An operator's local copy at `$AGENTROOM_HOME/config/models.json` is read once

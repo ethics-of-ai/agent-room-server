@@ -8,6 +8,7 @@ final class ModelCatalogFileStoreTests: XCTestCase {
         let document = try XCTUnwrap(store.read(at: ModelCatalogTestSupport.bundledCatalogURL))
 
         XCTAssertEqual(document.schemaVersion, ModelCatalogDocument.currentSchemaVersion)
+        XCTAssertEqual(try XCTUnwrap(document.runners.codex).fallbackModels.filter(\.isDefault).count, 1)
         XCTAssertFalse(try XCTUnwrap(document.runners.claudeCode).fallbackModels.isEmpty)
         XCTAssertEqual(try XCTUnwrap(document.runners.cursor).fallbackModels.filter(\.isDefault).count, 1)
         XCTAssertFalse(try XCTUnwrap(document.runners.deepseek).models.isEmpty)

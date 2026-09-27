@@ -2,6 +2,17 @@
   "$comment": "Static model data for runners whose live discovery can fail or does not exist. Live discovery always wins where a runner has it. Edit by hand; src/runner/modelCatalog.ts validates this file at load. See docs/engineering/RUNNERS.md#model-catalog.",
   "schemaVersion": 1,
   "runners": {
+    "codex": {
+      "fallbackModels": [
+        { "id": "gpt-6-astra", "label": "GPT-6-Astra", "description": "Frontier intelligence for the most demanding work.", "reasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "defaultReasoningEffort": "medium", "fast": true, "isDefault": true },
+        { "id": "gpt-6-sol", "label": "GPT-6-Sol", "description": "Workhorse model for coding and everyday work.", "reasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "defaultReasoningEffort": "medium", "fast": true },
+        { "id": "gpt-6-luna", "label": "GPT-6-Luna", "description": "Fast and affordable model for easier tasks.", "reasoningEfforts": ["low", "medium", "high", "xhigh", "max"], "defaultReasoningEffort": "medium", "fast": true },
+        { "id": "gpt-5.6-sol", "label": "GPT-5.6-Sol", "description": "Older coding model for complex work.", "reasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "defaultReasoningEffort": "low", "fast": true },
+        { "id": "gpt-5.6-terra", "label": "GPT-5.6-Terra", "description": "Older balanced model for straightforward work.", "reasoningEfforts": ["low", "medium", "high", "xhigh", "max", "ultra"], "defaultReasoningEffort": "medium", "fast": true },
+        { "id": "gpt-5.6-luna", "label": "GPT-5.6-Luna", "description": "Older fast and efficient model.", "reasoningEfforts": ["low", "medium", "high", "xhigh", "max"], "defaultReasoningEffort": "medium", "fast": true },
+        { "id": "gpt-5.5", "label": "GPT-5.5", "description": "Legacy coding model.", "reasoningEfforts": ["low", "medium", "high", "xhigh"], "defaultReasoningEffort": "medium", "fast": true }
+      ]
+    },
     "claude_code": {
       "reasoningEfforts": [
         { "id": "low", "label": "Low", "description": "Minimal thinking, fastest responses" },

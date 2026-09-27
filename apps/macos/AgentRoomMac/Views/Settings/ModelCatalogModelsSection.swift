@@ -8,6 +8,10 @@ struct ModelCatalogModelsSection: View {
     var body: some View {
         Section {
             switch runner {
+            case .codex:
+                ForEach($store.codex.fallbackModels, id: \.rowID) { $model in
+                    CodexCatalogModelRow(model: $model, store: store)
+                }
             case .claudeCode:
                 let vocabulary = store.claudeCode.reasoningEfforts
                 ForEach($store.claudeCode.fallbackModels, id: \.rowID) { $model in

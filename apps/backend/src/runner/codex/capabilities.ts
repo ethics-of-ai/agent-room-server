@@ -13,6 +13,7 @@ import {
   positiveIntegerValue,
   stringValue
 } from "../shared/jsonValues";
+import { currentModelCatalog } from "../modelCatalog";
 import { codexDisplayServiceTier } from "./settings";
 
 const standardSpeedTier: CodingAgentSettingValue = {
@@ -21,19 +22,22 @@ const standardSpeedTier: CodingAgentSettingValue = {
   description: "Standard Codex speed"
 };
 
+/**
+ * What a client sees when `model/list` cannot be read: the model catalog's
+ * Codex list, run through the same mapping as a live reply so defaults, effort
+ * labels, and speed tiers follow one set of rules.
+ */
 export function fallbackCapabilities(config: ServiceConfig): CodingAgentCapabilities {
-  const serviceTier = codexDisplayServiceTier(config.codexServiceTier);
-  return {
-    runnerKind: "codex",
-    settings: {
-      models: [],
-      defaultSettings: {
-        ...(config.codexModel ? { model: config.codexModel } : {}),
-        ...(config.codexReasoningEffort ? { reasoningEffort: config.codexReasoningEffort } : {}),
-        ...(serviceTier ? { serviceTier } : {})
-      }
-    }
-  };
+  const data = currentModelCatalog().runners.codex.fallbackModels.map((model) => ({
+    model: model.id,
+    displayName: model.label,
+    ...(model.description ? { description: model.description } : {}),
+    isDefault: model.isDefault,
+    supportedReasoningEfforts: model.reasoningEfforts.map((reasoningEffort) => ({ reasoningEffort })),
+    ...(model.defaultReasoningEffort ? { defaultReasoningEffort: model.defaultReasoningEffort } : {}),
+    additionalSpeedTiers: model.fast ? ["fast"] : []
+  }));
+  return capabilitiesFromModelList({ data }, config);
 }
 
 export function capabilitiesFromModelList(response: unknown, config: ServiceConfig): CodingAgentCapabilities {

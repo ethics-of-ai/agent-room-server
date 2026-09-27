@@ -6,18 +6,20 @@ import Foundation
 struct ModelCatalogDocument: Codable, Equatable {
     /// Sections keyed as the backend keys them; an absent one means "use bundled".
     struct Runners: Codable, Equatable {
+        var codex: CodexModelCatalog?
         var claudeCode: ClaudeCodeModelCatalog?
         var cursor: CursorModelCatalog?
         var deepseek: DeepSeekModelCatalog?
 
         private enum CodingKeys: String, CodingKey {
+            case codex
             case claudeCode = "claude_code"
             case cursor
             case deepseek
         }
 
         var isEmpty: Bool {
-            claudeCode == nil && cursor == nil && deepseek == nil
+            codex == nil && claudeCode == nil && cursor == nil && deepseek == nil
         }
     }
 

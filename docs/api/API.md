@@ -399,8 +399,9 @@ does not send a service tier override to Codex:
 }
 ```
 
-If Codex is not configured or cannot expose models, the route still returns an
-empty settings list plus a bounded error string.
+If Codex is not configured or cannot expose models, the route returns the
+[model catalog](../engineering/RUNNERS.md#model-catalog)'s Codex fallback list,
+mapped the same way, plus a bounded error string.
 
 For `claude_code`, the backend discovers models live through the Claude Agent
 SDK `supportedModels()` control request and maps them into the same shape with
