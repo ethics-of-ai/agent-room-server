@@ -151,7 +151,8 @@ sign-in or sign-out that just happened.
 DeepSeek requires an executable, composition source, fixed arguments for Node,
 and a provider key. Local checks validate executable, composition, and Node SDK
 entrypoint while the backend is stopped. They do not validate provider access.
-The key is masked and stored in Keychain. A source checkout can
+The key is stored in Keychain and masked unless the operator reveals it. Its
+row can also remove the stored key after a confirmation. A source checkout can
 populate Node, entrypoint, and composition through **Use a source checkout**.
 The chooser reads without executing, resolves paths, confines files to the
 checkout, and rejects comma-containing entrypoints. Review the selected Cordis

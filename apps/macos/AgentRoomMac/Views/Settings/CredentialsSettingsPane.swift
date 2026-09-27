@@ -10,21 +10,8 @@ struct CredentialsSettingsPane: View {
         Form {
             Section("AgentRoom Auth Token") {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    if isAuthTokenVisible {
-                        TextField("Bearer token", text: $authToken)
-                            .font(.system(.body, design: .monospaced))
-                    } else {
-                        SecureField("Bearer token", text: $authToken)
-                    }
-                    Button(
-                        isAuthTokenVisible ? "Hide token" : "Show token",
-                        systemImage: isAuthTokenVisible ? "eye.slash" : "eye",
-                        action: toggleTokenVisibility
-                    )
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .help(isAuthTokenVisible ? "Hide token" : "Show token")
+                    RevealableSecretField(title: "Bearer token", text: $authToken, isRevealed: isAuthTokenVisible)
+                    SecretVisibilityButton(subject: "token", isRevealed: isAuthTokenVisible, action: toggleTokenVisibility)
                     CopyButton(value: trimmedAuthToken, title: "Copy token", isEnabled: !trimmedAuthToken.isEmpty)
                         .buttonStyle(.borderless)
                         .controlSize(.small)
