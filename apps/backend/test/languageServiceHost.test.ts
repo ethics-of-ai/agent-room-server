@@ -244,6 +244,9 @@ describe("language-service host", () => {
       text: "let other = 2\n"
     });
 
+    // `openDocument` resolves once `didOpen` is sent, before the fake server
+    // logs it, so wait for both opens rather than reading the log at once.
+    await waitFor(async () => (await entries(test.log)).filter((entry) => entry.type === "open").length >= 2);
     const log = await entries(test.log);
     expect(log.filter((entry) => entry.type === "start")).toHaveLength(1);
     expect(new Set(log.filter((entry) => entry.type === "open").map((entry) => entry.processNumber)).size).toBe(1);

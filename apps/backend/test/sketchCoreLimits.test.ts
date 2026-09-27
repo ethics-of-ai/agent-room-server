@@ -522,6 +522,8 @@ describe("sketch retention limits", () => {
     expect(forgotten.ok).toBe(true);
   });
 
+  // Building and parsing over 2 MiB of history takes about 2.5 s on a fast Mac
+  // and can pass vitest's 5 s default on a shared CI runner.
   it("round-trips a state whose retained history exceeds the document cap", () => {
     const state = createSketchState("sketch-limits-fat-history");
     // Alternate full-length stroke create/delete: the document never holds
@@ -560,7 +562,7 @@ describe("sketch retention limits", () => {
       expect(parsed.value.history.undo).toHaveLength(working.history.undo.length);
       expect(parsed.value.expiredRequestIds).toEqual([]);
     }
-  });
+  }, 30_000);
 });
 
 describe("sketch stored-document size limit", () => {
