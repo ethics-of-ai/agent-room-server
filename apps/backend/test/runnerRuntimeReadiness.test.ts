@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRunner, AgentRunnerEvent } from "../src/runner/AgentRunner";
+import type { AgentRunner, AgentRunnerEvent, CapabilitiesRequest } from "../src/runner/AgentRunner";
 import type { CodingAgentCapabilities } from "../src/domain/models";
 import { RunnerRuntimeReadiness } from "../src/runner/runtimeReadiness";
 
@@ -45,11 +45,26 @@ describe("runner runtime readiness", () => {
     ).rejects.toThrow("handshake failed");
     expect(readiness.isReady("claude_code")).toBe(false);
   });
+
+  it("passes a refresh through to the adapter", async () => {
+    const readiness = new RunnerRuntimeReadiness();
+    const runner = stubRunner();
+
+    await readiness.discoverCapabilities("claude_code", runner);
+    await readiness.discoverCapabilities("claude_code", runner, { refresh: true });
+
+    expect(runner.requests).toEqual([undefined, { refresh: true }]);
+  });
 });
 
-function stubRunner(options: { error?: string; throws?: Error } = {}): AgentRunner {
+function stubRunner(
+  options: { error?: string; throws?: Error } = {}
+): AgentRunner & { requests: Array<CapabilitiesRequest | undefined> } {
+  const requests: Array<CapabilitiesRequest | undefined> = [];
   return {
-    async getCapabilities(): Promise<CodingAgentCapabilities> {
+    requests,
+    async getCapabilities(request?: CapabilitiesRequest): Promise<CodingAgentCapabilities> {
+      requests.push(request);
       if (options.throws) throw options.throws;
       return {
         runnerKind: "codex",

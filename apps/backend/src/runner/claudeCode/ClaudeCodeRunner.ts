@@ -4,6 +4,7 @@ import { logger } from "../../logging/logger";
 import {
   AgentRunnerInputError,
   type AgentRunner,
+  type CapabilitiesRequest,
   type AgentRunnerActivity,
   type AgentRunnerEvent,
   type AgentRunnerInput,
@@ -12,8 +13,8 @@ import {
 } from "../AgentRunner";
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { delay, withTimeout } from "../shared/asyncUtils";
-import { capabilitiesFromSupportedModels, fallbackClaudeCodeCapabilities } from "./capabilities";
 import { compactionThresholdFromContextUsage } from "./contextUsage";
+import { discoverClaudeCodeCapabilities } from "./discovery";
 import {
   runnerMetadataFromMessage,
   completionFromClaudeCodeMessage,
@@ -128,65 +129,24 @@ export class ClaudeCodeRunner implements AgentRunner {
 
   // Capability discovery spawns a full SDK session; the model list is stable
   // for the process lifetime, so cache it instead of spawning per request.
-  // Fallback responses (carrying an error) are not cached so the next request
-  // retries live discovery.
-  async getCapabilities(): Promise<CodingAgentCapabilities> {
+  // Fallback responses (carrying an error) and a signed-out result are not
+  // cached, so the next request sees a repair the operator has since made.
+  async getCapabilities(request?: CapabilitiesRequest): Promise<CodingAgentCapabilities> {
     const now = Date.now();
-    if (this.capabilitiesCache && now < this.capabilitiesCache.expiresAtMs) {
+    if (!request?.refresh && this.capabilitiesCache && now < this.capabilitiesCache.expiresAtMs) {
       return this.capabilitiesCache.promise;
     }
     const entry = {
-      promise: this.discoverCapabilities(),
+      promise: discoverClaudeCodeCapabilities(this.config, this.loadQuery),
       expiresAtMs: now + CAPABILITIES_CACHE_TTL_MS
     };
     this.capabilitiesCache = entry;
     void entry.promise.then((capabilities) => {
-      if (capabilities.error && this.capabilitiesCache === entry) {
+      if ((capabilities.error || capabilities.checks?.some((check) => check.status === "unavailable")) && this.capabilitiesCache === entry) {
         this.capabilitiesCache = undefined;
       }
     });
     return entry.promise;
-  }
-
-  private async discoverCapabilities(): Promise<CodingAgentCapabilities> {
-    const fallback = fallbackClaudeCodeCapabilities(this.config);
-    let session: { query: ClaudeCodeQuery; input: AsyncEventQueue<unknown> } | undefined;
-    try {
-      const queryFunction = await this.loadQuery();
-      const input = new AsyncEventQueue<unknown>();
-      const query = queryFunction({
-        prompt: input,
-        // Discovery runs in the backend's own cwd, not a registered workspace,
-        // so force isolation: never load or execute that directory's project
-        // settings (hooks, MCP servers) just to read the model list.
-        options: claudeCodeQueryOptions(
-          this.config,
-          process.cwd(),
-          effectiveClaudeCodeSettings(this.config, undefined),
-          { forceIsolation: true }
-        )
-      });
-      session = { query, input };
-      if (!query.supportedModels) {
-        return fallback;
-      }
-      const models = await withTimeout(
-        query.supportedModels(),
-        5_000,
-        "Timed out reading the Claude Code model list"
-      );
-      return capabilitiesFromSupportedModels(models, this.config);
-    } catch (error) {
-      return {
-        ...fallback,
-        error: error instanceof Error ? error.message : String(error)
-      };
-    } finally {
-      if (session) {
-        session.input.close();
-        void Promise.resolve(session.query.return?.(undefined)).catch(() => undefined);
-      }
-    }
   }
 
   validateInputParts(inputParts: AgentRunnerInputPart[] | undefined): void {
@@ -280,6 +240,8 @@ export class ClaudeCodeRunner implements AgentRunner {
 
     const finalEvent = activeTurn.finalEvent;
     const failed = !finalEvent || finalEvent.type === "run_failed";
+    // A sign-in can lapse mid-session; the next readiness read must ask again.
+    if (failed) this.capabilitiesCache = undefined;
     const durationMs = Date.now() - startedAtMs;
     const streamTiming = runnerStreamTimingAudit(timing, startedAtMs);
     logger.info({

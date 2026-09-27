@@ -128,7 +128,24 @@ Codex has a required executable path. Detection includes standalone installs,
 package-manager installs, and ChatGPT's bundled Codex. Claude Code has an
 informational executable path because the SDK includes a CLI, plus a required
 presence-only lookup for the `claude login` Keychain item. The lookup requests
-no secret data.
+no secret data. Presence cannot tell a live sign-in from an expired one, so the
+backend's `claude_login` check is the proof once the backend runs.
+
+The Claude descriptor declares a sign-in command. When the Keychain lookup
+finds nothing or the backend reports `claude_login` as unavailable, Settings
+offers **Sign in to Claude**. It writes a `.command` file that runs
+`claude auth login` with the executable probe's resolved CLI, opens it in
+Terminal, and then offers **Check again**, which reruns both checks. The file
+is user-only, deletes itself when it runs, and quotes the path for zsh. With no
+local CLI the row gives the command to run instead.
+
+When the Keychain item exists and the backend has not reported `claude_login`
+as unavailable, the row offers **Sign out of Claude** instead. A confirmation
+warns that `claude auth logout` removes the Keychain item every `claude` CLI on
+the Mac shares. The command runs in Terminal the same way, followed by
+**Check again**. Both **Check again** and **Check with backend** read
+capabilities with `refresh=true`, so the backend's discovery cache cannot hide a
+sign-in or sign-out that just happened.
 
 DeepSeek requires an executable, composition source, fixed arguments for Node,
 and a provider key. Local checks validate executable, composition, and Node SDK

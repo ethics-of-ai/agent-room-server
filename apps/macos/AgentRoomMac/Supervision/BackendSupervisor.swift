@@ -630,9 +630,14 @@ final class BackendSupervisor {
     /// handshakes, and reads the model list — so this makes no separate call and
     /// adds no route. `GET /api/runners` then reports what it proved, which is
     /// why the catalog is re-read afterwards.
+    /// The operator asked, so the backend reads again rather than answering
+    /// from its discovery cache, which would hide a sign-out for minutes.
     func checkRunnerRuntimeReadiness(runnerKind: String) async {
         do {
-            runnerCapabilityResults[runnerKind] = try await apiClient.fetchCodingAgentCapabilities(runnerKind: runnerKind)
+            runnerCapabilityResults[runnerKind] = try await apiClient.fetchCodingAgentCapabilities(
+                runnerKind: runnerKind,
+                refresh: true
+            )
         } catch {
             runnerCapabilityResults.removeValue(forKey: runnerKind)
             // The readiness observer records a server-side discovery failure

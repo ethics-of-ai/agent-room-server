@@ -872,6 +872,14 @@ the backend and bundled runner children subject to their documented scrubs.
 The Claude Code login probe asks Keychain only whether service
 `Claude Code-credentials` exists. It requests no item data.
 
+**Sign in to Claude** runs the CLI's own `auth login` in Terminal, so the
+operator drives the OAuth flow and the CLI writes its own Keychain item. The
+app fixes the arguments in its bundled descriptor, takes the executable only
+from the Claude executable probe, and never reads the result. This is a
+Mac-local launch of a fixed command, not a backend route, so it does not add a
+shell channel. The backend's `claude_login` check reports only a status and a
+fixed message, never the account email or organization.
+
 A sidecar may be adopted only when its recorded pid, kernel start time,
 executable, port, and ownership of the listening TCP socket still match. An
 unrecorded external backend is never signalled. Identity is rechecked immediately

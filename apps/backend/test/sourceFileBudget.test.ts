@@ -73,7 +73,7 @@ const allowlist: Readonly<Record<string, number>> = {
   "apps/backend/src/agent/AgentSessionService.ts": 894,
   "apps/backend/src/scene/diagram/compose.ts": 866,
   "apps/backend/src/runner/codex/CodexAppServerRunner.ts": 849,
-  "apps/shared/AgentRoomClient/Sources/AgentRoomClient/APIClient.swift": 824,
+  "apps/shared/AgentRoomClient/Sources/AgentRoomClient/APIClient.swift": 817,
   "apps/backend/src/runner/cursor/CursorSdkRunner.ts": 810,
   "apps/backend/src/runner/registry.ts": 800,
   // File opening still belongs beside the window actions that raise the editor.
@@ -84,7 +84,6 @@ const allowlist: Readonly<Record<string, number>> = {
   "apps/backend/src/scene/diagram/humanEdits.ts": 639,
   "apps/visionos/AgentRoom/State/AppStore/AppStore.swift": 623,
   "apps/visionos/AgentRoom/Views/WorkspaceScene/WorkspaceRunnerBuddyView.swift": 621,
-  "apps/backend/src/runner/claudeCode/ClaudeCodeRunner.ts": 613,
   "apps/backend/src/protocol/coding/events.ts": 603,
   "apps/backend/src/agent/AgentTurnEventApplier.ts": 602,
 

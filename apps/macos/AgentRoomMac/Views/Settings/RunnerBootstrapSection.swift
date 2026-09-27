@@ -46,6 +46,9 @@ struct RunnerBootstrapSection: View {
                 }
             }
             RunnerRuntimeReadinessRow(runnerKind: runner.runnerKind)
+            if let descriptor, let signIn = descriptor.signIn {
+                RunnerSignInRow(descriptor: descriptor, signIn: signIn)
+            }
         }
     }
 

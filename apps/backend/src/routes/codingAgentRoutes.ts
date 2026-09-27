@@ -9,6 +9,10 @@ const capabilitiesQuerySchema = z.object({
   runnerKind: agentRunnerKindSchema.optional()
 });
 
+const capabilitiesReadQuerySchema = capabilitiesQuerySchema.extend({
+  refresh: z.enum(["true", "false"]).optional()
+});
+
 export interface CodingAgentRoutesInput {
   runners: Partial<Record<AgentRunnerKind, AgentRunner>>;
   defaultRunnerKind: AgentRunnerKind;
@@ -35,7 +39,7 @@ export async function registerCodingAgentRoutes(app: FastifyInstance, input: Cod
     return test.result;
   });
   app.get("/api/coding-agent/capabilities", async (request, reply) => {
-    const parsed = capabilitiesQuerySchema.safeParse(request.query);
+    const parsed = capabilitiesReadQuerySchema.safeParse(request.query);
     if (!parsed.success) {
       return reply.code(400).send({ error: "Invalid capabilities query" });
     }
@@ -44,6 +48,6 @@ export async function registerCodingAgentRoutes(app: FastifyInstance, input: Cod
     if (!runner) {
       return reply.code(400).send({ error: `Runner kind ${runnerKind} is not configured` });
     }
-    return input.readiness.discoverCapabilities(runnerKind, runner);
+    return input.readiness.discoverCapabilities(runnerKind, runner, { refresh: parsed.data.refresh === "true" });
   });
 }

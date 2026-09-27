@@ -1,5 +1,5 @@
 import type { AgentRunnerKind, CodingAgentCapabilities } from "../domain/models";
-import type { AgentRunner } from "./AgentRunner";
+import type { AgentRunner, CapabilitiesRequest } from "./AgentRunner";
 
 /**
  * Backend runtime readiness, as defined by docs/engineering/RUNNERS.md.
@@ -59,10 +59,11 @@ export class RunnerRuntimeReadiness {
    */
   async discoverCapabilities(
     runnerKind: AgentRunnerKind,
-    runner: AgentRunner
+    runner: AgentRunner,
+    request?: CapabilitiesRequest
   ): Promise<CodingAgentCapabilities> {
     try {
-      const capabilities = await runner.getCapabilities();
+      const capabilities = await runner.getCapabilities(request);
       this.observed.set(runnerKind, capabilities.error === undefined);
       return capabilities;
     } catch (error) {

@@ -297,8 +297,17 @@ export type AgentRunnerEvent =
       totalTokens?: number;
     };
 
+/**
+ * `refresh` skips an adapter's cached discovery and stores the fresh answer.
+ * A client sends it when the operator has changed something the cache would
+ * hide, such as signing a CLI out. Adapters without a cache ignore it.
+ */
+export interface CapabilitiesRequest {
+  refresh?: boolean;
+}
+
 export interface AgentRunner {
-  getCapabilities(): Promise<CodingAgentCapabilities>;
+  getCapabilities(request?: CapabilitiesRequest): Promise<CodingAgentCapabilities>;
   /** Explicit provider call using a fixed prompt and no workspace/tool authority. */
   testConnection?(): Promise<{ ok: boolean; message: string }>;
   validateInputParts(inputParts: AgentRunnerInputPart[] | undefined): void;

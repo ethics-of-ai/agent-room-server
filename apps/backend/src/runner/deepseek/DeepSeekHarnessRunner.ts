@@ -7,6 +7,7 @@ import type { CodingAgentCapabilities, ServiceConfig } from "../../domain/models
 import { logger } from "../../logging/logger";
 import type {
   AgentRunner,
+  CapabilitiesRequest,
   AgentRunnerActivity,
   AgentRunnerEvent,
   AgentRunnerInput,
@@ -227,9 +228,9 @@ export class DeepSeekHarnessRunner implements AgentRunner {
    * Successful results are cached per process; a result carrying an error is
    * not, so the next request retries a runtime the operator has since fixed.
    */
-  async getCapabilities(): Promise<CodingAgentCapabilities> {
+  async getCapabilities(request?: CapabilitiesRequest): Promise<CodingAgentCapabilities> {
     const now = Date.now();
-    if (this.capabilitiesCache && now < this.capabilitiesCache.expiresAtMs) {
+    if (!request?.refresh && this.capabilitiesCache && now < this.capabilitiesCache.expiresAtMs) {
       return this.capabilitiesCache.promise;
     }
     const entry = { promise: this.probeCapabilities(), expiresAtMs: now + CAPABILITIES_CACHE_TTL_MS };

@@ -496,11 +496,17 @@ export interface CodingAgentSettingsDescriptor {
   defaultSettings: CodingAgentTurnSettings;
 }
 
+export interface CodingAgentReadinessCheck {
+  id: string;
+  status: "ready" | "unavailable" | "not_checked";
+  message: string;
+}
+
 export interface CodingAgentCapabilities {
   runnerKind: AgentRunnerKind;
   settings: CodingAgentSettingsDescriptor;
   error?: string;
-  checks?: Array<{ id: string; status: "ready" | "unavailable" | "not_checked"; message: string }>;
+  checks?: CodingAgentReadinessCheck[];
   connectionTestAvailable?: boolean;
   sessionNotice?: string;
   modelSelectionScope?: "turn" | "session";

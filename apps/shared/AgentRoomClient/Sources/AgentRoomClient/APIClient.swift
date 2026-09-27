@@ -87,11 +87,6 @@ public struct APIClient {
         )
     }
 
-    public func fetchCodingAgentCapabilities(runnerKind: String? = nil) async throws -> CodingAgentCapabilitiesResponse {
-        let queryItems = runnerKind.map { [URLQueryItem(name: "runnerKind", value: $0)] } ?? []
-        return try await request(["api", "coding-agent", "capabilities"], queryItems: queryItems)
-    }
-
     public func fetchWorkspaces() async throws -> LocalWorkspaceRegistrySnapshot {
         try await request("api/workspaces")
     }

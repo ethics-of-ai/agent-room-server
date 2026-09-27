@@ -5,6 +5,7 @@ import { logger } from "../../logging/logger";
 import { redactSecrets } from "../../util/redactSecrets";
 import type {
   AgentRunner,
+  CapabilitiesRequest,
   AgentRunnerEvent,
   AgentRunnerInput,
   AgentRunnerInputPart,
@@ -185,9 +186,9 @@ export class CursorSdkRunner implements AgentRunner {
    * successful result is cached per process; one carrying an error is not, so
    * the next request retries a runner the operator has since signed into.
    */
-  async getCapabilities(): Promise<CodingAgentCapabilities> {
+  async getCapabilities(request?: CapabilitiesRequest): Promise<CodingAgentCapabilities> {
     const now = Date.now();
-    if (this.capabilitiesCache && now < this.capabilitiesCache.expiresAtMs) {
+    if (!request?.refresh && this.capabilitiesCache && now < this.capabilitiesCache.expiresAtMs) {
       return this.capabilitiesCache.promise;
     }
     const entry = { promise: this.probeCapabilities(), expiresAtMs: now + CAPABILITIES_CACHE_TTL_MS };

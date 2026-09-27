@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../src/server";
 import { getServiceConfig } from "../src/config/serviceConfig";
-import type { AgentRunner, AgentRunnerEvent } from "../src/runner/AgentRunner";
+import type { AgentRunner, AgentRunnerEvent, CapabilitiesRequest } from "../src/runner/AgentRunner";
 import type { AgentRunnerKind, CodingAgentCapabilities } from "../src/domain/models";
 import { registeredRunnerKinds } from "../src/runner/registry";
 
@@ -137,6 +137,23 @@ describe("GET /api/runners", () => {
       });
     });
 
+    it("asks the adapter to skip its cache only when refresh=true", async () => {
+      await withEnv(async () => {
+        const claudeCode = new ProbeCountingRunner("claude_code");
+        await withServer(async (app) => {
+          const base = "/api/coding-agent/capabilities?runnerKind=claude_code";
+          await app.inject({ method: "GET", url: base });
+          await app.inject({ method: "GET", url: `${base}&refresh=false` });
+          await app.inject({ method: "GET", url: `${base}&refresh=true` });
+          expect(claudeCode.requests).toEqual([{ refresh: false }, { refresh: false }, { refresh: true }]);
+
+          const invalid = await app.inject({ method: "GET", url: `${base}&refresh=yes` });
+          expect(invalid.statusCode).toBe(400);
+          expect(claudeCode.requests).toHaveLength(3);
+        }, { claude_code: claudeCode });
+      });
+    });
+
     it("separates a runner that cannot start from one that is merely unconfigured", async () => {
       await withEnv(async () => {
         // The adapters report a failed handshake as a bounded `error` on the
@@ -196,14 +213,16 @@ function runnerNamed(runners: { runnerKind: string }[], runnerKind: string): Rec
 /** An adapter that answers discovery instantly and counts being asked. */
 class ProbeCountingRunner implements AgentRunner {
   probes = 0;
+  readonly requests: Array<CapabilitiesRequest | undefined> = [];
 
   constructor(
     private readonly runnerKind: AgentRunnerKind,
     private readonly error?: string
   ) {}
 
-  async getCapabilities(): Promise<CodingAgentCapabilities> {
+  async getCapabilities(request?: CapabilitiesRequest): Promise<CodingAgentCapabilities> {
     this.probes += 1;
+    this.requests.push(request);
     return {
       runnerKind: this.runnerKind,
       settings: { models: [], defaultSettings: {} },

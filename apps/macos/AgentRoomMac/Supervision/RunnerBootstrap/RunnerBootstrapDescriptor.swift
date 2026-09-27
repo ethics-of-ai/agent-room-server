@@ -29,6 +29,9 @@ struct RunnerBootstrapDescriptor: Equatable, Identifiable {
     /// Presentation only, and bundled like the rest of this contract: a note is
     /// a sentence this build shipped, never something the backend can supply.
     var notes: [RunnerBootstrapNote] = []
+    /// The runner's own sign-in, offered when its credential is missing or the
+    /// backend reports that it no longer works.
+    var signIn: RunnerSignInCommand? = nil
 
     var id: String { runnerKind }
 

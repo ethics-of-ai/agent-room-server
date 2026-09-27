@@ -76,6 +76,12 @@ export function completionFromClaudeCodeMessage(message: unknown): AgentRunnerEv
     };
   }
 
+  // A turn that fails before reaching the model (not logged in, an API error)
+  // arrives as a success subtype flagged `is_error`, with the reason in `result`.
+  if (subtype === "success") {
+    return { type: "run_failed", error: stringValue(object.result) || "Claude Code turn failed without a reason" };
+  }
+
   const errors = arrayValue(object.errors).flatMap((error) => {
     const text = stringValue(error);
     return text ? [text] : [];

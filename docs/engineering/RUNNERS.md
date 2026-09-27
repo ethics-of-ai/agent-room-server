@@ -57,6 +57,18 @@ deltas, cancels through the SDK's `interrupt()`, and resumes with the SDK's
 native session id. The adapter owns SDK event mapping and the exact permission
 mode vocabulary.
 
+A turn the CLI rejects before calling the model, such as a signed-out CLI,
+arrives as a `success` result with `is_error` set. The adapter fails the turn
+with the result text rather than the subtype.
+
+Capability discovery reads `accountInfo()` from the same isolated child that
+answers `supportedModels()`. Neither is a model call. A first-party provider
+that reports `tokenSource: "none"` and no API key source fails the
+`claude_login` check as `unavailable`. A `claude auth login` subscription
+omits `tokenSource`, so a missing field reads as signed in. Bedrock, Vertex, and gateway providers always pass. The probe
+loads no project settings, so a workspace whose project settings supply an API
+key helper can read as signed out here and still run turns.
+
 Project settings, billing, and isolation are trust decisions rather than runner
 architecture. See
 [`Claude Code workspace configuration and billing`](../safety/TRUST_AND_SAFETY.md#claude-code-workspace-configuration-and-billing).
@@ -121,7 +133,9 @@ executable path, environment name, Keychain slot, or probe from the backend.
 
 Capability discovery must remain lazy. It must not create N probe children at
 startup. Current successful results are cached where the adapter's cost makes
-that useful.
+that useful. Claude Code and DeepSeek do not cache a result with an
+`unavailable` check, and Claude Code drops its cache when a turn fails, so a
+repaired sign-in shows on the next read.
 
 ## Managed settings
 

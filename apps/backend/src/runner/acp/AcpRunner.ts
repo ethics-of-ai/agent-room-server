@@ -7,6 +7,7 @@ import { redactSecrets } from "../../util/redactSecrets";
 import {
   AgentRunnerInputError,
   type AgentRunner,
+  type CapabilitiesRequest,
   type AgentRunnerActivity,
   type AgentRunnerEvent,
   type AgentRunnerInput,
@@ -185,9 +186,9 @@ export class AcpRunner implements AgentRunner {
    * the honest readiness signal
    * (`runner/runtimeReadiness.ts` reads exactly that).
    */
-  async getCapabilities(): Promise<CodingAgentCapabilities> {
+  async getCapabilities(request?: CapabilitiesRequest): Promise<CodingAgentCapabilities> {
     const cached = this.capabilityCache;
-    if (cached && Date.now() - cached.at < CAPABILITY_CACHE_MS) return cached.capabilities;
+    if (!request?.refresh && cached && Date.now() - cached.at < CAPABILITY_CACHE_MS) return cached.capabilities;
 
     const empty = { models: [], defaultSettings: {} };
     let session: AcpSession | undefined;

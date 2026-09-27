@@ -14,6 +14,8 @@ export interface ClaudeCodeQuery extends AsyncIterable<unknown> {
    * leave the runner working, with no threshold reported.
    */
   getContextUsage?(): Promise<unknown>;
+  /** The signed-in account, read from the child without a model call. */
+  accountInfo?(): Promise<unknown>;
   return?(value?: unknown): Promise<IteratorResult<unknown>>;
 }
 

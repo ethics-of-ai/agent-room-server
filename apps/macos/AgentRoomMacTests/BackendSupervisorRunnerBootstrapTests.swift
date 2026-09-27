@@ -185,6 +185,8 @@ final class BackendSupervisorRunnerBootstrapTests: XCTestCase {
 
         await supervisor.checkRunnerRuntimeReadiness(runnerKind: "codex")
 
+        // An operator's check must not be answered from the backend cache.
+        XCTAssertEqual(RunnerReadinessFailureURLProtocol.capabilitiesQuery, "runnerKind=codex&refresh=true")
         XCTAssertEqual(supervisor.runnerCatalog.descriptor(for: "codex").ready, false)
         XCTAssertTrue(supervisor.diagnostics.contains { $0.message.contains("Runner readiness check failed") })
     }

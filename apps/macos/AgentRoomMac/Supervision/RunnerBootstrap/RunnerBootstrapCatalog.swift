@@ -108,9 +108,11 @@ enum RunnerBootstrapCatalog {
                 actionTitle: "Check Claude Code sign-in",
                 actionSymbol: "person.badge.key",
                 messages: RunnerBootstrapProbeMessages(
-                    satisfied: "Claude Code is signed in. Turns bill your claude login subscription.",
-                    detected: "Claude Code is signed in. Turns bill your claude login subscription.",
-                    absent: "No Claude Code sign-in found. Run claude login in Terminal, then rerun this check.",
+                    // Presence cannot tell a live sign-in from an expired
+                    // one; the backend's sign-in check below is the proof.
+                    satisfied: "Found a Claude Code sign-in on this Mac. Turns bill your claude login subscription.",
+                    detected: "Found a Claude Code sign-in on this Mac. Turns bill your claude login subscription.",
+                    absent: "No Claude Code sign-in found. Sign in to Claude, then rerun this check.",
                     failure: "Could not verify Claude Code sign-in (%@).",
                     blockingAbsent: "Sign in with claude login so Claude Code turns can authenticate.",
                     blockingFailed: "Resolve the Claude Code sign-in check error.",
@@ -167,7 +169,18 @@ enum RunnerBootstrapCatalog {
                     blockingUnchecked: ""
                 )
             )
-        ]
+        ],
+        // Every claude CLI reads and writes the same Keychain item, so signing
+        // in with the resolved CLI signs in the one the backend launches.
+        signIn: RunnerSignInCommand(
+            title: "Sign in to Claude",
+            executableProbeID: "executable",
+            arguments: ["auth", "login"],
+            signOutTitle: "Sign out of Claude",
+            signOutArguments: ["auth", "logout"],
+            credentialProbeID: "signIn",
+            readinessCheckID: "claude_login"
+        )
     )
 
     private static let deepseek = RunnerBootstrapDescriptor(

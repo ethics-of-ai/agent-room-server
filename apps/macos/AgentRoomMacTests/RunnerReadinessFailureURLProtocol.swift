@@ -4,6 +4,9 @@ import Foundation
 /// discovery fails after the backend records `ready: false`, then the public
 /// catalog read returns that recorded answer.
 final class RunnerReadinessFailureURLProtocol: URLProtocol {
+    /// The query of the last capabilities request, for asserting what it asked.
+    nonisolated(unsafe) static var capabilitiesQuery: String?
+
     static func session() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RunnerReadinessFailureURLProtocol.self]
@@ -26,6 +29,7 @@ final class RunnerReadinessFailureURLProtocol: URLProtocol {
         let payload: (status: Int, body: String)
         switch url.path {
         case "/api/coding-agent/capabilities":
+            Self.capabilitiesQuery = url.query
             payload = (500, #"{"error":"runner spawn failed"}"#)
         case "/api/runners":
             payload = (

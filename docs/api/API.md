@@ -335,7 +335,9 @@ never resolved to a known runner. See `docs/safety/TRUST_AND_SAFETY.md` and
 
 Capabilities may include `checks`, each with an `id`, a `status` of `ready`,
 `unavailable`, or `not_checked`, and a safe `message`. DeepSeek uses `runtime`,
-`provider`, and `agent_tools`. Optional `connectionTestAvailable` enables an
+`provider`, and `agent_tools`. Claude Code uses `claude_login`, which carries no
+account identity. An `unavailable` check does not change the runner's `ready`
+state. Optional `connectionTestAvailable` enables an
 explicit test action. `sessionNotice` explains continuation limitations, and
 `modelSelectionScope: "session"` tells clients that an existing conversation's
 model is fixed. Missing fields preserve older-client behavior.
@@ -355,7 +357,10 @@ an AgentRoom session or claim lasting provider readiness.
 for the configured coding agent. The optional
 `?runnerKind=codex|claude_code|deepseek|cursor`
 query selects a specific runner; without it the route serves the backend's
-default runner (`RUNNER_KIND`). For Codex JSON-RPC, the backend asks the local
+default runner (`RUNNER_KIND`). Adapters cache discovery for up to five minutes.
+`?refresh=true` skips that cache and stores the fresh answer, for a client
+reacting to an operator action such as a sign-out. `refresh` accepts only
+`true` or `false`; any other value returns `400`. For Codex JSON-RPC, the backend asks the local
 Codex app-server for `model/list` and maps visible model, optional advertised
 context window token capacity, reasoning effort, and speed choices into a
 stable AgentRoom shape. Codex speed is presented as `standard` and, when the model

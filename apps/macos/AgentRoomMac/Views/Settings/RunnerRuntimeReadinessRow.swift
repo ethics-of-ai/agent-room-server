@@ -22,8 +22,12 @@ struct RunnerRuntimeReadinessRow: View {
                 Text(notice).font(.callout).foregroundStyle(.secondary)
             }
             ForEach(result.checks ?? []) { check in
-                Label(check.message, systemImage: check.status == "ready" ? "checkmark.circle" : "info.circle")
-                    .foregroundStyle(.secondary)
+                if check.status == "unavailable" {
+                    StatusMessageRow(message: check.message, style: StatusStyle(systemImage: "exclamationmark.triangle.fill", tint: .orange))
+                } else {
+                    Label(check.message, systemImage: check.status == "ready" ? "checkmark.circle" : "info.circle")
+                        .foregroundStyle(.secondary)
+                }
             }
             if result.connectionTestAvailable == true {
                 Button("Test provider connection", systemImage: "network", action: testConnection)
