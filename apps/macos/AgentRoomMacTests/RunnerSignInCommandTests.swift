@@ -1,7 +1,7 @@
 import XCTest
 @testable import AgentRoomMac
 
-/// The Claude sign-in runs a fixed command in Terminal. These pin that the
+/// A runner sign-in runs a fixed command in Terminal. These pin that the
 /// command is the one the descriptor declares and that no path can break out
 /// of its quoting.
 final class RunnerSignInCommandTests: XCTestCase {
@@ -17,8 +17,24 @@ final class RunnerSignInCommandTests: XCTestCase {
         XCTAssertNotNil(descriptor.probe(signIn.credentialProbeID))
     }
 
+    func testCodexDescriptorSignsInWithTheResolvedCLI() throws {
+        let descriptor = RunnerBootstrapTestSupport.descriptor("codex")
+        let signIn = try XCTUnwrap(descriptor.signIn)
+
+        XCTAssertEqual(signIn.arguments, ["login"])
+        XCTAssertEqual(signIn.signOutArguments, ["logout"])
+        XCTAssertEqual(signIn.readinessCheckID, "codex_login")
+        XCTAssertNotNil(descriptor.probe(signIn.executableProbeID)?.resolvedSlotID)
+        let credential = try XCTUnwrap(descriptor.probe(signIn.credentialProbeID))
+        XCTAssertEqual(credential.kind, .filePresence(path: "~/.codex/auth.json"))
+        // A Keychain-stored or relocated Codex sign-in writes no file there,
+        // so a missing file must not block setup.
+        XCTAssertEqual(credential.requirement, .informational)
+    }
+
     func testOtherRunnersOfferNoSignIn() {
-        XCTAssertNil(RunnerBootstrapTestSupport.descriptor("codex").signIn)
+        XCTAssertNil(RunnerBootstrapTestSupport.descriptor("deepseek").signIn)
+        XCTAssertNil(RunnerBootstrapTestSupport.descriptor("cursor").signIn)
     }
 
     func testScriptQuotesTheExecutableAndDeletesItself() throws {

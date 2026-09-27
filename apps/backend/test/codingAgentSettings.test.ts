@@ -80,7 +80,8 @@ describe("coding agent settings", () => {
           reasoningEffort: "minimal",
           serviceTier: "standard"
         }
-      }
+      },
+      checks: [{ id: "codex_login", status: "ready", message: "Codex is signed in." }]
     });
 
     await app.close();
@@ -147,6 +148,8 @@ describe("coding agent settings", () => {
 
     expect(capabilities.settings.models.map((model) => model.id)).toEqual(["gpt-fast", "gpt-deep"]);
     expect(messages.map((message) => message.method)).toContain("model/list");
+    expect(messages.find((message) => message.method === "account/read")?.params).toEqual({ refreshToken: false });
+    expect(capabilities.checks).toEqual([{ id: "codex_login", status: "ready", message: "Codex is signed in." }]);
 
     await runner.dispose();
   });
@@ -272,6 +275,11 @@ rl.on("line", (line) => {
 
   if (message.method === "initialize") {
     send({ id: message.id, result: { userAgent: "fake-codex", codexHome: "/tmp/codex", platformFamily: "unix", platformOs: "macos" } });
+    return;
+  }
+
+  if (message.method === "account/read") {
+    send({ id: message.id, result: { account: { type: "chatgpt", email: "fixture@example.com", planType: "plus" }, requiresOpenaiAuth: true } });
     return;
   }
 

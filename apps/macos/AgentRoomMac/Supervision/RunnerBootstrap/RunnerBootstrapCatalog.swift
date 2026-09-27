@@ -89,8 +89,44 @@ enum RunnerBootstrapCatalog {
                     blockingFailed: "Resolve the Codex executable check error.",
                     blockingUnchecked: "Set or check the Codex executable path."
                 )
+            ),
+            RunnerBootstrapProbe(
+                id: "signIn",
+                // The file `codex login` writes under the default CODEX_HOME.
+                // Presence only, as the Cursor lookup: the path is stat'ed and
+                // never opened, because the file is the credential. The
+                // backend's `codex_login` check is the proof once it runs.
+                kind: .filePresence(path: "~/.codex/auth.json"),
+                // Informational, unlike Claude Code's: a Codex configured to
+                // keep its sign-in in the Keychain, or under another
+                // CODEX_HOME, writes no file here and must not be blocked.
+                requirement: .informational,
+                actionTitle: "Check Codex sign-in",
+                actionSymbol: "person.badge.key",
+                messages: RunnerBootstrapProbeMessages(
+                    satisfied: "Found a Codex sign-in on this Mac. Turns bill the account codex login used.",
+                    detected: "Found a Codex sign-in on this Mac. Turns bill the account codex login used.",
+                    absent: "No Codex sign-in found in ~/.codex. Sign in to Codex, then rerun this check.",
+                    failure: "Could not verify Codex sign-in (%@).",
+                    blockingAbsent: "",
+                    blockingFailed: "",
+                    blockingUnchecked: ""
+                )
             )
-        ]
+        ],
+        // Every codex CLI sharing ~/.codex reads the same auth file, so signing
+        // in with the resolved executable signs in the one the backend launches.
+        signIn: RunnerSignInCommand(
+            title: "Sign in to Codex",
+            executableProbeID: "executable",
+            arguments: ["login"],
+            signOutTitle: "Sign out of Codex",
+            signOutArguments: ["logout"],
+            credentialProbeID: "signIn",
+            readinessCheckID: "codex_login",
+            missingExecutableMessage: "No local codex CLI was found to sign in with. Install Codex, or run codex login in a terminal.",
+            signOutWarning: "This signs out every codex CLI on this Mac that uses ~/.codex, including one you use in a terminal. AgentRoom Codex turns stop until you sign in again."
+        )
     )
 
     private static let claudeCode = RunnerBootstrapDescriptor(
@@ -185,7 +221,9 @@ enum RunnerBootstrapCatalog {
             signOutTitle: "Sign out of Claude",
             signOutArguments: ["auth", "logout"],
             credentialProbeID: "signIn",
-            readinessCheckID: "claude_login"
+            readinessCheckID: "claude_login",
+            missingExecutableMessage: "No local claude CLI was found to sign in with. Install Claude Code, or run claude auth login in a terminal.",
+            signOutWarning: "This signs out every claude CLI on this Mac, including one you use in a terminal. AgentRoom turns stop until you sign in again."
         )
     )
 

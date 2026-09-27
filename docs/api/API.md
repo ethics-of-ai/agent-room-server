@@ -335,8 +335,8 @@ never resolved to a known runner. See `docs/safety/TRUST_AND_SAFETY.md` and
 
 Capabilities may include `checks`, each with an `id`, a `status` of `ready`,
 `unavailable`, or `not_checked`, and a safe `message`. DeepSeek uses `runtime`,
-`provider`, and `agent_tools`. Claude Code uses `claude_login`, which carries no
-account identity. An `unavailable` check does not change the runner's `ready`
+`provider`, and `agent_tools`. Claude Code uses `claude_login` and Codex uses
+`codex_login`. Neither carries account identity. An `unavailable` check does not change the runner's `ready`
 state. Optional `connectionTestAvailable` enables an
 explicit test action. `sessionNotice` explains continuation limitations, and
 `modelSelectionScope: "session"` tells clients that an existing conversation's

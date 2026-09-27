@@ -72,7 +72,7 @@ const allowlist: Readonly<Record<string, number>> = {
   // Recorded here rather than attempted.
   "apps/backend/src/agent/AgentSessionService.ts": 894,
   "apps/backend/src/scene/diagram/compose.ts": 866,
-  "apps/backend/src/runner/codex/CodexAppServerRunner.ts": 849,
+  "apps/backend/src/runner/codex/CodexAppServerRunner.ts": 844,
   "apps/shared/AgentRoomClient/Sources/AgentRoomClient/APIClient.swift": 817,
   "apps/backend/src/runner/cursor/CursorSdkRunner.ts": 810,
   "apps/backend/src/runner/registry.ts": 800,

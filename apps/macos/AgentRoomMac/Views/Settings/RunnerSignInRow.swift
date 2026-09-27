@@ -31,7 +31,7 @@ struct RunnerSignInRow: View {
                 .buttonStyle(.borderedProminent)
             } else {
                 SettingsCaption(
-                    text: "No local claude CLI was found to sign in with. Install Claude Code, or run claude auth login in a terminal.",
+                    text: signIn.missingExecutableMessage,
                     systemImage: "exclamationmark.triangle"
                 )
             }
@@ -45,7 +45,7 @@ struct RunnerSignInRow: View {
                     launch(.signOut, executablePath: executablePath)
                 }
             } message: {
-                Text("This signs out every claude CLI on this Mac, including one you use in a terminal. AgentRoom turns stop until you sign in again.")
+                Text(signIn.signOutWarning)
             }
         }
         if let launchError {
@@ -74,7 +74,7 @@ struct RunnerSignInRow: View {
         credential == .absent || loginCheckStatus == "unavailable"
     }
 
-    /// The Keychain item exists and the backend, if it has answered, has not
+    /// The local credential exists and the backend, if it has answered, has not
     /// found it signed out. With the backend stopped the local probe decides.
     private var isSignedIn: Bool {
         credential?.isSatisfied == true && loginCheckStatus != "unavailable"

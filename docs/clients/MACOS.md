@@ -126,7 +126,11 @@ than served because a remotely supplied executable or environment name would be
 code execution by configuration.
 
 Codex has a required executable path. Detection includes standalone installs,
-package-manager installs, and ChatGPT's bundled Codex. Claude Code has an
+package-manager installs, and ChatGPT's bundled Codex. Codex also has an
+informational presence-only check for the `~/.codex/auth.json` file
+`codex login` writes. It is informational because a Codex that keeps its
+sign-in in the Keychain or under another `CODEX_HOME` writes no file there. The
+backend's `codex_login` check is the proof once the backend runs. Claude Code has an
 informational executable path because the SDK includes a CLI, plus a required
 presence-only lookup for the `claude login` Keychain item. The lookup requests
 no secret data. Presence cannot tell a live sign-in from an expired one, so the
@@ -139,6 +143,12 @@ offers **Sign in to Claude**. It writes a `.command` file that runs
 Terminal, and then offers **Check again**, which reruns both checks. The file
 is user-only, deletes itself when it runs, and quotes the path for zsh. With no
 local CLI the row gives the command to run instead.
+
+The Codex descriptor declares the same pair. **Sign in to Codex** runs
+`codex login` with the Codex executable probe's resolved path, and it appears
+when the auth file is missing or the backend reports `codex_login` as
+unavailable. **Sign out of Codex** runs `codex logout` after a confirmation that
+warns it signs out every `codex` CLI sharing `~/.codex`.
 
 When the Keychain item exists and the backend has not reported `claude_login`
 as unavailable, the row offers **Sign out of Claude** instead. A confirmation

@@ -14,6 +14,8 @@ import {
   stringValue
 } from "../shared/jsonValues";
 import { currentModelCatalog } from "../modelCatalog";
+import { withTimeout } from "../shared/asyncUtils";
+import { readCodexLoginCheck, type CodexRequestClient } from "./login";
 import { codexDisplayServiceTier } from "./settings";
 
 const standardSpeedTier: CodingAgentSettingValue = {
@@ -38,6 +40,22 @@ export function fallbackCapabilities(config: ServiceConfig): CodingAgentCapabili
     additionalSpeedTiers: model.fast ? ["fast"] : []
   }));
   return capabilitiesFromModelList({ data }, config);
+}
+
+/**
+ * Reads the model list and the sign-in from an initialized app-server child.
+ * Neither is a model call. A failed sign-in read never fails discovery.
+ */
+export async function readCodexCapabilities(
+  client: CodexRequestClient,
+  config: ServiceConfig
+): Promise<CodingAgentCapabilities> {
+  const response = await withTimeout(
+    client.request("model/list", { includeHidden: false }),
+    2_500,
+    "Timed out reading Codex model list"
+  );
+  return { ...capabilitiesFromModelList(response, config), checks: [await readCodexLoginCheck(client)] };
 }
 
 export function capabilitiesFromModelList(response: unknown, config: ServiceConfig): CodingAgentCapabilities {

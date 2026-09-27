@@ -17,7 +17,7 @@ import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { TimeoutError, delay, withTimeout } from "../shared/asyncUtils";
 import { commandAudit } from "../shared/commandAudit";
 import { objectValue, stringValue } from "../shared/jsonValues";
-import { capabilitiesFromModelList, fallbackCapabilities } from "./capabilities";
+import { fallbackCapabilities, readCodexCapabilities } from "./capabilities";
 import { assistantTextFromCodexExecJsonLine, codexExecJsonOutput, codexTextOutputFilter } from "./execOutput";
 import {
   runnerMetadataFromNotification,
@@ -180,12 +180,7 @@ export class CodexAppServerRunner implements AgentRunner {
           experimentalApi: true
         }
       }), 2_000, "Timed out initializing Codex app-server capabilities");
-      const response = await withTimeout(
-        client.request("model/list", { includeHidden: false }),
-        2_500,
-        "Timed out reading Codex model list"
-      );
-      return capabilitiesFromModelList(response, this.config);
+      return await readCodexCapabilities(client, this.config);
     } catch (error) {
       return {
         ...fallback,

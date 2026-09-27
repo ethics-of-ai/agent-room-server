@@ -86,7 +86,7 @@ shasum -a 256 -c SHA256SUMS.txt
 Open the DMG, drag `AgentRoom.app` to Applications, and launch it. The app
 bundles its own Node.js runtime and the compiled backend, so nothing else has to
 be installed to start the backend. You still need at least one runner: Codex
-(set its executable path in the app), Claude Code (sign in with `claude login`
+(set its executable path and sign in from Settings), Claude Code (sign in with `claude login`
 as the Mac user), Cursor (run the sign-in command in
 [Signing in to Cursor](docs/engineering/CURSOR_SDK_RUNNER.md#credentials-and-billing); a Cursor
 Pro plan or better is required), or DeepSeek Harness (see the

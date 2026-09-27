@@ -131,6 +131,12 @@ The Mac owns a separate bootstrap readiness answer. It checks bundled
 descriptors also form the child launch-environment allowlist. Never source an
 executable path, environment name, Keychain slot, or probe from the backend.
 
+Codex discovery follows `model/list` with the app-server's `account/read`
+(`refreshToken: false`) in the same child. A reply with an account, or one whose
+provider does not require OpenAI auth, passes the `codex_login` check. No
+account where OpenAI auth is required is `unavailable`. A failed or unreadable
+reply is `not_checked` and never fails discovery.
+
 Capability discovery must remain lazy. It must not create N probe children at
 startup. Current successful results are cached where the adapter's cost makes
 that useful. Claude Code and DeepSeek do not cache a result with an

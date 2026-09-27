@@ -891,6 +891,12 @@ Mac-local launch of a fixed command, not a backend route, so it does not add a
 shell channel. The backend's `claude_login` check reports only a status and a
 fixed message, never the account email or organization.
 
+**Sign in to Codex** and **Sign out of Codex** follow the same rule with
+`codex login` and `codex logout`, taking the executable only from the Codex
+executable probe. The Codex sign-in probe only stats `~/.codex/auth.json` and
+never opens it. The backend's `codex_login` check comes from the app-server's
+`account/read` with `refreshToken: false` and drops the account email and plan.
+
 A sidecar may be adopted only when its recorded pid, kernel start time,
 executable, port, and ownership of the listening TCP socket still match. An
 unrecorded external backend is never signalled. Identity is rechecked immediately

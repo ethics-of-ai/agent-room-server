@@ -20,6 +20,10 @@ struct RunnerSignInCommand: Equatable {
     /// The backend readiness check that proves the credential still works.
     /// `unavailable` offers sign-in even when the local credential exists.
     var readinessCheckID: String
+    /// Shown instead of the button when no local CLI resolved.
+    var missingExecutableMessage: String
+    /// The sign-out confirmation: what else on the Mac loses its sign-in.
+    var signOutWarning: String
 
     /// The Terminal script. It deletes itself first, so a stale copy cannot be
     /// reopened, and every path and argument is single-quoted for zsh.
