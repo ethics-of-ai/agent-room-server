@@ -34,7 +34,8 @@ version, or before trusting a new external agent with real work.
 ## Prerequisites
 
 - A local `codex` binary. The ChatGPT app bundles one at
-  `/Applications/ChatGPT.app/Contents/Resources/codex`; any installed `codex`
+  `/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`
+  (older releases used `Contents/Resources/codex`); any installed `codex`
   works. The ACP agent finds it through `CODEX_PATH`.
 - `@agentclientprotocol/codex-acp` installed. The spike drove 1.4.0. Use the
   maintained `@agentclientprotocol/*` package, **not** the retired
@@ -57,7 +58,7 @@ Everything below is one shell session. Nothing here is committed.
 ```bash
 export REPO=/Users/me/repos/agent-room                       # this checkout
 export CONF=$HOME/.agentroom-acp-conformance                 # scratch, outside the repo
-export CODEX_PATH=/Applications/ChatGPT.app/Contents/Resources/codex
+export CODEX_PATH=/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
 export NODE_BIN="$(command -v node)"
 mkdir -p "$CONF"
 

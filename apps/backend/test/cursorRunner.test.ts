@@ -214,6 +214,25 @@ describe("CursorSdkRunner", () => {
     expect(events.at(-1)).toMatchObject({ type: "run_succeeded" });
   });
 
+  it("serves a relayed call that arrives in the same chunk as the send answer", async () => {
+    // The host may answer \`agent/send\` and relay its first tool call before the
+    // backend has recorded the run id; that call belongs to the live turn.
+    const host = await writeFakeHost({ askQuestion: true, relayInSendChunk: true });
+    const serviceConfig = await config();
+    const runner = new CursorSdkRunner(serviceConfig, { hostModulePath: host, questionTimeoutMs: 40 });
+    const events = await collect(runner.run({
+      runId: "agentroom-turn-same-chunk",
+      sessionId: "agent-session-same-chunk",
+      workspacePath: serviceConfig.workspaceRoot,
+      prompt: "Which client first?"
+    }));
+    await runner.dispose();
+
+    expect(canonicalOf(events, "question_requested")).toHaveLength(1);
+    expect(canonicalOf(events, "question_resolved")[0]).toMatchObject({ status: "timeout", decidedBy: "timeout" });
+    expect(assistantText(events)).toContain("chose: (timeout)");
+  });
+
   it("still serves the legacy question/ask shim with the same behavior", async () => {
     // The relay's first method remains answered: an older host's `question/ask`
     // funnels into the same bound dispatch as `tools/invoke`.
@@ -529,11 +548,13 @@ describe("Cursor fallback catalog", () => {
     expect(byId.get("default")).toMatchObject({ isDefault: true, reasoningEfforts: [], serviceTiers: [] });
     expect(byId.get("composer-2.5")?.reasoningEfforts).toEqual([]);
     expect(byId.get("composer-2.5")?.serviceTiers.map((tier) => tier.id)).toEqual(["standard", "fast"]);
-    expect(byId.get("claude-opus-5")?.reasoningEfforts.map((effort) => effort.id))
+    expect(byId.get("claude-sonnet-5")?.reasoningEfforts.map((effort) => effort.id))
       .toEqual(["low", "medium", "high", "xhigh", "max"]);
-    expect(byId.get("gpt-5.3-codex")?.reasoningEfforts.map((effort) => effort.id))
-      .toEqual(["low", "medium", "high", "extra-high"]);
+    expect(byId.get("gpt-5.6-sol")?.reasoningEfforts.map((effort) => effort.id))
+      .toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
     expect(byId.get("claude-sonnet-5")?.serviceTiers).toEqual([]);
+    // A model whose parameters were never recorded carries none.
+    expect(byId.get("claude-opus-5-5")).toMatchObject({ reasoningEfforts: [], serviceTiers: [] });
   });
 
   it("reports the catalog's own default when nothing is configured", () => {
@@ -561,6 +582,12 @@ async function writeFakeHost(options: {
   rejectInitialize?: boolean;
   malformedInitialize?: boolean;
   shutdownMarkerPath?: string;
+  /**
+   * Write the `agent/send` answer and everything the turn emits before its
+   * first wait (messages and the relayed tool call) as one stdout chunk, so the
+   * backend reads the call in the same pass as the answer carrying the run id.
+   */
+  relayInSendChunk?: boolean;
 } = {}): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "agentroom-fake-cursor-host-"));
   const path = join(root, "fake-cursor-host.cjs");
@@ -576,7 +603,11 @@ let nextRunId = 0;
 let nextRequestId = 0;
 const pending = new Map();
 
-function send(frame) { process.stdout.write(JSON.stringify(frame) + "\\n"); }
+let chunk;
+function send(frame) {
+  const line = JSON.stringify(frame) + "\\n";
+  if (chunk) chunk.push(line); else process.stdout.write(line);
+}
 function notify(method, params) { send({ jsonrpc: "2.0", method, params }); }
 function message(runId, msg) { notify("run/message", { runId, message: msg }); }
 function backendRequest(method, params) {
@@ -654,7 +685,12 @@ rl.on("line", (line) => {
         process.stderr.write("cursor host: crashed with an active run\\n");
         process.exit(3);
       }
-      { sendModel = msg.params.model; sendForce = Boolean(msg.params.force); const runId = "run-" + (++nextRunId); respond({ runId }); void runTurn(runId, lastRunId); lastRunId = runId; } return;
+      {
+        sendModel = msg.params.model; sendForce = Boolean(msg.params.force); const runId = "run-" + (++nextRunId);
+        if (options.relayInSendChunk) chunk = [];
+        respond({ runId }); void runTurn(runId, lastRunId); lastRunId = runId;
+        if (chunk) { const lines = chunk; chunk = undefined; process.stdout.write(lines.join("")); }
+      } return;
     case "run/cancel":
       // A hung run is never settled here; the adapter's ladder kills the child.
       respond({}); return;

@@ -1,0 +1,65 @@
+{
+  "$comment": "Static model data for runners whose live discovery can fail or does not exist. Live discovery always wins where a runner has it. Edit by hand; src/runner/modelCatalog.ts validates this file at load. See docs/engineering/RUNNERS.md#model-catalog.",
+  "schemaVersion": 1,
+  "runners": {
+    "claude_code": {
+      "reasoningEfforts": [
+        { "id": "low", "label": "Low", "description": "Minimal thinking, fastest responses" },
+        { "id": "medium", "label": "Medium", "description": "Moderate thinking" },
+        { "id": "high", "label": "High", "description": "Deep reasoning" },
+        { "id": "xhigh", "label": "Xhigh", "description": "Deeper than high on supported models" }
+      ],
+      "fallbackModels": [
+        { "id": "opus", "label": "Opus", "description": "Latest Opus, best for everyday, complex tasks" },
+        {
+          "id": "claude-fable-5-1",
+          "label": "Fable 5.1",
+          "description": "Most capable for your hardest and longest-running tasks"
+        },
+        { "id": "sonnet", "label": "Sonnet", "description": "Latest Sonnet, efficient for routine tasks" },
+        {
+          "id": "haiku",
+          "label": "Haiku",
+          "description": "Latest Haiku, fastest for quick answers",
+          "reasoningEfforts": []
+        }
+      ]
+    },
+    "cursor": {
+      "fallbackModels": [
+        { "id": "default", "label": "Auto", "description": "Cursor picks the model", "isDefault": true },
+        {
+          "id": "composer-2.5",
+          "label": "Composer 2.5",
+          "description": "Cursor's own coding model",
+          "speed": { "defaultFast": true }
+        },
+        { "id": "claude-opus-5-5", "label": "Claude Opus 5.5" },
+        {
+          "id": "claude-sonnet-5",
+          "label": "Claude Sonnet 5",
+          "contextWindowTokens": 1000000,
+          "depth": { "parameter": "effort", "values": ["low", "medium", "high", "xhigh", "max"], "defaultValue": "high" }
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "label": "GPT-5.6 Sol",
+          "contextWindowTokens": 1000000,
+          "depth": {
+            "parameter": "reasoning",
+            "values": ["none", "low", "medium", "high", "xhigh", "max"],
+            "defaultValue": "medium"
+          },
+          "speed": { "defaultFast": false }
+        },
+        { "id": "gpt-5.6-terra", "label": "GPT-5.6 Terra" }
+      ]
+    },
+    "deepseek": {
+      "models": [
+        { "id": "deepseek-flash", "label": "DeepSeek V4.1 Flash", "description": "Fast and capable, the default" },
+        { "id": "deepseek-v4-pro", "label": "DeepSeek V4 Pro", "description": "Previous-generation large model" }
+      ]
+    }
+  }
+}

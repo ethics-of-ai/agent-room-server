@@ -18,7 +18,7 @@ export const DEFAULT_DEEPSEEK_PROVIDER = "deepseek-official";
  * unprovable until the operator guessed one — and refusing a turn that names no
  * model would refuse the very default the same response advertised.
  */
-export const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
+export const DEFAULT_DEEPSEEK_MODEL = "deepseek-flash";
 
 /**
  * The runtime that serves this protocol, named for diagnostics only.

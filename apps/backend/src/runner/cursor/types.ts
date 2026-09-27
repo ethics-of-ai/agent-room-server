@@ -14,6 +14,14 @@ import type { CursorTurnState } from "./messageMapper";
 export interface CursorActiveTurn {
   runId: string;
   cursorRunId?: string;
+  /**
+   * Settles with the host's run id once `agent/send` answers, or with
+   * `undefined` when the turn ends without one. The host can relay its first
+   * tool call in the same stdout chunk as that answer, before `cursorRunId` is
+   * recorded, so the relay waits on this rather than reading the call as stale.
+   */
+  cursorRunIdKnown: Promise<string | undefined>;
+  settleCursorRunId: (runId: string | undefined) => void;
   sendAttempted: boolean;
   queue: AsyncEventQueue<AgentRunnerEvent>;
   finalEvent?: AgentRunnerEvent;

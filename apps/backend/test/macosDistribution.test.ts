@@ -501,7 +501,7 @@ describe("macOS distribution packaging", () => {
     expect(distribution.isMachOHeader(Buffer.from([0x7f]))).toBe(false);
     expect(
       distribution.isPublisherSignedBinary(
-        "/x/AgentRoom.app/Contents/Resources/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-darwin-arm64@0.3.172/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
+        "/x/AgentRoom.app/Contents/Resources/node_modules/.pnpm/@anthropic-ai+claude-agent-sdk-darwin-arm64@0.3.283/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude"
       )
     ).toBe(true);
     expect(

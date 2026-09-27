@@ -4,6 +4,7 @@ import type {
   CodingAgentSettingValue,
   ServiceConfig
 } from "../../domain/models";
+import { currentModelCatalog } from "../modelCatalog";
 import { arrayValue, booleanValue, objectValue, stringValue } from "../shared/jsonValues";
 
 /**
@@ -57,60 +58,17 @@ export interface CursorModelCatalog {
 export const DEFAULT_CURSOR_MODEL = "default";
 
 /**
- * The offline fallback, seeded from the catalog recorded on 2026-08-26 against
- * `@cursor/sdk@1.0.28`. Deliberately small and open: what a client sees when the
- * live read fails, and what the adapter maps parameters against until a live
- * list arrives. The model id stays an open bounded string
+ * The offline fallback, read from `modelCatalog.json`. Parameters come from a
+ * live list recorded on 2026-08-26 against `@cursor/sdk@1.0.28`; entries added
+ * later from Cursor's docs carry none until a live list confirms them. Deliberately small and open: what a
+ * client sees when the live read fails, and what the adapter maps parameters
+ * against until a live list arrives. The model id stays an open bounded string
  * (`codingAgentModelIdSchema`), so an operator-configured model this list has
  * never heard of is still the default rather than coerced to a listed id.
  */
-export const fallbackCursorCatalog: CursorModelCatalog = {
-  source: "fallback",
-  models: [
-    { id: DEFAULT_CURSOR_MODEL, label: "Auto", description: "Cursor picks the model", isDefault: true },
-    {
-      id: "composer-2.5",
-      label: "Composer 2.5",
-      description: "Cursor's own coding model",
-      speed: { defaultFast: true },
-      isDefault: false
-    },
-    {
-      id: "claude-opus-5",
-      label: "Claude Opus 5",
-      contextWindowTokens: 1_000_000,
-      depth: { parameter: "effort", values: ["low", "medium", "high", "xhigh", "max"], defaultValue: "high" },
-      speed: { defaultFast: false },
-      isDefault: false
-    },
-    {
-      id: "claude-sonnet-5",
-      label: "Claude Sonnet 5",
-      contextWindowTokens: 1_000_000,
-      depth: { parameter: "effort", values: ["low", "medium", "high", "xhigh", "max"], defaultValue: "high" },
-      isDefault: false
-    },
-    {
-      id: "gpt-5.6-sol",
-      label: "GPT-5.6 Sol",
-      contextWindowTokens: 1_000_000,
-      depth: {
-        parameter: "reasoning",
-        values: ["none", "low", "medium", "high", "xhigh", "max"],
-        defaultValue: "medium"
-      },
-      speed: { defaultFast: false },
-      isDefault: false
-    },
-    {
-      id: "gpt-5.3-codex",
-      label: "Codex 5.3",
-      depth: { parameter: "reasoning", values: ["low", "medium", "high", "extra-high"], defaultValue: "high" },
-      speed: { defaultFast: true },
-      isDefault: false
-    }
-  ]
-};
+export function fallbackCursorCatalog(): CursorModelCatalog {
+  return { source: "fallback", models: currentModelCatalog().runners.cursor.fallbackModels };
+}
 
 /**
  * Parse the raw `Cursor.models.list()` reply into a catalog. Returns `undefined`
@@ -180,12 +138,12 @@ export function cursorCapabilities(
 
 /** The fallback catalog's descriptor, with the bounded error a failed probe reports. */
 export function fallbackCursorCapabilities(config: ServiceConfig, error?: string): CodingAgentCapabilities {
-  return cursorCapabilities(fallbackCursorCatalog, config, error);
+  return cursorCapabilities(fallbackCursorCatalog(), config, error);
 }
 
 /** The live reply's descriptor, or the fallback's when the reply is unusable. */
 export function cursorCapabilitiesFromModels(response: unknown, config: ServiceConfig): CodingAgentCapabilities {
-  return cursorCapabilities(cursorCatalogFromModels(response) ?? fallbackCursorCatalog, config);
+  return cursorCapabilities(cursorCatalogFromModels(response) ?? fallbackCursorCatalog(), config);
 }
 
 function modelOption(model: CursorCatalogModel, isDefault: boolean): CodingAgentModelOption {

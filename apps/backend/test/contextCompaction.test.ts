@@ -84,7 +84,7 @@ describe("Claude Code compaction mapping", () => {
   it("ignores a subagent compacting its own window", () => {
     // Its context is not this thread's, the same rule the occupancy read
     // applies. Neither compaction message declares `parent_tool_use_id` today
-    // (SDK 0.3.172), so this pins a guard against the SDK growing one rather
+    // (SDK 0.3.283), so this pins a guard against the SDK growing one rather
     // than behavior the current wire can produce.
     for (const message of [
       { type: "system", subtype: "status", status: "compacting", parent_tool_use_id: "tool-1" },

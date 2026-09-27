@@ -189,7 +189,7 @@ describe("Cursor model selection", () => {
   it("maps against the fallback catalog until a live one arrives", () => {
     expect(
       cursorModelSelection(
-        fallbackCursorCatalog,
+        fallbackCursorCatalog(),
         effectiveCursorSettings(config(), { model: "gpt-5.6-sol", reasoningEffort: "xhigh", serviceTier: "standard" })
       )
     ).toEqual({ id: "gpt-5.6-sol", params: [{ id: "reasoning", value: "xhigh" }, { id: "fast", value: "false" }] });
@@ -256,7 +256,7 @@ describe("Cursor capability descriptor", () => {
 describe("Cursor agent-start posture", () => {
   it("always disallows askQuestion; AgentRoom tools are composed from the catalog, not the posture", () => {
     const settings = effectiveCursorSettings(config(), undefined);
-    const model = cursorModelSelection(fallbackCursorCatalog, settings);
+    const model = cursorModelSelection(fallbackCursorCatalog(), settings);
     const on = cursorAgentStartPosture(config(), settings, model);
     expect(on.model).toEqual({ id: "default" });
     expect(on.disallowedTools).toEqual(["askQuestion"]);
@@ -273,7 +273,7 @@ describe("Cursor agent-start posture", () => {
   it("forces settingSources empty when workspace settings are off", () => {
     const serviceConfig = config({ cursorLoadWorkspaceSettings: false });
     const settings = effectiveCursorSettings(serviceConfig, undefined);
-    const model = cursorModelSelection(fallbackCursorCatalog, settings);
+    const model = cursorModelSelection(fallbackCursorCatalog(), settings);
     expect(cursorAgentStartPosture(serviceConfig, settings, model).settingSources).toEqual([]);
   });
 

@@ -211,33 +211,33 @@ describe("claude code settings", () => {
 });
 
 describe("claude code capabilities", () => {
-  it("returns the hardcoded fallback catalog when discovery is unavailable", () => {
-    const capabilities = fallbackClaudeCodeCapabilities(config({ claudeCodeModel: "claude-sonnet-5" }));
+  it("returns the model catalog fallback when discovery is unavailable", () => {
+    const capabilities = fallbackClaudeCodeCapabilities(config({ claudeCodeModel: "sonnet" }));
 
     expect(capabilities.runnerKind).toBe("claude_code");
     expect(capabilities.settings.models.map((model) => model.id)).toEqual([
-      "claude-opus-5",
-      "claude-fable-5",
-      "claude-sonnet-5",
-      "claude-haiku-4-5"
+      "opus",
+      "claude-fable-5-1",
+      "sonnet",
+      "haiku"
     ]);
-    expect(capabilities.settings.models.find((model) => model.isDefault)?.id).toBe("claude-sonnet-5");
+    expect(capabilities.settings.models.find((model) => model.isDefault)?.id).toBe("sonnet");
     expect(capabilities.settings.models[0].serviceTiers).toEqual([]);
     expect(capabilities.settings.defaultSettings).toEqual({
-      model: "claude-sonnet-5",
+      model: "sonnet",
       reasoningEffort: "high"
     });
   });
 
   it("advertises no effort levels for a fallback model that does not accept them", () => {
-    const capabilities = fallbackClaudeCodeCapabilities(config({ claudeCodeModel: "claude-haiku-4-5" }));
-    const haiku = capabilities.settings.models.find((model) => model.id === "claude-haiku-4-5");
+    const capabilities = fallbackClaudeCodeCapabilities(config({ claudeCodeModel: "haiku" }));
+    const haiku = capabilities.settings.models.find((model) => model.id === "haiku");
 
     // Haiku takes no effort level; advertising one would both break the client
     // picker and send an unsupported effortLevel to the SDK.
     expect(haiku?.reasoningEfforts).toEqual([]);
     expect(haiku?.defaultReasoningEffort).toBeUndefined();
-    expect(capabilities.settings.defaultSettings).toEqual({ model: "claude-haiku-4-5" });
+    expect(capabilities.settings.defaultSettings).toEqual({ model: "haiku" });
   });
 
   it("maps SDK supportedModels output into the AgentRoom capabilities shape", () => {
@@ -298,7 +298,7 @@ describe("claude code capabilities", () => {
   it("falls back to the catalog when discovery returns no models", () => {
     const capabilities = capabilitiesFromSupportedModels([], config());
     expect(capabilities.settings.models.length).toBeGreaterThan(0);
-    expect(capabilities.settings.models[0].id).toBe("claude-opus-5");
+    expect(capabilities.settings.models[0].id).toBe("opus");
   });
 
   it("keeps default reasoning efforts inside the model's discovered effort list", () => {

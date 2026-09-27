@@ -1,6 +1,7 @@
 import { buildServer } from "./server";
 import { getServiceConfig } from "./config/serviceConfig";
 import { writeRunnerCatalogFile } from "./config/runnerCatalogFile";
+import { installModelCatalog, loadModelCatalog, resolveModelCatalogPath } from "./runner/modelCatalog";
 import { booleanEnv } from "./config/env";
 import { startParentExitWatchdog } from "./util/parentExitWatchdog";
 import { installShutdownHandlers } from "./util/shutdown";
@@ -9,6 +10,7 @@ import { logger } from "./logging/logger";
 async function main(): Promise<void> {
   armParentExitWatchdog();
   const config = getServiceConfig();
+  await installLocalModelCatalog(config.agentRoomHome);
   const { app } = await buildServer({ config });
   // Installed once the server exists and before it listens, so the SIGINT the
   // macOS app sends on quit runs the close hooks (runner children SIGTERMed,
@@ -25,6 +27,22 @@ async function main(): Promise<void> {
     { host: config.host, port: config.port, runnerKind: config.runnerKind, mode: "agent-bridge" },
     "AgentRoom backend listening"
   );
+}
+
+/**
+ * Applies the operator's `config/models.json` for this process's lifetime. The
+ * macOS Models pane writes it and restarts the backend, the same apply rule as
+ * managed settings. A rejected file leaves the bundled catalog in place.
+ */
+async function installLocalModelCatalog(agentRoomHome: string | undefined): Promise<void> {
+  const path = resolveModelCatalogPath(agentRoomHome);
+  const loaded = await loadModelCatalog(path);
+  installModelCatalog(loaded.catalog);
+  if (loaded.error) {
+    logger.warn({ path, reason: loaded.error }, "Ignoring invalid local model catalog; using the bundled catalog");
+  } else if (loaded.source === "local") {
+    logger.info({ path }, "Using local model catalog");
+  }
 }
 
 /**

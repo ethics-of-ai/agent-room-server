@@ -166,17 +166,22 @@ struct BackendRuntimeLocator {
 
     func locateRuntime() throws -> BackendRuntime {
         let nodeCandidates = explicitCandidate(named: "AGENTROOM_NODE_EXECUTABLE").map { [$0] } ?? defaultNodeCandidates()
-        let backendCandidates = explicitCandidate(named: "AGENTROOM_BACKEND_ENTRYPOINT").map { [$0] }
-            ?? bundledRuntimeCandidates + developmentRuntimeCandidates
 
         guard let nodeExecutableURL = nodeCandidates.first(where: isExecutableFile) else {
             throw BackendRuntimeLocatorError.missingNode(candidates: nodeCandidates.map(\.path))
         }
+        return BackendRuntime(nodeExecutableURL: nodeExecutableURL, backendEntrypointURL: try locateBackendEntrypoint())
+    }
+
+    /// The compiled backend entrypoint alone, for reading files the backend
+    /// ships beside it without needing a Node runtime.
+    func locateBackendEntrypoint() throws -> URL {
+        let backendCandidates = explicitCandidate(named: "AGENTROOM_BACKEND_ENTRYPOINT").map { [$0] }
+            ?? bundledRuntimeCandidates + developmentRuntimeCandidates
         guard let backendEntrypointURL = backendCandidates.first(where: fileExists) else {
             throw BackendRuntimeLocatorError.missingBackendEntrypoint(candidates: backendCandidates.map(\.path))
         }
-
-        return BackendRuntime(nodeExecutableURL: nodeExecutableURL, backendEntrypointURL: backendEntrypointURL)
+        return backendEntrypointURL
     }
 
     private func explicitCandidate(named name: String) -> URL? {

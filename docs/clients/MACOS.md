@@ -21,6 +21,7 @@ in [DeepSeek Harness](../engineering/DEEPSEEK_HARNESS_RUNNER.md) and
 - Mirror backend sessions, transcripts, metrics, events, and active-turn cancel.
 - Display pairing URLs and export secret-redacted diagnostics.
 - Import and validate data-only editor catalogs.
+- Edit the local model catalog at `$AGENTROOM_HOME/config/models.json`.
 - Run the source-controlled Sparkle update channel.
 
 The Threads dashboard is read and control UI over backend sessions. It does not
@@ -210,6 +211,25 @@ fetches and verifies every blob before activating the generation. The
 [catalog API](../api/API.md#editor-language-catalog) owns the wire contract;
 [language-catalog safety](../safety/TRUST_AND_SAFETY.md#language-catalog) owns
 validation, activation, and import bounds.
+
+## Model catalog
+
+The Models pane edits the local copy of the backend's model catalog, whose
+loader and precedence live in
+[`RUNNERS.md`](../engineering/RUNNERS.md#model-catalog). It reads the bundled
+catalog from `dist/runner/modelCatalog.json` beside the backend entrypoint the
+app launches. Each runner's list starts from the local copy when that copy
+lists the runner, and from the bundled catalog otherwise.
+
+A save writes only the runner sections that differ from the bundled catalog,
+so untouched runners keep receiving app updates. A section edited back to the
+bundled list is dropped, and a save with no differing section removes the file.
+The app writes the file directly and atomically, so editing works while the
+backend is stopped. It checks the backend's rules first, trims fields the way
+the backend schema does, and refuses to save while any rule fails. The backend
+reads the file only at startup. A save made while the backend runs therefore
+offers a restart, the same apply rule as managed settings. An existing file the
+app cannot read is reported, and saving replaces it.
 
 ## Updates
 

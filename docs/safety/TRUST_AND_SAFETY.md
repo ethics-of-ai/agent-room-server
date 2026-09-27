@@ -91,6 +91,17 @@ may not name both for one setting. `valueKind` and `options` describe the schema
 `config_reloaded` and its audit projection carry changed key names only, never
 values.
 
+### Model catalog
+
+`$AGENTROOM_HOME/config/models.json` is operator data, like `settings.json`,
+but it is not a managed setting. No route reads or writes it, so a bearer
+token or paired client cannot change it. Only the Mac app writes it. It
+decides which model ids the fallback and DeepSeek pickers offer and which one
+an unconfigured Claude Code or Cursor fallback turn runs, so it can steer
+provider usage. It cannot override live discovery or an operator-configured
+model. The backend reads at most 256 KiB, validates it with the same strict
+schema as the bundled catalog, and uses the bundled catalog when it fails.
+
 ### Runner catalog and readiness
 
 `GET /api/runners` exposes only runner id, display name, `registered`,

@@ -12,6 +12,9 @@ struct SettingsView: View {
             RunnerSettingsPane()
                 .tabItem { Label("Runner", systemImage: "cpu") }
 
+            ModelCatalogSettingsPane()
+                .tabItem { Label("Models", systemImage: "list.bullet.rectangle") }
+
             EditorCatalogSettingsPane()
                 .tabItem { Label("Languages", systemImage: "curlybraces") }
 

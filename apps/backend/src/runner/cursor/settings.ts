@@ -64,7 +64,7 @@ export interface CursorEffectiveSettings {
 export function effectiveCursorSettings(
   config: ServiceConfig,
   settings: CodingAgentTurnSettings | undefined,
-  catalog: CursorModelCatalog = fallbackCursorCatalog
+  catalog: CursorModelCatalog = fallbackCursorCatalog()
 ): CursorEffectiveSettings {
   return {
     modelId: settings?.model ?? defaultCursorModelId(catalog, config),

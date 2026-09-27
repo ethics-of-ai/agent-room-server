@@ -141,7 +141,7 @@ export class CursorSdkRunner implements AgentRunner {
    * than a wrong posture. The capability *response* keeps its five-minute cache
    * so a client's picker still refreshes.
    */
-  private catalog: CursorModelCatalog = fallbackCursorCatalog;
+  private catalog: CursorModelCatalog = fallbackCursorCatalog();
 
   constructor(
     private readonly config: ServiceConfig,
@@ -258,8 +258,14 @@ export class CursorSdkRunner implements AgentRunner {
     const startedAtMs = Date.now();
     const timing = createRunnerStreamTiming();
     const command = cursorCommandAudit();
+    let settleCursorRunId: (runId: string | undefined) => void = () => undefined;
+    const cursorRunIdKnown = new Promise<string | undefined>((resolve) => {
+      settleCursorRunId = resolve;
+    });
     const activeTurn: CursorActiveTurn = {
       runId: input.runId,
+      cursorRunIdKnown,
+      settleCursorRunId,
       queue: new AsyncEventQueue<AgentRunnerEvent>(),
       completed: false,
       sendAttempted: false,
@@ -312,6 +318,7 @@ export class CursorSdkRunner implements AgentRunner {
       const sendResult = agentSendResultSchema.parse(sendResponse);
       if (force) this.forceNextSends.delete(session.key);
       activeTurn.cursorRunId = sendResult.runId;
+      activeTurn.settleCursorRunId(sendResult.runId);
       activeTurn.queue.push(this.turnStartedEvent(session, sendResult.runId));
 
       for await (const event of activeTurn.queue) {
@@ -324,6 +331,8 @@ export class CursorSdkRunner implements AgentRunner {
         error: redactSecrets(error instanceof Error ? error.message : String(error))
       };
     } finally {
+      // A relayed call still waiting on the run id is answered as stale.
+      activeTurn.settleCursorRunId(undefined);
       this.activeTurns.delete(input.runId);
       if (session) {
         disposeCursorTurnTools(session);

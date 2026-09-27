@@ -408,7 +408,8 @@ reasoning effort choices (`low`, `medium`, `high`, `xhigh`) and an empty
 `serviceTiers` list (Claude Code has no speed-tier analog). Successful
 discovery results are cached briefly per backend process so repeated
 capability reads do not each spawn an SDK session. If discovery fails, a
-hardcoded fallback catalog of current Claude model aliases is returned with a
+fallback catalog of current Claude model aliases from the backend's
+[model catalog](../engineering/RUNNERS.md#model-catalog) is returned with a
 bounded error string; fallback responses are not cached, so the next request
 retries live discovery.
 
@@ -461,7 +462,7 @@ Note that `reasoningEffort` on a turn is an **open id bounded by shape**, not a
 closed vocabulary: the list a client renders comes from the model's own
 `reasoningEfforts`, and a registered runner may advertise values outside the
 Codex and Claude Code managed-setting vocabulary (a configured ACP adapter can offer `max` or `ultra`; Cursor
-offers `extra-high` and `max`). The closed `none|minimal|low|medium|high|xhigh`
+offers `extra-high` and `max`; Codex 0.158 offers `max` and `ultra` on newer models). The closed `none|minimal|low|medium|high|xhigh`
 vocabulary still bounds the `codexReasoningEffort` and
 `claudeCodeReasoningEffort` *managed settings*, which `GET /api/config` reports
 as those keys' `options`; `cursorReasoningEffort` is open for the reason above,

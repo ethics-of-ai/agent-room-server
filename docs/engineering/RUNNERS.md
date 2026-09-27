@@ -281,6 +281,30 @@ runner fails instead of being dropped. ACP maps only the reserved `model` and
 `thought_level` selectors. It does not expose `mode`, since that value can
 widen the agent's sandbox without the tier-2 settings gate.
 
+## Model catalog
+
+`apps/backend/src/runner/modelCatalog.json` holds the static model data. It has
+the Claude Code effort vocabulary and offline fallback list, the Cursor offline
+fallback list with each model's depth parameter name, and the whole DeepSeek
+list. `runner/modelCatalog.ts` validates it with zod when the backend loads, so
+a bad edit fails startup and `modelCatalog.test.ts` rather than a turn.
+
+Live discovery wins wherever a runner has it: Codex `model/list`, Claude Code
+`supportedModels()`, and Cursor `models/list`. Codex and ACP take nothing from
+the file. An operator-configured model is always the default. Without one,
+DeepSeek uses the `DEFAULT_DEEPSEEK_MODEL` constant, the Cursor fallback uses
+its `isDefault` entry, which the test pins to `DEFAULT_CURSOR_MODEL`, and the
+Claude Code fallback uses its first entry. The file is hand-edited and mirrored
+with the rest of `apps/backend`.
+
+An operator's local copy at `$AGENTROOM_HOME/config/models.json` is read once
+at startup. Each runner section it lists replaces the bundled section, and
+omitted runners keep the bundled data. A missing copy is normal. An unreadable,
+oversized, or invalid copy is logged and ignored, so a bad edit cannot stop the
+backend. The macOS Models pane writes this copy; see
+[`MACOS.md`](../clients/MACOS.md#model-catalog). The trust posture is in
+[`TRUST_AND_SAFETY.md`](../safety/TRUST_AND_SAFETY.md#model-catalog).
+
 ## External ACP adapters
 
 The ACP v1 adapter is off by default. `ACP_ADAPTERS_ENABLED` gates a whole

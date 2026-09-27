@@ -7,6 +7,19 @@ import Security
 /// bootstrap contract, executed by one prober that knows probe *kinds* and never
 /// which runner it is looking at.
 final class RunnerBootstrapTests: XCTestCase {
+    func testCodexSearchPrefersChatGPTsPackagedCLIOverTheRetiredFlatPath() throws {
+        let probe = try XCTUnwrap(RunnerBootstrapTestSupport.descriptor("codex").probes.first { $0.id == "executable" })
+        guard case .executablePath(_, let search) = probe.kind else {
+            return XCTFail("the Codex executable probe should search for a path")
+        }
+        let packaged = try XCTUnwrap(search.absoluteCandidates.firstIndex(of:
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"))
+        let flat = try XCTUnwrap(search.absoluteCandidates.firstIndex(of: "/Applications/ChatGPT.app/Contents/Resources/codex"))
+        // The packaged binary, not its `bin/codex` shell wrapper, which needs PATH tools.
+        XCTAssertLessThan(packaged, flat)
+        XCTAssertFalse(search.absoluteCandidates.contains { $0.hasSuffix("codex-cli/bin/codex") })
+    }
+
     func testExecutableProbeKeepsAStoredPathThatStillResolves() throws {
         let installed = temporaryURL(named: "codex")
         try RunnerBootstrapTestSupport.makeExecutableFile(at: installed)

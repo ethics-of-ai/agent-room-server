@@ -1,10 +1,10 @@
 import type {
   CodingAgentCapabilities,
   CodingAgentModelOption,
-  CodingAgentReasoningEffort,
   CodingAgentSettingValue,
   ServiceConfig
 } from "../../domain/models";
+import { codingAgentReasoningEffortIdSchema } from "../../domain/settingValueSchemas";
 import {
   arrayValue,
   booleanValue,
@@ -175,16 +175,13 @@ function uniqueSettingValues(values: CodingAgentSettingValue[]): CodingAgentSett
   });
 }
 
-function reasoningEffortValue(value: unknown): CodingAgentReasoningEffort | undefined {
-  if (
-    value === "none" ||
-    value === "minimal" ||
-    value === "low" ||
-    value === "medium" ||
-    value === "high" ||
-    value === "xhigh"
-  ) {
-    return value;
-  }
-  return undefined;
+/**
+ * Codex names its own effort levels in `model/list`, and newer releases add
+ * levels such as `max` and `ultra`. Any id of the shared bounded shape passes
+ * through, so the picker offers what Codex offers; a turn can only select an
+ * advertised level, and the value reaches Codex as a config value, never a shell.
+ */
+function reasoningEffortValue(value: unknown): string | undefined {
+  const parsed = codingAgentReasoningEffortIdSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }

@@ -71,15 +71,18 @@ async function dispatchCursorToolCall(
   input: unknown,
   hostRunId?: string
 ): Promise<string> {
-  const binding = session.toolBinding;
-  if (!binding) return unboundAgentToolResult(tool);
   const turn = session.activeTurn;
-  if (hostRunId !== undefined && turn?.cursorRunId !== hostRunId) {
+  if (hostRunId !== undefined) {
     // The generation handle: a callback from a run that is not the session's
     // live turn — a late or replayed relay — is answered with the tool's
     // unavailable text, never dispatched into whichever turn is active now.
-    return unboundAgentToolResult(tool);
+    // The live run's first call can arrive in the same chunk as the
+    // `agent/send` answer, before the run id is recorded, so wait for it.
+    const liveRunId = turn ? turn.cursorRunId ?? (await turn.cursorRunIdKnown) : undefined;
+    if (liveRunId !== hostRunId || session.activeTurn !== turn) return unboundAgentToolResult(tool);
   }
+  const binding = session.toolBinding;
+  if (!binding) return unboundAgentToolResult(tool);
   return binding.invoke(tool, input);
 }
 

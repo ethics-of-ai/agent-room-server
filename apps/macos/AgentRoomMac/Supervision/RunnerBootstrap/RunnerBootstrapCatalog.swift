@@ -60,8 +60,14 @@ enum RunnerBootstrapCatalog {
                         absoluteCandidates: [
                             // Since the Codex desktop integration moved into
                             // ChatGPT, the bundled executable ships from
-                            // ChatGPT.app. The standalone bundle path stays as a
-                            // compatibility fallback for older installations.
+                            // ChatGPT.app. Newer ChatGPT releases move it into a
+                            // `codex-cli` package; its `bin/codex` is a shell
+                            // wrapper that needs PATH tools, so the native
+                            // binary it execs is listed instead. The older
+                            // flat path and the standalone bundle stay as
+                            // fallbacks for older installations.
+                            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+                            "~/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
                             "/Applications/ChatGPT.app/Contents/Resources/codex",
                             "~/Applications/ChatGPT.app/Contents/Resources/codex",
                             "/Applications/Codex.app/Contents/Resources/codex",

@@ -264,7 +264,7 @@ function compactionStatusEvents(
 ): AgentRunnerEvent[] {
   // A subagent compacting its own window is not this thread compacting, the
   // same rule `contextOccupancyFromAssistant` applies to occupancy. Neither
-  // compaction message declares `parent_tool_use_id` today (SDK 0.3.172), so
+  // compaction message declares `parent_tool_use_id` today (SDK 0.3.283), so
   // this is a guard against the SDK growing one rather than a filter that
   // currently fires — and if it never does, a subagent's compaction is
   // indistinguishable from the thread's on this wire.

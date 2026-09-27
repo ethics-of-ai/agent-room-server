@@ -5,33 +5,37 @@ import type {
   CodingAgentSettingValue,
   ServiceConfig
 } from "../../domain/models";
-import { arrayValue, booleanValue, labelFromIdentifier, objectValue, stringValue } from "../shared/jsonValues";
+import { currentModelCatalog } from "../modelCatalog";
+import { arrayValue, booleanValue, objectValue, stringValue } from "../shared/jsonValues";
 
-const claudeCodeEffortValues: CodingAgentSettingValue[] = [
-  { id: "low", label: "Low", description: "Minimal thinking, fastest responses" },
-  { id: "medium", label: "Medium", description: "Moderate thinking" },
-  { id: "high", label: "High", description: "Deep reasoning" },
-  { id: "xhigh", label: "Xhigh", description: "Deeper than high on supported models" }
-];
-
-const supportedClaudeCodeEfforts = new Set(claudeCodeEffortValues.map((value) => value.id));
+function claudeCodeEffortValues(): CodingAgentSettingValue[] {
+  return currentModelCatalog().runners.claude_code.reasoningEfforts;
+}
 
 // Offline fallback only: the primary path is live discovery through the SDK
 // supportedModels() control request, which reflects whatever `claude` CLI the
-// runner spawns. Keep this list aligned with current Claude model aliases when
-// it drifts. Haiku carries no effort list because it does not accept an effort
-// level; advertising one would send an unsupported effortLevel to the SDK.
-const fallbackClaudeCodeModels: CodingAgentModelOption[] = [
-  fallbackModel("claude-opus-5", "Opus 5", "Best for everyday, complex tasks"),
-  fallbackModel("claude-fable-5", "Fable 5", "Most capable for the hardest, longest-running tasks"),
-  fallbackModel("claude-sonnet-5", "Sonnet 5", "Efficient for routine tasks"),
-  fallbackModel("claude-haiku-4-5", "Haiku 4.5", "Fastest for quick answers", [])
-];
+// runner spawns. The list lives in the model catalog; keep it aligned with
+// current Claude model aliases when it drifts. A model with an empty effort
+// list (Haiku) does not accept an effort level; advertising one would send an
+// unsupported effortLevel to the SDK.
+function fallbackClaudeCodeModels(): CodingAgentModelOption[] {
+  const vocabulary = claudeCodeEffortValues();
+  return currentModelCatalog().runners.claude_code.fallbackModels.map((model) => {
+    const efforts = model.reasoningEfforts === undefined ? undefined : new Set<string>(model.reasoningEfforts);
+    return fallbackModel(
+      model.id,
+      model.label,
+      model.description,
+      efforts ? vocabulary.filter((effort) => efforts.has(effort.id)) : vocabulary
+    );
+  });
+}
 
 export function fallbackClaudeCodeCapabilities(config: ServiceConfig): CodingAgentCapabilities {
-  const models = fallbackClaudeCodeModels.map((model) => ({
+  const fallback = fallbackClaudeCodeModels();
+  const models = fallback.map((model) => ({
     ...model,
-    isDefault: model.id === (config.claudeCodeModel ?? fallbackClaudeCodeModels[0].id)
+    isDefault: model.id === (config.claudeCodeModel ?? fallback[0].id)
   }));
   return {
     runnerKind: "claude_code",
@@ -96,19 +100,15 @@ function modelOptionFromValue(value: unknown): CodingAgentModelOption | undefine
   if (!object || !id) return undefined;
 
   const supportsEffort = booleanValue(object.supportsEffort) ?? false;
-  const discoveredEfforts = arrayValue(object.supportedEffortLevels)
-    .flatMap((effort) => {
-      const effortId = stringValue(effort);
-      return effortId && supportedClaudeCodeEfforts.has(effortId) ? [effortId] : [];
-    })
-    .map((effortId) => claudeCodeEffortValues.find((candidate) => candidate.id === effortId) ?? {
-      id: effortId,
-      label: labelFromIdentifier(effortId)
-    });
+  const vocabulary = claudeCodeEffortValues();
+  const discoveredEfforts = arrayValue(object.supportedEffortLevels).flatMap((effort) => {
+    const known = vocabulary.find((candidate) => candidate.id === stringValue(effort));
+    return known ? [known] : [];
+  });
   const reasoningEfforts = discoveredEfforts.length > 0
     ? discoveredEfforts
     : supportsEffort
-      ? claudeCodeEffortValues
+      ? vocabulary
       : [];
 
   const defaultReasoningEffort = supportedDefaultEffort(reasoningEfforts);
@@ -126,14 +126,14 @@ function modelOptionFromValue(value: unknown): CodingAgentModelOption | undefine
 function fallbackModel(
   id: string,
   label: string,
-  description: string,
-  reasoningEfforts: CodingAgentSettingValue[] = claudeCodeEffortValues
+  description: string | undefined,
+  reasoningEfforts: CodingAgentSettingValue[]
 ): CodingAgentModelOption {
   const defaultReasoningEffort = supportedDefaultEffort(reasoningEfforts);
   return {
     id,
     label,
-    description,
+    ...(description ? { description } : {}),
     isDefault: false,
     reasoningEfforts,
     ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
