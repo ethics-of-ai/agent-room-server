@@ -1,294 +1,182 @@
-# AgentRoom server and macOS app
+<p align="center">
+  <img src="apps/macos/AgentRoomMac/Assets.xcassets/AppIcon.appiconset/AgentRoomIcon-256.png" alt="AgentRoom" width="128" height="128">
+</p>
 
-[![CI](https://github.com/ethics-of-ai/agent-room-server/actions/workflows/ci.yml/badge.svg)](https://github.com/ethics-of-ai/agent-room-server/actions/workflows/ci.yml)
+<h1 align="center">AgentRoom</h1>
 
-AgentRoom runs coding-agent sessions on a Mac and exposes them to clients over
-REST and WebSocket. The backend registers local folders as workspaces, starts
-Codex, Claude Code, DeepSeek Harness, Cursor, or an external ACP agent inside
-them, owns session state, and streams typed events. The macOS app is the
-operator console: it configures runners, keeps secrets in Keychain, registers
-workspaces, starts and supervises the backend, and shows diagnostics.
+<p align="center">
+  <strong>Spatial Agentic Engineering.</strong><br>
+  Coding agents run in your repositories on your Mac. You direct them from Apple Vision Pro.
+</p>
 
-This repository holds the backend, the macOS app, and the Swift client library
-the Apple apps compile. It does not hold the visionOS app. That app is the main
-session client (threads, editor, source control, spatial diagrams) and is not
-open source yet. The Mac app's Threads view supervises sessions and can stop a
-turn, but it does not send prompts. With this repository alone you run the
-backend and drive turns through its API with `curl` or a client of your own;
-[Local Mac server](docs/operations/LOCAL_MAC_SERVER.md) walks through that.
+<p align="center">
+  <a href="https://github.com/ethics-of-ai/agent-room-server/releases/latest"><strong>Download for Mac</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://testflight.apple.com/join/TVSxh8e2"><strong>Join the Vision Pro TestFlight</strong></a>
+  &nbsp;·&nbsp;
+  <a href="docs/README.md">Docs</a>
+  &nbsp;·&nbsp;
+  <a href="docs/safety/TRUST_AND_SAFETY.md">Security model</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/ethics-of-ai/agent-room-server/actions/workflows/ci.yml"><img src="https://github.com/ethics-of-ai/agent-room-server/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/ethics-of-ai/agent-room-server/releases/latest"><img src="https://img.shields.io/github/v/release/ethics-of-ai/agent-room-server?label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-black?logo=apple" alt="macOS 14+ on Apple Silicon">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+</p>
+
+---
+
+Agents already write code faster than one flat screen can review it. AgentRoom
+gives each agent thread, diff, file, terminal, and diagram its own window, so
+you can arrange your engineering work around you in Vision Pro while the agents
+run on the Mac that holds your code and credentials.
+
+This repository is the open-source half: the **backend** that runs the agents
+and the **macOS app** that sets it up and keeps it running. The visionOS app is
+in TestFlight.
 
 ```mermaid
-flowchart TB
-    client["your client"]
+flowchart LR
+    vp["Apple Vision Pro<br/>AgentRoom (TestFlight)"]
+    other["your own client<br/>REST + WebSocket"]
 
-    subgraph mac["the operator's Mac"]
-        operator["macOS operator app"]
-        backend["Fastify backend"]
-        workspaces["registered local workspaces"]
-        agents["Codex, Claude Code, DeepSeek, Cursor, or ACP agent"]
-
-        operator -->|launches, supervises, REST| backend
-        backend -->|registers| workspaces
-        backend -->|starts inside a workspace| agents
+    subgraph mac["Your Mac"]
+        app["AgentRoom.app<br/>setup and supervision"]
+        backend["AgentRoom backend"]
+        agents["Codex · Claude Code · Cursor<br/>DeepSeek Harness · ACP agents"]
+        repos["your repositories"]
+        app --> backend
+        backend --> agents
+        agents --> repos
     end
 
-    client -->|REST + WebSocket| backend
+    vp --> backend
+    other --> backend
 ```
 
-## What is here
+## Features
 
-| Path | Contents |
-| --- | --- |
-| `apps/backend` | Fastify API, workspace registry, sessions and turns, runner adapters, opt-in editor language services, events, audit, file access, Git operations, terminal sessions, spatial document composition |
-| `apps/macos` | SwiftUI operator app: backend supervision, runner setup, Keychain storage, workspace registration, managed settings, diagnostics |
-| `apps/shared/AgentRoomClient` | Swift API contracts and REST client code compiled into the Apple apps |
-| `scripts` | DMG packaging and local install |
-| `docs` | Architecture, API, operations, trust posture, engineering records |
+**Agents**
+- Codex, Claude Code, Cursor, DeepSeek Harness, and external agents that speak ACP, behind one API.
+- Persistent threads that resume the agent's native conversation after a restart, crash, or update.
+- Live assistant text, reasoning, tool calls, plans, diffs, token usage, and permission prompts.
+- File, folder, and image context on any turn, plus each agent's own skills from the repository.
 
-The backend supports persistent agent threads with live assistant text,
-reasoning, tool activity, plans, diffs, token usage, and permission events;
-explicit file and directory context, runner-native skill discovery, and PNG,
-JPEG, or WebP turn attachments; bounded workspace browsing, quick open, literal
-content search, UTF-8 file writes, single-folder creation, same-parent entry
-rename, same-workspace
-entry move and copy, and bounded
-file/folder deletion; Git status, branches,
-staging, discard, commit, fetch, fast-forward pull, push, and branch creation
-through fixed operations; an optional terminal that opens a real shell on the
-Mac (off by default); an optional closed backend protocol for Mac-hosted
-SourceKit-LSP, bundled TypeScript/JavaScript and Python, and operator-installed
-Rust, Go, Java, Kotlin, and C# semantics, plus separately gated external LSP
-descriptors (off by default); live SVG and Mermaid
-sketches; and composition of
-`*.diagram.json` and `*.scene.json` spatial documents with their human override
-layers.
+**Workspace**
+- Browse, quick open, search, edit, rename, move, copy, and delete files in registered folders.
+- Git status, staging, commit, branches, fetch, pull, and push through fixed operations.
+- An optional terminal and optional editor language services (Swift, TypeScript, Python, Rust, Go, Java, Kotlin, C#). Both are off by default.
 
-The repository sketch API saves human edits in workspace `.sketch.json` files,
-with undo/redo and conflict checks. Saved files survive session deletion.
+**Spatial** (Vision Pro app)
+- Threads, editor, source control, and terminals as separate windows you can place around you.
+- Live SVG and Mermaid sketches, and hand-drawn `.sketch.json` files saved in the repository.
+- Architecture diagrams and scenes you can view and edit in a volume or an immersive space.
 
-## Download
+**Mac app**
+- Starts and supervises the backend, with no Node.js install needed.
+- Finds each agent's CLI, signs you in to Codex and Claude, and keeps keys in the Keychain.
+- Registers workspaces, edits settings, and updates itself through Sparkle.
 
-Each versioned release on the [Releases page](https://github.com/ethics-of-ai/agent-room-server/releases)
-carries `AgentRoom-<version>-arm64.dmg`,
-`AgentRoom-<version>-release.json`, and `SHA256SUMS.txt`. Update-enabled releases
-also carry `appcast.xml`. The
-manifest records the backend/API compatibility policy used by AgentRoom
-clients. Every attached artifact is covered by the checksums. The app
-is signed with a Developer ID certificate and notarized by Apple, so it opens
-like any other downloaded Mac app. Apple Silicon only.
+## Get started
 
-Verify the download before opening it:
+**1. Install the Mac app.** Download `AgentRoom-<version>-arm64.dmg` from
+[Releases](https://github.com/ethics-of-ai/agent-room-server/releases/latest),
+check it, and drag `AgentRoom.app` to Applications. Releases are signed with a
+Developer ID and notarized by Apple.
 
 ```bash
 shasum -a 256 -c SHA256SUMS.txt
 ```
 
-Open the DMG, drag `AgentRoom.app` to Applications, and launch it. The app
-bundles its own Node.js runtime and the compiled backend, so nothing else has to
-be installed to start the backend. You still need at least one runner: Codex
-(set its executable path and sign in from Settings), Claude Code (sign in with `claude login`
-as the Mac user), Cursor (run the sign-in command in
-[Signing in to Cursor](docs/engineering/CURSOR_SDK_RUNNER.md#credentials-and-billing); a Cursor
-Pro plan or better is required), or DeepSeek Harness (see the
-[DeepSeek runner guide](docs/engineering/DEEPSEEK_HARNESS_RUNNER.md)).
+**2. Set up at least one agent** in AgentRoom's Settings.
 
-Signed stable release builds embed the Sparkle release key and check the fixed
-latest-stable appcast once a day. Sparkle still asks before installation. Source
-and unsigned builds contain no key or feed and make no update request.
+| Agent | Setup |
+| --- | --- |
+| Codex | Found automatically, including the copy inside ChatGPT. Choose **Sign in to Codex**. |
+| Claude Code | Bundled. Choose **Sign in to Claude**. |
+| Cursor | Bundled. Sign in as described in [the Cursor guide](docs/engineering/CURSOR_SDK_RUNNER.md#credentials-and-billing). Needs Cursor Pro or better. |
+| DeepSeek Harness | Point it at your runtime and composition. See [the DeepSeek guide](docs/engineering/DEEPSEEK_HARNESS_RUNNER.md). |
 
-Release candidates are isolated from that stable feed. A signed
-`vX.Y.Z-rc.N` build checks the rolling prerelease-only `rc` appcast, whose
-download still points to the exact versioned RC release. To test updating,
-manually install RC.1, have a maintainer publish RC.2 through the private
-release workflow, then use **Check for Updates…** in RC.1. Stable installations
-never query the RC appcast.
+**3. Connect Vision Pro.** Install AgentRoom from
+[TestFlight](https://testflight.apple.com/join/TVSxh8e2). On the Mac, open **Settings > Credentials**,
+choose **Generate Token**, and save. In the Vision Pro app, enter your Mac's
+address (for example `http://my-mac.local:8787`) and paste the token.
 
-Existing stable installations from before this policy change cannot discover
-the first updater-enabled stable release because they contain no Sparkle key.
-Install that release manually once; later stable releases update through the
-stable feed.
+No headset? Drive the backend with `curl` or your own client. The
+[local server guide](docs/operations/LOCAL_MAC_SERVER.md) and the
+[API reference](docs/api/API.md) cover both.
 
 ## Build from source
 
-Requirements:
-
-- macOS 14 or later to run the app; Xcode 26 to build it.
-- Node.js 24 LTS or newer and pnpm 9.15.4 (`npx pnpm` works without a global
-  install).
-- XcodeGen for the Mac project.
-
-Backend:
+You need Xcode 26, Node.js 24 or newer, pnpm 9.15.4 (`npx pnpm` works), and
+XcodeGen.
 
 ```bash
 pnpm install
-cp .env.example .env
+cp .env.example .env        # set CODEX_EXECUTABLE or another runner
+pnpm dev                    # backend on http://localhost:8787
 ```
 
-Set up a runner in `.env`. A direct Codex setup needs at least an absolute
-executable path:
-
-```dotenv
-CODEX_EXECUTABLE=/absolute/path/to/codex
-```
-
-Claude Code uses the Mac user's existing `claude login`. Cursor's SDK is
-bundled; `pnpm --filter @agentroom/backend cursor:login` completes the web
-sign-in it reads. Create a bearer token before connecting another device:
-
-```bash
-npx pnpm --filter @agentroom/backend auth:init
-```
-
-Run in development (port 8787, debug page at `http://localhost:8787`, health
-check at `/health`):
-
-```bash
-pnpm dev
-```
-
-Or compiled:
+The Mac app finds the backend built from this checkout:
 
 ```bash
 pnpm --filter @agentroom/backend build
-pnpm --filter @agentroom/backend start
+cd apps/macos && xcodegen generate && open AgentRoomMac.xcodeproj
 ```
 
-Mac app (build the backend first; development builds of the app find
-`apps/backend/dist/index.js` in this checkout):
+`npx pnpm dist:macos` builds a local DMG. Run
+`pnpm typecheck && pnpm --filter @agentroom/backend build && pnpm test` before
+you open a pull request. [`.env.example`](.env.example) lists every setting, and
+[`apps/macos/README.md`](apps/macos/README.md) covers the app.
 
-```bash
-pnpm --filter @agentroom/backend build
-cd apps/macos
-xcodegen generate
-open AgentRoomMac.xcodeproj
-```
+## Security model
 
-Run the `AgentRoomMac` scheme. The generated Xcode project is not source; edit
-[`apps/macos/project.yml`](apps/macos/project.yml) and regenerate. See
-[`apps/macos/README.md`](apps/macos/README.md) for what the app does and how it
-locates the backend.
+AgentRoom runs agents with your permissions on your Mac. A registered folder is
+not a sandbox.
 
-Local DMG:
+- Agents load the repository's own configuration: `AGENTS.md`, `CLAUDE.md`,
+  skills, hooks, and MCP servers. Only register repositories you trust.
+- Claude Code's default mode is not confined to the workspace. Cursor's sandbox
+  limits writes and network access, not reads.
+- File access stays inside registered folders, checks symlinks, and hides
+  secret-named files. Git accepts fixed operations, never command strings.
+- The backend listens on your network. Set an access token before you connect
+  another device, the terminal, or language services.
 
-```bash
-npx pnpm dist:macos
-```
+Read [Trust and safety](docs/safety/TRUST_AND_SAFETY.md) for the full posture
+and its known gaps. Report vulnerabilities through [`SECURITY.md`](SECURITY.md).
 
-This writes `build/distribution/macos/AgentRoom.app` and `AgentRoom.dmg`. The
-script copies the Node runtime it finds on your machine unless
-`AGENTROOM_NODE_RUNTIME_DIR` points at a full Node.js macOS distribution, and it
-signs and notarizes only when `AGENTROOM_CODESIGN_IDENTITY` and the notary
-variables in [`scripts/package-macos.mjs`](scripts/package-macos.mjs) are set.
-`npx pnpm install:macos` replaces `/Applications/AgentRoom.app` with that build.
+## Bundled agents
 
-Before you change anything, make sure this passes:
+The DMG includes an unmodified Claude Code binary (through the Claude Agent
+SDK) and the unmodified Cursor SDK. You sign in with your own account and plan;
+AgentRoom holds no provider credentials and does not resell usage. Their use is
+governed by [Anthropic's terms](https://code.claude.com/docs/en/legal-and-compliance)
+and [Cursor's Terms of Service](https://cursor.com/terms-of-service). Other
+bundled components are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-```bash
-pnpm typecheck
-pnpm --filter @agentroom/backend build
-pnpm test
-```
+## Contributing
 
-## Configuration and trust
+This repository is a read-only mirror of a private monorepo that also holds the
+visionOS app. Each sync is one commit whose `Source-Commit:` trailer names the
+upstream commit.
 
-Startup values and secrets come from the environment or the Mac app's Keychain
-storage: the bearer token, executable paths, bind address, storage locations.
-Preferences and trust settings live in `$AGENTROOM_HOME/config/settings.json`;
-the Mac app writes that file directly and clients edit it through
-`GET`/`PATCH /api/config`. An environment value wins over the file and locks
-that key, and managed changes apply after a backend restart. The annotated
-[`.env.example`](.env.example) lists every setting; the
-[API reference](docs/api/API.md) documents the managed settings response and
-patch contract.
-
-Agent threads are stored under the state directory (`STATE_DIR/sessions/`,
-beside the audit log and attachments) and survive a backend restart, a crash,
-and an app update. The next turn on a restored thread continues the same
-native conversation; if the runner cannot resume it, the thread says so in a
-system message rather than continuing under the old name. Deleting a thread
-is the only way its record goes away.
-
-Registered does not mean sandboxed. Read these before pointing AgentRoom at a
-repository you did not write:
-
-- Codex loads the workspace's `AGENTS.md`, repository skills, and
-  `.codex/config.toml`, including configured MCP servers and hooks.
-- Claude Code can load the workspace's project settings, hooks, MCP servers,
-  skills, and `CLAUDE.md`. Its default `bypassPermissions` mode is not confined
-  to the registered folder.
-- A DeepSeek turn is bounded by the operator-supplied Cordis composition, which
-  AgentRoom cannot inspect.
-- A Cursor turn is sandboxed by default, and that sandbox bounds writes (the
-  workspace and `/private/tmp`) and network egress, not reads. It loads the
-  workspace's `.cursor/hooks.json`, `.cursor/mcp.json`, rules, and skills
-  unless `CURSOR_LOAD_WORKSPACE_SETTINGS` is off.
-- The optional terminal is off by default. On, it is a real shell on the Mac,
-  unsandboxed after launch.
-- Editor language services are off by default. Their processes may inspect SDKs,
-  language environments, project state, or plugins and may invoke ecosystem
-  build tools, so enable them only for trusted registered projects. Optional
-  Rust, Go, Java, Kotlin, and C# servers require absolute environment-only
-  executable paths; the backend never searches `PATH` for them. External LSP
-  descriptors require a second default-off gate, use fixed argv, and cannot
-  shadow a built-in language id. A stalled language server cannot retain
-  unbounded editor updates: queued input is capped at 4 MiB per child.
-- The backend binds to the LAN by default. Set `AUTH_TOKEN` before connecting a
-  second device or enabling the terminal or editor language services.
-
-Workspace reads stay registered-folder-only, symlink-checked, and secret-name
-filtered. Text reads are bounded; native media previews have no file-size cap
-and stream validated disk-backed snapshots. The one client write is a bounded
-UTF-8 file endpoint with an optimistic lock. Git routes accept fixed operations, not command strings. The
-full posture, including known gaps, is
-[Trust and safety](docs/safety/TRUST_AND_SAFETY.md).
-
-## Ships with Claude Code and the Cursor SDK
-
-The DMG bundles the Claude Agent SDK, which carries an unmodified Claude Code
-binary. AgentRoom starts it as published by Anthropic, and each person signs in
-with their own `claude login`; by default AgentRoom strips Anthropic credentials
-from the child it spawns and intermediates no usage. Use of that binary is
-governed by
-[Anthropic's terms](https://code.claude.com/docs/en/legal-and-compliance).
-
-The DMG also bundles the Cursor SDK and its Anysphere-signed helper binaries,
-unmodified. Each person signs in with their own Cursor account through the
-SDK's web login, on their own plan (Cursor Pro or better); AgentRoom holds no
-Cursor credential and intermediates no usage. Use of the SDK is governed by
-[Cursor's Terms of Service](https://cursor.com/terms-of-service).
-
-Everything else the DMG bundles is listed in
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-
-## This repository is a mirror
-
-Development happens in a private monorepo that also holds the visionOS app. A
-workflow there publishes the paths in this repository after each change to its
-`main`, as one commit per sync whose `Source-Commit:` trailer names the upstream
-commit. Nobody pushes here by hand.
-
-Issues are welcome. Pull requests are welcome as proposals: a maintainer reviews
-them, ports the change upstream, and closes the PR with a pointer to the sync
-commit it arrived in. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the details
-and [`SECURITY.md`](SECURITY.md) for reporting vulnerabilities.
-
-Some documents under `docs/` link to visionOS client documents that are not in
-this repository. Those links point into the private tree.
+Issues are welcome. Pull requests are welcome as proposals: a maintainer ports
+the change upstream and links the sync commit it lands in. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md). Some documents link to visionOS sources
+that are not published here.
 
 ## Documentation
 
-Start with the [documentation index](docs/README.md), or go directly to:
-
+- [Documentation index](docs/README.md)
 - [Architecture](docs/architecture/ARCHITECTURE.md)
-- [API](docs/api/API.md)
-- [macOS client](docs/clients/MACOS.md)
+- [API reference](docs/api/API.md)
+- [macOS app](docs/clients/MACOS.md), including [updates](docs/clients/MACOS.md#updates)
+- [Runners](docs/engineering/RUNNERS.md)
 - [Trust and safety](docs/safety/TRUST_AND_SAFETY.md)
-- [Runner architecture and maintenance](docs/engineering/RUNNERS.md)
-
-There is no separate agent guidance file in this tree; the documents above,
-starting with [Trust and safety](docs/safety/TRUST_AND_SAFETY.md), are the
-rules for anyone working here, person or agent.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+[MIT](LICENSE)
