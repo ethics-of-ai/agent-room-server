@@ -55,6 +55,13 @@ export interface AgentToolAdvertisement {
   readonly outputSchema: Record<string, unknown>;
 }
 
+/** The input-only view a native tool list registers: name, description, and input schema. */
+export function agentToolInputSpec(
+  entry: AgentToolAdvertisement
+): { name: string; description: string; inputSchema: Record<string, unknown> } {
+  return { name: entry.name, description: entry.description, inputSchema: entry.inputSchema };
+}
+
 export type AgentToolCallOutcome =
   | "completed"
   | "truncated"

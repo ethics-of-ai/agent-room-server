@@ -28,8 +28,10 @@ import {
   runnerStreamTimingAudit
 } from "../shared/streamTiming";
 import { runnerDescriptor } from "../registry";
-import { advertisedAgentTools, type AgentToolHandler } from "../../agentTools/dispatch";
+import { advertisedAgentTools } from "../../agentTools/dispatch";
 import { allowedAgentToolLogicalIds } from "../../agentTools/catalog";
+import { QUESTIONS_ASK_LOGICAL_ID } from "../../agentTools/questionAsk";
+import { combinedToolCatalog, promptWithRegisteredTools, runnerAgentToolCapabilities } from "../shared/agentToolSets";
 import {
   cursorCapabilities,
   cursorCatalogFromModels,
@@ -122,13 +124,6 @@ export class CursorSdkRunner implements AgentRunner {
   private readonly initializeTimeoutMs: number;
   /** The registry owns whether this runner's transport carries AgentRoom tools. */
   private readonly agentToolsEnabled: boolean;
-  /**
-   * Handlers for catalog tools beyond `questions.ask`, keyed by logical id and
-   * injected by their owning modules. The question handler is wired here; a
-   * future tool module contributes its own without touching the
-   * relay or the host.
-   */
-  private readonly extraToolHandlers: Readonly<Record<string, AgentToolHandler>>;
   /** Sessions whose persisted agent may still record an active run after a killed host. */
   private readonly forceNextSends = new Set<string>();
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
@@ -151,15 +146,12 @@ export class CursorSdkRunner implements AgentRunner {
       questionTimeoutMs?: number;
       /** A fake host module for tests; defaults to the compiled `host.js` beside this file. */
       hostModulePath?: string;
-      /** Handlers for bound catalog tools beyond `questions.ask`, by logical id. */
-      toolHandlers?: Readonly<Record<string, AgentToolHandler>>;
     } = {}
   ) {
     this.initializeTimeoutMs = deps.initializeTimeoutMs ?? INITIALIZE_TIMEOUT_MS;
     this.usesDefaultHost = deps.hostModulePath === undefined;
     this.hostModulePath = deps.hostModulePath ?? resolve(__dirname, `host${extname(__filename)}`);
     this.agentToolsEnabled = runnerDescriptor("cursor").agentTools.mode === "custom_tools";
-    this.extraToolHandlers = deps.toolHandlers ?? {};
     this.questions = new PendingQuestionRequests(
       deps.questionTimeoutMs !== undefined ? { timeoutMs: deps.questionTimeoutMs } : {}
     );
@@ -288,13 +280,16 @@ export class CursorSdkRunner implements AgentRunner {
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
       // The turn's tool binding: relays arriving while this turn is the
       // session's live turn dispatch; after settle they are answered, not run.
+      // Session tools arrive already bound to the AgentRoom turn; the adapter
+      // adds only its own question tool.
       bindCursorTurnTools({
         session,
         turn: activeTurn,
-        allowed: this.turnToolLogicalIds(),
+        questionIds: this.questionToolLogicalIds(),
         questions: this.questions,
-        extraHandlers: this.extraToolHandlers
+        ...(input.tools ? { sessionTools: input.tools } : {})
       });
+      const prompt = promptWithRegisteredTools(input, session.registeredToolNames ?? new Set(), "cursor");
       // Against the catalog the session learned at start, so a turn's effort or
       // speed rides the parameter name this model actually declares. A value
       // the model does not offer is refused here, before anything is sent.
@@ -307,7 +302,7 @@ export class CursorSdkRunner implements AgentRunner {
       activeTurn.sendAttempted = true;
       const sendResponse = await withTimeout(
         session.client.request("agent/send", {
-          text: input.prompt,
+          text: prompt,
           ...(images.length > 0 ? { images } : {}),
           model,
           ...(force ? { force: true } : {})
@@ -486,14 +481,18 @@ export class CursorSdkRunner implements AgentRunner {
       await this.refreshCatalog(client);
       const model = cursorModelSelection(this.catalog, settings);
       const resumeAgentId = this.sessions.resumableId(key);
+      // The host registers this catalog once for the child's life; a later
+      // turn's tools are checked against it rather than re-registered.
+      const tools = this.agentToolsEnabled
+        ? combinedToolCatalog(input.tools?.catalog, advertisedAgentTools(this.questionToolLogicalIds()))
+        : [];
+      session.registeredToolNames = new Set(tools.map((tool) => tool.name));
       const startResponse = await withTimeout(
         client.request("agent/start", {
           cwd: input.workspacePath,
           ...(resumeAgentId ? { agentId: resumeAgentId } : {}),
           ...cursorAgentStartPosture(this.config, settings, model),
-          tools: this.agentToolsEnabled
-            ? advertisedAgentTools(this.turnToolLogicalIds())
-            : []
+          tools
         }),
         AGENT_START_TIMEOUT_MS,
         "Timed out starting the Cursor agent"
@@ -531,17 +530,17 @@ export class CursorSdkRunner implements AgentRunner {
   }
 
   /**
-   * The logical ids a turn binds. Composed from the catalog's feature gates —
-   * the same composition that advertised the tools at `agent/start`. A gate
-   * that flips between turns leaves the host's registration stable while
-   * dispatch refuses the now-unavailable call, per the tool contract.
+   * The adapter-owned question tool, when the catalog's gates allow it. The
+   * same composition advertises it at `agent/start` and binds it per turn. A
+   * gate that flips between turns leaves the host's registration stable while
+   * dispatch refuses the now-unavailable call, per the tool contract. Every
+   * other tool is the session's and arrives in `AgentRunnerInput.tools`.
    */
-  private turnToolLogicalIds(): string[] {
-    const policy = runnerDescriptor("cursor").agentTools;
+  private questionToolLogicalIds(): string[] {
     return allowedAgentToolLogicalIds({
       gates: { clarifyingQuestions: this.config.clarifyingQuestionsEnabled !== false },
-      capabilities: policy.mode === "none" ? [] : policy.capabilities
-    });
+      capabilities: runnerAgentToolCapabilities("cursor", this.config)
+    }).filter((logicalId) => logicalId === QUESTIONS_ASK_LOGICAL_ID);
   }
 
   private handleNotification(session: CursorRunnerSession, notification: JsonRpcNotification): void {

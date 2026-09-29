@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { WorkspaceTreeEntry } from "./models";
 import { agentRunnerKindSchema } from "../runner/registry";
+import { PLAN_LIMITS, planMutationReceiptSchema, threadPlanSchema } from "../plans/planModel";
 import {
   defaultClaudeCodeLoadWorkspaceSkills,
   defaultClaudeCodePermissionMode
@@ -340,7 +341,8 @@ export const agentTurnSketchContextSchema = z.object({
 export const agentTurnContextSchema = z.object({
   paths: z.array(z.string().min(1)).max(8).optional(),
   attachments: z.array(z.string().trim().min(1).regex(/^attachment-[0-9a-f-]{36}$/)).max(8).optional(),
-  sketch: z.never({ message: "Sketch context is no longer supported" }).optional()
+  sketch: z.never({ message: "Sketch context is no longer supported" }).optional(),
+  planToolsRequired: z.boolean().optional()
 });
 
 export const agentSessionAttachmentSchema = z.object({
@@ -452,7 +454,7 @@ export const agentSessionMessageSchema = z.object({
   at: z.string().min(1)
 });
 
-export const DURABLE_AGENT_SESSION_SCHEMA_VERSION = 1;
+export const DURABLE_AGENT_SESSION_SCHEMA_VERSION = 2;
 
 // The on-disk session document. `runnerKind` is a plain string here, not
 // `agentRunnerKindSchema`: that schema resolves against the runners this
@@ -465,7 +467,18 @@ export const durableAgentSessionDocumentSchema = z.object({
   schemaVersion: z.literal(DURABLE_AGENT_SESSION_SCHEMA_VERSION),
   session: agentSessionSchema.extend({ runnerKind: z.string().min(1) }),
   turns: z.array(agentSessionTurnSchema),
-  messages: z.array(agentSessionMessageSchema)
+  messages: z.array(agentSessionMessageSchema),
+  // Beside the session summary, never inside it: status and list responses
+  // project `session` and must not carry plan text. Optional on read, so a
+  // document without them loads as a thread with no plan; always written.
+  plan: threadPlanSchema.nullable().default(null),
+  planMutationReceipts: z.array(planMutationReceiptSchema).max(PLAN_LIMITS.receipts).default([]),
+  // The AgentRoom tool names the native conversation registered, for a
+  // restore that cannot report them itself. Absent when unknown.
+  nativeToolRegistration: z.object({
+    nativeSessionId: z.string().min(1).max(512),
+    names: z.array(z.string().min(1).max(256)).max(64)
+  }).optional()
 });
 
 export const agentBridgeMetricsSchema = z.object({

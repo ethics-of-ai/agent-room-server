@@ -146,6 +146,17 @@ default runner — would move their turns onto a different agent without asking.
 An environment `RUNNER_KIND` is unaffected either way, since it never enters the
 file.
 
+### Downgrading after session plans
+
+Session documents under `STATE_DIR/sessions/` moved to schema version 2 when
+thread plans shipped. The upgrade itself changes nothing on disk: a version 1
+document is migrated in memory and rewritten only by its next change, such as
+a turn. An older build skips version 2 documents and logs them as newer than
+it supports, so those sessions disappear from its list. The files are left
+untouched, and the sessions come back when a newer build runs again. There is
+no conversion step. Copy `STATE_DIR/sessions/` before upgrading if you might
+downgrade and need those threads on the older build.
+
 ## Workspaces
 
 ```bash
@@ -209,6 +220,20 @@ and `/usr/local/bin`. It strips only the AgentRoom-managed keys it owns, so an
 inherited shell export cannot silently lock a setting the panes present as
 editable; unrelated developer credentials in the operator's environment are
 passed through.
+
+A session runner's model keeps an optional plan through AgentRoom plan tools.
+Read it with the bearer token when `AUTH_TOKEN` is configured:
+
+```bash
+curl -sS http://127.0.0.1:8787/api/agent-sessions/<session-id>/plan
+```
+
+A `503` from that read means the backend is still resolving a plan write, or
+has not yet saved a turn-end pause or restart recovery, for example after a
+failed disk write; retry after a moment. The same state makes a
+new turn answer `503` until the session's plan state is recorded. To make a
+turn fail instead of running without plan tools, send
+`"context":{"planToolsRequired":true}`.
 
 Selected model, reasoning effort, and speed values can be sent with a
 turn:

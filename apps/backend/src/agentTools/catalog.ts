@@ -19,7 +19,7 @@
 export type AgentToolGate = "clarifyingQuestions";
 
 /** Descriptor-owned runner capabilities used to filter the shared catalog. */
-export type AgentToolCapability = "questions";
+export type AgentToolCapability = "questions" | "plans";
 
 export interface AgentToolDefinition {
   /**

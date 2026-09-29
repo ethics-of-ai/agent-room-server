@@ -23,6 +23,12 @@ export function prepareAgentRunnerToolSet(input: {
   sessionKey: string;
   catalog: readonly string[];
   allowed: readonly string[];
+  /**
+   * Whether the turn's context requires these tools. Explicit, never inferred
+   * from the allowed set: advertising a tool by default must not make an
+   * ordinary turn fail when its transport cannot register it.
+   */
+  required: boolean;
   handlers: Readonly<Record<string, AgentToolHandler>>;
   isLive(): boolean;
   onCall?: (telemetry: AgentToolCallTelemetry) => void;
@@ -40,7 +46,7 @@ export function prepareAgentRunnerToolSet(input: {
   });
   const advertisements = binding.advertisements();
   const tools: AgentRunnerToolSet = {
-    required: input.allowed.length > 0,
+    required: input.required,
     catalog: advertisedAgentTools(input.catalog),
     binding: {
       runId: input.runId,

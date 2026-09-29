@@ -57,6 +57,14 @@ export class AgentTurnContextAssembler {
       diagramRenderFeedback?: {
         prepareSummaryForTurn(session: AgentSession): Promise<{ summary?: string; acknowledge(): void } | undefined>;
       };
+      // Thread plans: a standing tool instruction, placed by descriptor
+      // policy like the diagram contract, and volatile per-turn plan context
+      // that rides every runner's turn prompt. Read after the session's
+      // pending plan settlement, so the context never shows the previous
+      // turn's plan as still running.
+      planPrompt?: {
+        promptForTurn(session: AgentSession): Promise<{ standing?: string; context?: string }>;
+      };
     }
   ) {}
 
@@ -76,6 +84,7 @@ export class AgentTurnContextAssembler {
       // the agent's own last write before the prompt moves on to what the human
       // changed since.
       const renderFeedback = await this.deps.diagramRenderFeedback?.prepareSummaryForTurn(input.session);
+      const planPrompt = await this.deps.planPrompt?.promptForTurn(input.session);
       // The standing diagram contract is constant, so a runner whose descriptor
       // says `system` has already had it installed once by its own adapter
       // (Claude Code appends it to the cached SDK system prompt); repeating it
@@ -93,8 +102,10 @@ export class AgentTurnContextAssembler {
         this.deps.artifactInstruction,
         questionInstruction,
         standingInstructionsRideTheTurn ? this.deps.diagramInstruction : undefined,
+        standingInstructionsRideTheTurn ? planPrompt?.standing : undefined,
         renderFeedback?.summary,
-        humanEditSummary?.summary
+        humanEditSummary?.summary,
+        planPrompt?.context
       ].filter((value): value is string => value !== undefined);
       const prompt = instructions.length > 0
         ? `${instructions.join("\n\n")}\n\n${contextPrompt}`

@@ -80,7 +80,7 @@ export class PersistentRunnerSessionHost<S extends PersistentRunnerSession> {
    * dropped only when the AgentRoom session is deleted, so an explicitly
    * deleted thread is never silently resumed.
    */
-  private readonly resumableIds = new Map<string, string>();
+  private readonly resumableIds = new Map<string, { id: string; toolNames?: readonly string[] }>();
 
   constructor(private readonly options: PersistentRunnerSessionHostOptions<S>) {}
 
@@ -185,16 +185,33 @@ export class PersistentRunnerSessionHost<S extends PersistentRunnerSession> {
 
   /** The native id to restore this AgentRoom session's conversation with. */
   resumableId(key: string): string | undefined {
-    return this.resumableIds.get(key);
+    return this.resumableIds.get(key)?.id;
   }
 
   /**
-   * Record the native id a restore would use. Ignored for an `unsupported`
+   * The AgentRoom tool names the resumable conversation registered, for a
+   * transport whose restore brings back the stored catalog without saying
+   * what it holds. Undefined when unknown.
+   */
+  resumableToolNames(key: string): ReadonlySet<string> | undefined {
+    const names = this.resumableIds.get(key)?.toolNames;
+    return names ? new Set(names) : undefined;
+  }
+
+  /** The resumable id with its known tool names, for the service to persist. */
+  toolRegistration(key: string): { nativeSessionId: string; names: string[] } | undefined {
+    const entry = this.resumableIds.get(key);
+    return entry?.toolNames ? { nativeSessionId: entry.id, names: [...entry.toolNames] } : undefined;
+  }
+
+  /**
+   * Record the native id a restore would use, and the tool names its
+   * conversation registered when known. Ignored for an `unsupported`
    * strategy, so the host can never hold a resume token it would not honor.
    */
-  rememberResumableId(key: string, id: string): void {
+  rememberResumableId(key: string, id: string, toolNames?: Iterable<string>): void {
     if (!this.restorable) return;
-    this.resumableIds.set(key, id);
+    this.resumableIds.set(key, { id, ...(toolNames ? { toolNames: [...toolNames] } : {}) });
   }
 
   /** Forget a rejected id (a thread with no rollout, an externally pruned one). */

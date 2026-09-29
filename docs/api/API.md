@@ -2437,6 +2437,16 @@ explicitly. Nothing on either path drops an attachment silently. Optional
 `/api/coding-agent/capabilities`. In Codex JSON-RPC mode they map to `turn/start`
 model, reasoning effort, and speed overrides.
 
+Optional `context.planToolsRequired: true` makes the turn depend on the
+session runner's [plan tools](#thread-plans). It requires tool readiness only;
+it does not execute a plan or change permissions. A runner that cannot offer
+plan tools answers `409` before the turn starts. A runner that accepts the
+turn but cannot confirm native registration fails that turn. Without the flag,
+the turn still runs. When the runner knows tools are missing, the model is told
+which ones are unavailable. When it cannot confirm them, the model is told to
+treat a missing tool or a failed call as unavailable. The backend never infers
+the flag from the message text.
+
 `context.sketch` is retired. New turn requests containing it return `400`
 before a turn starts. Historical message context may still contain a sketch
 selection for transcript compatibility. Human sketch editing is independent of
@@ -2626,6 +2636,88 @@ turn is ignored for transcript/session state. DeepSeek is the exception: its
 protocol has no cancel or verified restore method, so stopping it makes that
 AgentRoom session uncontinuable and a follow-up fails until the client creates a
 new session.
+
+### Thread plans
+
+Each session owns zero or one plan. Only the session runner's model changes
+it, through AgentRoom plan tools bound to the running turn; there is no HTTP
+route that mutates a plan or runs a tool. Runner transports and the tool set
+are in [Runners](../engineering/RUNNERS.md#thread-plan-tools).
+
+`GET /api/agent-sessions/:sessionId/plan` returns the current plan:
+
+```json
+{
+  "schemaVersion": 1,
+  "plan": {
+    "id": "plan-5b0c1f5e-0d6e-4c43-9a55-1f0e8f7a3c21",
+    "revision": 7,
+    "objective": "Ship the importer",
+    "completionCriteria": "Importer tests pass",
+    "steps": [
+      {
+        "id": "step-1",
+        "description": "Parse the manifest",
+        "status": "completed",
+        "outcome": "Parser handles nested names",
+        "lastBlocker": null
+      },
+      {
+        "id": "step-2",
+        "description": "Wire the route",
+        "status": "blocked",
+        "outcome": null,
+        "lastBlocker": "Needs the auth decision"
+      }
+    ],
+    "status": "blocked",
+    "createdAt": "2026-09-28T01:00:00.000Z",
+    "updatedAt": "2026-09-28T01:05:00.000Z",
+    "lastModifiedTurnId": "agent-turn-a",
+    "executionTurnId": null,
+    "pauseReason": null,
+    "resumeNote": null,
+    "summary": null
+  }
+}
+```
+
+`plan` is `null` when the thread has none. Plan `status` is `draft`,
+`running`, `blocked`, `paused`, `completed`, or `cancelled`. Step `status` is
+`pending`, `in_progress`, `blocked`, `completed`, or `skipped`. `pauseReason`
+is `turn_ended`, `turn_failed`, `turn_cancelled`, or `backend_restarted`, and
+is set only on a paused plan. Nullable fields are always present. Clients must
+treat an unrecognized status or reason as an open value rather than fail the
+decode. Completed and skipped steps form a prefix; the first unresolved step is
+the current one.
+
+The route requires the bearer token when `AUTH_TOKEN` is configured, because
+the objective, steps, notes, and summary are model-authored. It returns `404`
+for an unknown session and `503` while the backend has no authoritative
+snapshot: it is still resolving the outcome of a plan write, or it has not yet
+saved the pause for an ended turn or the recovery after a restart. A `503` is
+never an absent plan; retry. Mutation receipts are never returned. A backend that
+predates plans answers `404` for the route itself.
+
+`agent_plan_changed` is broadcast after every committed change, including the
+backend's own pause when a turn ends and recovery after a restart:
+
+```json
+{
+  "schemaVersion": 1,
+  "sessionId": "agent-session-abc123",
+  "planId": "plan-5b0c1f5e-0d6e-4c43-9a55-1f0e8f7a3c21",
+  "revision": 8
+}
+```
+
+The event carries no plan text. Treat it as a signal to reread the plan route.
+Revisions order snapshots within one `planId` only: a replacement plan starts
+again at revision 1, so a new `planId` always needs a reread. Also reread on
+reconnect and when a turn settles, since a client can miss the event. The event
+is not written to the durable audit log. `coding_plan_updated` is unrelated:
+it reports a runner's own native checklist, which cannot change the stored
+plan.
 
 ## Sketches
 
@@ -2925,6 +3017,7 @@ authenticated, workspace-scoped protocols. The server sends an initial
 - `agent_turn_cancelled`
 - `agent_permission_resolved`
 - `agent_question_resolved`
+- `agent_plan_changed` (metadata only; see [Thread plans](#thread-plans))
 - `runner_audit`
 - `coding_session_started`
 - `coding_turn_started`

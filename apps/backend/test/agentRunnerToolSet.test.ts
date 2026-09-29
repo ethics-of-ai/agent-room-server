@@ -26,12 +26,14 @@ describe("runner-facing AgentRoom tool set", () => {
       sessionKey: "session-1",
       catalog: [logicalId],
       allowed: [],
+      required: false,
       handlers: {},
       isLive: () => true
     });
 
     expect(prepared.tools.catalog.map((tool) => tool.name)).toEqual(["test_runner_input"]);
     expect(prepared.tools.binding).toMatchObject({ runId: "turn-1", allowedNames: [] });
+    expect(prepared.tools.required).toBe(false);
     await expect(prepared.tools.binding.invoke({
       callId: "call-1",
       name: "test_runner_input",
@@ -48,6 +50,7 @@ describe("runner-facing AgentRoom tool set", () => {
       sessionKey: "session-1",
       catalog: [logicalId],
       allowed: [logicalId],
+      required: true,
       handlers: {
         [logicalId]: async (_input, context) => {
           seenSignals.push(context.signal);
@@ -87,15 +90,18 @@ describe("runner-facing AgentRoom tool set", () => {
       sessionKey: "session-1",
       catalog: [logicalId],
       allowed: [logicalId],
+      required: true,
       handlers: { [logicalId]: handler },
       isLive: () => true
     });
+    expect(first.tools.required).toBe(true);
     first.dispose();
     const second = prepareAgentRunnerToolSet({
       runId: "turn-2",
       sessionKey: "session-1",
       catalog: [logicalId],
       allowed: [logicalId],
+      required: true,
       handlers: { [logicalId]: handler },
       isLive: () => true
     });

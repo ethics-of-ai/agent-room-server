@@ -106,6 +106,30 @@ describe("durable agent sessions", () => {
     await second.app.close();
   });
 
+  it("persists the tool names a native conversation registered beside the session and seeds them back", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
+    const toolNames = ["create_plan", "get_plan"];
+    const first = await buildServer({ config: serviceConfig, runners: { claude_code: nativeSessionRunner("native-thread-tools", { toolNames }) } });
+    const registered = await first.app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+    const created = await first.app.inject({
+      method: "POST", url: "/api/agent-sessions", payload: { workspaceId: registered.json().workspace.id, runnerKind: "claude_code" }
+    });
+    const sessionId = created.json().session.id;
+    await first.app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "hello" } });
+    await waitForSession(first.app, sessionId, "idle");
+    const detail = await first.app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}` });
+    expect(JSON.stringify(detail.json())).not.toContain("create_plan");
+    await first.app.close();
+    const document = JSON.parse(await readFile(join(serviceConfig.stateDir, "sessions", `${sessionId}.json`), "utf8"));
+    expect(document.nativeToolRegistration).toEqual({ nativeSessionId: "native-thread-tools", names: toolNames });
+
+    const seeds: Array<{ sessionId: string; nativeSessionId: string; interrupted: boolean; registeredToolNames?: readonly string[] }> = [];
+    const second = await buildServer({ config: serviceConfig, runners: { claude_code: nativeSessionRunner("native-thread-tools", { seeds }) } });
+    expect(seeds).toEqual([{ sessionId, nativeSessionId: "native-thread-tools", interrupted: false, registeredToolNames: toolNames }]);
+    await second.app.close();
+  });
+
   it("settles a turn that was running at shutdown as failed, audits it, and seeds the runner as interrupted", async () => {
     const serviceConfig = await config();
     const workspace = await registerWorkspaceOffline(serviceConfig);

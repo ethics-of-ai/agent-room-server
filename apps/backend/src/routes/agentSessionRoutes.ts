@@ -14,6 +14,7 @@ import { AgentAttachmentError, AgentAttachmentStore, maxAgentAttachmentBytes } f
 import { AgentSessionError, AgentSessionService } from "../agent/AgentSessionService";
 import { agentRunnerKindSchema, agentTurnContextSchema, codingAgentTurnSettingsSchema } from "../domain/schemas";
 import type { ServiceConfig } from "../domain/models";
+import { PLAN_SNAPSHOT_SCHEMA_VERSION } from "../plans/planTools";
 import { authorizedForRead } from "./readAuthorization";
 
 const createSessionPayloadSchema = z.object({
@@ -104,6 +105,25 @@ export async function registerAgentSessionRoutes(
     const messages = agentSessions.listSessionMessages(sessionId);
     if (!messages) return reply.code(404).send({ error: "Agent session was not found" });
     return { messages };
+  });
+
+  // The thread's plan: model-authored objective, steps, notes, and summary, so
+  // it is a content read like the transcript. Mutation receipts never leave
+  // the backend, and there is deliberately no mutating plan route: plans change
+  // only through the agent's bound tools. While a plan write's outcome is
+  // unresolved there is no authoritative snapshot, which is a 503 rather than
+  // an absent plan.
+  app.get("/api/agent-sessions/:sessionId/plan", async (request, reply) => {
+    if (!authorizedForRead(request.headers.authorization, config)) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
+    const { sessionId } = sessionParamsSchema.parse(request.params);
+    const read = await agentSessions.readPlan(sessionId);
+    if (!read) return reply.code(404).send({ error: "Agent session was not found" });
+    if (read.kind === "unavailable") {
+      return reply.code(503).send({ error: "This thread's plan state is being recovered; retry shortly" });
+    }
+    return { schemaVersion: PLAN_SNAPSHOT_SCHEMA_VERSION, plan: read.plan };
   });
 
   app.get("/api/agent-sessions/:sessionId/artifacts", async (request, reply) => {

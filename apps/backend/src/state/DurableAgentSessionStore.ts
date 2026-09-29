@@ -41,10 +41,56 @@ export interface DurableAgentSessionInventory {
   unreadable: number;
 }
 
+/**
+ * One acknowledged write: the plan commit path. Ordinary marks coalesce and
+ * log failures; a commit reports whether its document reached disk.
+ */
+export interface DurableCommitRequest {
+  /** Built at write time from the latest session content plus the candidate. */
+  snapshot(): DurableAgentSessionDocument;
+  /** Whether a document read back from disk contains this commit. */
+  verify(document: DurableAgentSessionDocument): boolean;
+  /**
+   * Asked once, immediately before the write starts, after any earlier write
+   * for the session has finished. False withdraws the commit unwritten.
+   */
+  proceed?(): boolean;
+  /**
+   * Called once, synchronously, when the outcome becomes known: before any
+   * later write takes its snapshot, so a committed candidate is published
+   * before an ordinary write can observe the old state.
+   */
+  settle(committed: boolean): void;
+}
+
+/**
+ * `unknown`: the rename failed and the file could not be read back. Later
+ * writes for the session wait until reconciliation settles the request.
+ * `withdrawn`: `proceed` refused the write before it started.
+ */
+export type DurableCommitOutcome = "committed" | "not_committed" | "unknown" | "removed" | "withdrawn";
+
+/** The file operations a write and a reconciliation read use; injectable for fault tests. */
+export interface DurableSessionFileSystem {
+  writeFile(path: string, data: string): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
+  readFile(path: string, encoding: "utf8"): Promise<string>;
+}
+
+interface QueuedCommit {
+  request: DurableCommitRequest;
+  resolve(outcome: DurableCommitOutcome): void;
+}
+
 interface PendingWrite {
   snapshot: () => DurableAgentSessionDocument;
   dirty: boolean;
   removed: boolean;
+  commits: QueuedCommit[];
+  /** A commit whose rename failed and whose outcome is not yet known. */
+  unresolved?: QueuedCommit & { reported: boolean };
+  /** Reconciliation failed; wait for an explicit retry instead of spinning. */
+  stalled: boolean;
   inFlight?: Promise<void>;
 }
 
@@ -64,6 +110,9 @@ interface PendingWrite {
  * The store knows nothing about what a session means. It holds no session
  * itself; the service that owns the in-memory record hands it a snapshot
  * function and tells it when a session is gone.
+ *
+ * `commit` shares the same per-session chain, so an acknowledged plan write
+ * and ordinary marks are strictly ordered and no second writer exists.
  */
 export class DurableAgentSessionStore {
   private readonly directory: string;
@@ -73,8 +122,11 @@ export class DurableAgentSessionStore {
   // document while remove() yields, or after it returns.
   private readonly deletedSessionIds = new Set<string>();
 
-  constructor(config: Pick<ServiceConfig, "stateDir">) {
+  private readonly fileSystem: DurableSessionFileSystem;
+
+  constructor(config: Pick<ServiceConfig, "stateDir">, deps: { fileSystem?: DurableSessionFileSystem } = {}) {
     this.directory = join(config.stateDir, DIRECTORY_NAME);
+    this.fileSystem = deps.fileSystem ?? { writeFile, rename, readFile };
   }
 
   /**
@@ -88,7 +140,7 @@ export class DurableAgentSessionStore {
       if (!name.endsWith(FILE_SUFFIX)) continue;
       const path = join(this.directory, name);
       const sessionId = name.slice(0, -FILE_SUFFIX.length);
-      const outcome = await readDocument(path, sessionId);
+      const outcome = await readDocument(this.fileSystem, path, sessionId);
       if (outcome.kind === "document") {
         inventory.documents.push(outcome.document);
         if (outcome.migrated) {
@@ -106,7 +158,7 @@ export class DurableAgentSessionStore {
         );
       } else {
         inventory.unreadable += 1;
-        logger.warn({ path, reason: outcome.reason }, "Agent session document is unreadable and is left in place");
+        logger.warn({ path, reason: outcome.kind === "missing" ? "file vanished while reading" : outcome.reason }, "Agent session document is unreadable and is left in place");
       }
     }
     logger.info(
@@ -131,19 +183,65 @@ export class DurableAgentSessionStore {
   schedule(sessionId: string, snapshot: () => DurableAgentSessionDocument): Promise<void> {
     assertSessionId(sessionId);
     if (this.deletedSessionIds.has(sessionId)) return Promise.resolve();
-    const entry = this.pending.get(sessionId) ?? { snapshot, dirty: false, removed: false };
+    const entry = this.entryFor(sessionId, snapshot);
     entry.snapshot = snapshot;
     entry.dirty = true;
-    entry.removed = false;
+    return this.kick(sessionId, entry);
+  }
+
+  /**
+   * Write one acknowledged document through the session's chain. Resolves
+   * with `committed` only after the rename succeeded (or a read-back after an
+   * ambiguous rename found it), and never lets a failed candidate reach disk
+   * through a later ordinary write: those snapshot the service's committed
+   * state, not the candidate.
+   */
+  commit(sessionId: string, request: DurableCommitRequest): Promise<DurableCommitOutcome> {
+    assertSessionId(sessionId);
+    if (this.deletedSessionIds.has(sessionId)) return Promise.resolve("removed");
+    // A commit never lends its candidate to ordinary writes; those always
+    // snapshot through the service's own function, set by `schedule`.
+    const entry = this.entryFor(sessionId, noOrdinarySnapshot);
+    return new Promise((resolve) => {
+      entry.commits.push({ request, resolve });
+      entry.stalled = false;
+      void this.kick(sessionId, entry);
+    });
+  }
+
+  /** Whether a commit's outcome is still unknown for this session. */
+  hasUnresolvedCommit(sessionId: string): boolean {
+    return Boolean(this.pending.get(sessionId)?.unresolved);
+  }
+
+  /** Retry reading back an unresolved commit. Resolves true once it is settled. */
+  async reconcile(sessionId: string): Promise<boolean> {
+    const entry = this.pending.get(sessionId);
+    if (!entry?.unresolved) return true;
+    entry.stalled = false;
+    await this.kick(sessionId, entry);
+    return !entry.unresolved;
+  }
+
+  private entryFor(sessionId: string, snapshot: () => DurableAgentSessionDocument): PendingWrite {
+    const existing = this.pending.get(sessionId);
+    if (existing) return existing;
+    const entry: PendingWrite = { snapshot, dirty: false, removed: false, commits: [], stalled: false };
     this.pending.set(sessionId, entry);
+    return entry;
+  }
+
+  private kick(sessionId: string, entry: PendingWrite): Promise<void> {
     if (entry.inFlight) return entry.inFlight;
     entry.inFlight = this.drain(sessionId, entry).finally(() => {
       entry.inFlight = undefined;
-      // A mark can land between the drain loop's last dirty check and this
-      // cleanup; re-schedule so that state is not stranded in memory.
-      if (entry.dirty && !entry.removed) {
-        void this.schedule(sessionId, entry.snapshot);
-      } else if (this.pending.get(sessionId) === entry) {
+      // A mark can land between the drain loop's last check and this cleanup;
+      // re-kick so that state is not stranded in memory. A stalled
+      // reconciliation waits for an explicit retry instead.
+      const work = entry.dirty || entry.commits.length > 0 || entry.unresolved !== undefined;
+      if (work && !entry.removed && !entry.stalled) {
+        void this.kick(sessionId, entry);
+      } else if (!work && this.pending.get(sessionId) === entry) {
         this.pending.delete(sessionId);
       }
     });
@@ -163,7 +261,12 @@ export class DurableAgentSessionStore {
       if (entry) {
         entry.dirty = false;
         entry.removed = true;
+        for (const queued of entry.commits.splice(0)) queued.resolve("removed");
         await entry.inFlight;
+        if (entry.unresolved) {
+          if (!entry.unresolved.reported) entry.unresolved.resolve("removed");
+          entry.unresolved = undefined;
+        }
         if (this.pending.get(sessionId) === entry) this.pending.delete(sessionId);
       }
       await rm(this.documentPath(sessionId), { force: true });
@@ -186,8 +289,22 @@ export class DurableAgentSessionStore {
   }
 
   private async drain(sessionId: string, entry: PendingWrite): Promise<void> {
-    while (entry.dirty && !entry.removed) {
+    while (!entry.removed && !entry.stalled && (entry.unresolved || entry.dirty || entry.commits.length > 0)) {
+      if (entry.unresolved) {
+        await this.reconcileEntry(sessionId, entry);
+        continue;
+      }
+      const queued = entry.commits.shift();
+      // Every snapshot is built from the latest content, so a write that
+      // reaches disk, commit or ordinary, satisfies the pending mark. A commit
+      // that never lands leaves the mark for an ordinary write.
+      const marked = entry.dirty;
       entry.dirty = false;
+      if (queued) {
+        const committed = await this.writeCommit(sessionId, entry, queued);
+        if (!committed && marked) entry.dirty = true;
+        continue;
+      }
       try {
         await this.writeDocument(sessionId, entry.snapshot());
       } catch (error) {
@@ -199,12 +316,67 @@ export class DurableAgentSessionStore {
     }
   }
 
+  /** True when the commit's document is on disk; false when it was withdrawn, failed, or is still unknown. */
+  private async writeCommit(sessionId: string, entry: PendingWrite, queued: QueuedCommit): Promise<boolean> {
+    const path = this.documentPath(sessionId);
+    const tmp = path + TEMP_SUFFIX;
+    if (queued.request.proceed && !queued.request.proceed()) {
+      queued.request.settle(false);
+      queued.resolve("withdrawn");
+      return false;
+    }
+    try {
+      await this.ensureDirectory();
+      await this.fileSystem.writeFile(tmp, JSON.stringify(queued.request.snapshot()));
+    } catch (error) {
+      logger.warn({ error, path }, "Agent session commit failed before its rename; the previous document stands");
+      queued.request.settle(false);
+      queued.resolve("not_committed");
+      return false;
+    }
+    try {
+      await this.fileSystem.rename(tmp, path);
+    } catch (error) {
+      logger.warn({ error, path }, "Agent session commit rename failed; reading the document back to learn its outcome");
+      entry.unresolved = { ...queued, reported: false };
+      return false;
+    }
+    queued.request.settle(true);
+    queued.resolve("committed");
+    return true;
+  }
+
+  /**
+   * Learn an ambiguous commit's outcome from the file itself. A readable
+   * document settles it either way; a missing file means the rename never
+   * happened. Anything else leaves it unresolved and stalls the chain, so no
+   * later write can overwrite a document that may hold the commit.
+   */
+  private async reconcileEntry(sessionId: string, entry: PendingWrite): Promise<void> {
+    const pending = entry.unresolved as NonNullable<PendingWrite["unresolved"]>;
+    const outcome = await readDocument(this.fileSystem, this.documentPath(sessionId), sessionId);
+    if (outcome.kind === "document" || outcome.kind === "missing") {
+      const committed = outcome.kind === "document" && pending.request.verify(outcome.document);
+      entry.unresolved = undefined;
+      pending.request.settle(committed);
+      if (!pending.reported) pending.resolve(committed ? "committed" : "not_committed");
+      return;
+    }
+    logger.warn({ path: this.documentPath(sessionId) }, "Agent session commit outcome is still unknown; later writes wait");
+    if (!pending.reported) {
+      pending.reported = true;
+      pending.resolve("unknown");
+    }
+    for (const queued of entry.commits.splice(0)) queued.resolve("unknown");
+    entry.stalled = true;
+  }
+
   private async writeDocument(sessionId: string, document: DurableAgentSessionDocument): Promise<void> {
     await this.ensureDirectory();
     const path = this.documentPath(sessionId);
     const tmp = path + TEMP_SUFFIX;
-    await writeFile(tmp, JSON.stringify(document));
-    await rename(tmp, path);
+    await this.fileSystem.writeFile(tmp, JSON.stringify(document));
+    await this.fileSystem.rename(tmp, path);
   }
 
   private async ensureDirectory(): Promise<void> {
@@ -220,6 +392,7 @@ export class DurableAgentSessionStore {
 
 type ReadOutcome =
   | { kind: "document"; document: DurableAgentSessionDocument; migrated: boolean; fromSchemaVersion: number }
+  | { kind: "missing" }
   | { kind: "unsupported"; schemaVersion: number }
   | { kind: "unreadable"; reason: string };
 
@@ -227,13 +400,14 @@ type DurableAgentSessionMigration = (document: Record<string, unknown>) => Recor
 
 /**
  * One step per older schema version, keyed by the version it reads and
- * producing the next. Version 1 has no predecessor, so the table is empty; it
- * exists so the first real migration is a function to add here rather than a
- * reader to restructure. A step migrates the document whole, never key by key
- * — the `settings.json` rule — and sets `schemaVersion` to the version it
+ * producing the next. A step migrates the document whole, never key by key
+ * (the `settings.json` rule), and sets `schemaVersion` to the version it
  * produced.
  */
-const MIGRATIONS: Readonly<Record<number, DurableAgentSessionMigration>> = {};
+const MIGRATIONS: Readonly<Record<number, DurableAgentSessionMigration>> = {
+  // v2 adds the thread plan and its mutation receipts beside the session.
+  1: (document) => ({ ...document, schemaVersion: 2, plan: null, planMutationReceipts: [] })
+};
 
 /**
  * Bring a parsed document at an older known version up to this build's shape,
@@ -261,11 +435,16 @@ export function migrateDurableAgentSessionDocument(
   return { document: current, migrated };
 }
 
-async function readDocument(path: string, sessionId: string): Promise<ReadOutcome> {
+async function readDocument(
+  fileSystem: Pick<DurableSessionFileSystem, "readFile">,
+  path: string,
+  sessionId: string
+): Promise<ReadOutcome> {
   let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await fileSystem.readFile(path, "utf8");
   } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return { kind: "missing" };
     return { kind: "unreadable", reason: `read failed: ${describeError(error)}` };
   }
   let parsed: unknown;
@@ -302,6 +481,10 @@ async function readDocument(path: string, sessionId: string): Promise<ReadOutcom
     return { kind: "unreadable", reason: "file name does not match the session id inside" };
   }
   return { kind: "document", document: result.data, migrated: migration.migrated, fromSchemaVersion: schemaVersion };
+}
+
+function noOrdinarySnapshot(): DurableAgentSessionDocument {
+  throw new Error("No ordinary snapshot was scheduled for this session");
 }
 
 function assertSessionId(sessionId: string): void {

@@ -60,20 +60,18 @@ describe("runner registry", () => {
   });
 
   it("declares the AgentRoom tool transport for every runner", () => {
-    // Cursor is the one custom-tools relay; every other runner's question path
-    // is untouched by the tool catalog, which is what `none` records. Shared
-    // code reads this policy rather than a runner id.
-    expect(runnerDescriptor("cursor").agentTools).toEqual({
-      mode: "custom_tools",
-      capabilities: ["questions"]
-    });
-    expect(runnerDescriptor("deepseek").agentTools).toEqual({
-      mode: "cordis_pipe",
-      capabilities: ["questions"]
-    });
-    for (const kind of ["codex", "claude_code"] as const) {
-      expect(runnerDescriptor(kind).agentTools).toEqual({ mode: "none" });
-    }
+    // Every built-in carries plan tools. Cursor and DeepSeek also carry the
+    // question tool; Codex and Claude Code keep their native question paths.
+    // Shared code reads this policy rather than a runner id.
+    expect(runnerDescriptor("cursor").agentTools).toEqual({ mode: "custom_tools", capabilities: ["questions", "plans"] });
+    expect(runnerDescriptor("deepseek").agentTools).toEqual({ mode: "cordis_pipe", capabilities: ["questions", "plans"] });
+    const codexTools = runnerDescriptor("codex").agentTools;
+    expect(codexTools).toMatchObject({ mode: "dynamic_tools", capabilities: ["plans"] });
+    // Only the app-server protocol has a tool channel.
+    if (codexTools.mode === "none") throw new Error("Codex declares no tool transport");
+    expect(codexTools.availableWhen?.({ codexRunnerProtocol: "jsonrpc" } as never)).toBe(true);
+    expect(codexTools.availableWhen?.({ codexRunnerProtocol: "exec" } as never)).toBe(false);
+    expect(runnerDescriptor("claude_code").agentTools).toEqual({ mode: "sdk_mcp", capabilities: ["plans"] });
   });
 
   it("is the single source of the runner-id schema the domain re-exports", () => {

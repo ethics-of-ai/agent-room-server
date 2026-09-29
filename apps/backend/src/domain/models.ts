@@ -1,5 +1,6 @@
 import type { RegisteredRunnerKind } from "../runner/registry";
 import type { LanguageServiceExecutableConfig } from "./languageService";
+import type { PlanPersistedState } from "../plans/planModel";
 export interface ServiceConfig extends LanguageServiceExecutableConfig {
   runnerKind: AgentRunnerKind;
   agentRoomHome?: string;
@@ -427,6 +428,11 @@ export interface AgentTurnContext {
   attachments?: string[];
   /** Retained for explicit refusal of legacy callers; never grants agent access. */
   sketch?: AgentTurnSketchContext;
+  /**
+   * Require the thread's plan tools to be ready for this turn. It requires
+   * readiness only: it neither executes a plan nor changes permissions.
+   */
+  planToolsRequired?: boolean;
 }
 
 export interface AgentTurnSketchContext {
@@ -645,11 +651,12 @@ export interface AgentSessionMessageContext {
  * not register (an ACP adapter since removed from the environment) stays
  * readable as history; whether it can take a turn is decided at turn time.
  */
-export interface DurableAgentSessionDocument {
-  schemaVersion: 1;
+export interface DurableAgentSessionDocument extends PlanPersistedState {
+  schemaVersion: 2;
   session: AgentSession;
   turns: AgentSessionTurn[];
   messages: AgentSessionMessage[];
+  nativeToolRegistration?: { nativeSessionId: string; names: string[] };
 }
 
 export interface AgentBridgeMetrics {

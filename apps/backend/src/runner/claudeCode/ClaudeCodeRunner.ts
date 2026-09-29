@@ -22,11 +22,15 @@ import {
   type ClaudeCodeToolUseDisplay
 } from "./messageMapper";
 import {
+  loadClaudeCodeMcpServerFactory,
   loadClaudeCodeQuery,
   type ClaudeCodeCanUseTool,
+  type ClaudeCodeMcpServerLoader,
   type ClaudeCodeQuery,
   type ClaudeCodeQueryLoader
 } from "./sdk";
+import { ClaudeSessionTools } from "./agentTools";
+import { promptWithRegisteredTools } from "../shared/agentToolSets";
 import {
   claudeCodeCommandAudit,
   claudeCodeQueryOptions,
@@ -68,6 +72,8 @@ interface ClaudeCodeRunnerSession {
   model?: string;
   effort?: string;
   toolUses: Map<string, ClaudeCodeToolUseDisplay>;
+  /** AgentRoom tools attached at spawn; absent when the child was spawned without any. */
+  tools?: ClaudeSessionTools;
   activeTurn?: ClaudeCodeActiveTurn;
   // One SDK `result` message arrives per pushed user message, in order. Turns
   // queue here when their prompt is pushed so completions route to the turn
@@ -96,6 +102,7 @@ export class ClaudeCodeRunner implements AgentRunner {
   // instead of silently starting a fresh thread with no memory.
   private readonly sessions: PersistentRunnerSessionHost<ClaudeCodeRunnerSession>;
   private readonly loadQuery: ClaudeCodeQueryLoader;
+  private readonly loadMcpServer: ClaudeCodeMcpServerLoader;
   // Clarifying-question batches held open for a human answer, keyed by the
   // AgentRoom session. The CLI's `AskUserQuestion` tool reaches `decideToolUse`
   // through the SDK `canUseTool` callback and waits here; the answer route
@@ -105,9 +112,10 @@ export class ClaudeCodeRunner implements AgentRunner {
 
   constructor(
     private readonly config: ServiceConfig,
-    deps: { loadQuery?: ClaudeCodeQueryLoader; idleSessionTimeoutMs?: number; questionTimeoutMs?: number } = {}
+    deps: { loadQuery?: ClaudeCodeQueryLoader; loadMcpServer?: ClaudeCodeMcpServerLoader; idleSessionTimeoutMs?: number; questionTimeoutMs?: number } = {}
   ) {
     this.loadQuery = deps.loadQuery ?? loadClaudeCodeQuery;
+    this.loadMcpServer = deps.loadMcpServer ?? loadClaudeCodeMcpServerFactory;
     this.questions = new PendingQuestionRequests(
       deps.questionTimeoutMs !== undefined ? { timeoutMs: deps.questionTimeoutMs } : {}
     );
@@ -198,6 +206,11 @@ export class ClaudeCodeRunner implements AgentRunner {
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
 
       await this.applyTurnSettings(session, settings);
+      const registered = input.tools?.binding.allowedNames.length
+        ? await (session.tools?.registeredNames(session.query) ?? new Set<string>())
+        : new Set<string>();
+      const prompt = promptWithRegisteredTools(input, registered, "claude_code");
+      if (input.tools) session.tools?.bindTurn(input.runId, input.tools.binding);
       this.readCompactionThreshold(session, activeTurn);
       activeTurn.queue.push({
         type: "agent_activity",
@@ -214,7 +227,7 @@ export class ClaudeCodeRunner implements AgentRunner {
         }
       });
       session.turnsAwaitingResult.push(activeTurn);
-      session.input.push(await claudeCodeUserMessage(input.prompt, input.inputParts, session.sdkSessionId));
+      session.input.push(await claudeCodeUserMessage(prompt, input.inputParts, session.sdkSessionId));
 
       for await (const event of activeTurn.queue) {
         observeRunnerStreamEvent(timing, event);
@@ -228,6 +241,7 @@ export class ClaudeCodeRunner implements AgentRunner {
     } finally {
       this.activeTurns.delete(input.runId);
       if (session) {
+        session.tools?.releaseTurn(input.runId);
         this.sessions.touch(session);
         if (session.activeTurn === activeTurn) {
           session.activeTurn = undefined;
@@ -344,11 +358,13 @@ export class ClaudeCodeRunner implements AgentRunner {
     const canUseTool: ClaudeCodeCanUseTool | undefined = this.config.clarifyingQuestionsEnabled !== false
       ? (toolName, toolInput, options) => this.decideToolUse(key, () => session, toolName, toolInput, options)
       : undefined;
+    const tools = input.tools?.catalog.length ? new ClaudeSessionTools(await this.loadMcpServer(), input.tools.catalog) : undefined;
     const query = queryFunction({
       prompt: sessionInput,
       options: claudeCodeQueryOptions(this.config, input.workspacePath, settings, {
         ...(resumeSessionId ? { resume: resumeSessionId } : {}),
-        ...(canUseTool ? { canUseTool } : {})
+        ...(canUseTool ? { canUseTool } : {}),
+        ...(tools ? { agentTools: { ...tools.queryOptions(), ...(input.tools?.instructions ? { instructions: input.tools.instructions } : {}) } } : {})
       })
     });
     session = {
@@ -358,6 +374,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       model: settings.model,
       effort: settings.effort,
       toolUses: new Map(),
+      ...(tools ? { tools } : {}),
       turnsAwaitingResult: []
     };
     this.sessions.register(session);
@@ -384,6 +401,9 @@ export class ClaudeCodeRunner implements AgentRunner {
     toolInput: Record<string, unknown>,
     options: { signal?: AbortSignal; toolUseID?: string }
   ): ReturnType<ClaudeCodeCanUseTool> {
+    // AgentRoom's own tools, by exact name; `allowedTools` normally approves
+    // them before this callback is consulted.
+    if (getSession()?.tools?.allows(toolName)) return { behavior: "allow", updatedInput: toolInput };
     if (toolName !== ASK_USER_QUESTION_TOOL) {
       return { behavior: "deny", message: HEADLESS_PERMISSION_DENY_MESSAGE };
     }
@@ -472,6 +492,11 @@ export class ClaudeCodeRunner implements AgentRunner {
         this.sessions.rememberResumableId(session.key, session.sdkSessionId);
       }
     }
+    // A tool call's owner is the oldest turn still owed a result, never the
+    // active turn. With none, the call fails closed: a turn is awaited before
+    // its prompt is sent, so none of its own calls can arrive earlier.
+    const owner = session.turnsAwaitingResult.find((turn) => !turn.finalEvent);
+    if (owner) session.tools?.observe(message, owner.runId);
     const completion = completionFromClaudeCodeMessage(message);
     const target = completion
       ? this.resolveCompletionOwner(session, completion)

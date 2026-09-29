@@ -31,6 +31,22 @@ export class AgentTurnTelemetryStore {
     });
   }
 
+  /** Record acceptance and log it with the request's safe size metadata. */
+  logAccepted(
+    session: AgentSession,
+    turn: AgentSessionTurn,
+    request: { requestStartedAtMs: number; promptBytes: number; contextPathCount: number; attachmentCount: number; runnerInputPartCount: number }
+  ): void {
+    const acceptedAtMs = Date.now();
+    this.accept(turn.id, request.requestStartedAtMs, acceptedAtMs);
+    const { requestStartedAtMs, ...sizes } = request;
+    logger.info({
+      ...turnLogFields(session, turn),
+      acceptDurationMs: acceptedAtMs - requestStartedAtMs,
+      ...sizes
+    }, "Agent turn accepted");
+  }
+
   markRunnerStarted(turnId: string): { runnerStartedAtMs?: number; requestStartedAtMs?: number } {
     const telemetry = this.telemetry.get(turnId);
     if (!telemetry) return {};
@@ -39,6 +55,17 @@ export class AgentTurnTelemetryStore {
       runnerStartedAtMs: telemetry.runnerStartedAtMs,
       requestStartedAtMs: telemetry.requestStartedAtMs
     };
+  }
+
+  /** Mark the runner started and log the time it took to get there. */
+  logRunnerStarted(session: AgentSession, turn: AgentSessionTurn): void {
+    const telemetry = this.markRunnerStarted(turn.id);
+    logger.info({
+      ...turnLogFields(session, turn),
+      timeToRunnerStartMs: telemetry.runnerStartedAtMs && telemetry.requestStartedAtMs
+        ? telemetry.runnerStartedAtMs - telemetry.requestStartedAtMs
+        : undefined
+    }, "Agent turn runner consumption started");
   }
 
   recordRunnerEvent(turn: AgentSessionTurn, event: AgentRunnerEvent): void {
@@ -72,10 +99,7 @@ export class AgentTurnTelemetryStore {
     if (!telemetry) return;
     const completedAtMs = Date.now();
     logger.info({
-      sessionId: session.id,
-      turnId: turn.id,
-      workspaceId: session.workspaceId,
-      runnerKind: session.runnerKind,
+      ...turnLogFields(session, turn),
       status,
       acceptDurationMs: telemetry.acceptedAtMs - telemetry.requestStartedAtMs,
       ...(telemetry.runnerStartedAtMs ? { timeToRunnerStartMs: telemetry.runnerStartedAtMs - telemetry.requestStartedAtMs } : {}),
@@ -98,4 +122,8 @@ export class AgentTurnTelemetryStore {
   delete(turnId: string): void {
     this.telemetry.delete(turnId);
   }
+}
+
+function turnLogFields(session: AgentSession, turn: AgentSessionTurn) {
+  return { sessionId: session.id, turnId: turn.id, workspaceId: session.workspaceId, runnerKind: session.runnerKind };
 }

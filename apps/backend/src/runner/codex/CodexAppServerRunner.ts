@@ -3,11 +3,9 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { CodingAgentCapabilities, CodingAgentTurnSettings, ServiceConfig } from "../../domain/models";
 import { logger } from "../../logging/logger";
 import { redactSecrets } from "../../util/redactSecrets";
-import { randomUUID } from "node:crypto";
 import {
   AgentRunnerInputError,
   type AgentRunner,
-  type AgentRunnerActivity,
   type AgentRunnerEvent,
   type AgentRunnerInput,
   type AgentRunnerInputPart,
@@ -39,17 +37,12 @@ import {
   type JsonRpcNotification,
   type JsonRpcRequest
 } from "../shared/JsonRpcLineClient";
-import {
-  PendingQuestionRequests,
-  type QuestionAnswerResult,
-  type QuestionWaitOutcome
-} from "../shared/PendingQuestionRequests";
-import {
-  CODEX_REQUEST_USER_INPUT_METHOD,
-  codexUserInputBatch,
-  codexUserInputRequestSchema,
-  codexUserInputResponse
-} from "./userInput";
+import { PendingQuestionRequests, type QuestionAnswerResult } from "../shared/PendingQuestionRequests";
+import { promptWithRegisteredTools } from "../shared/agentToolSets";
+import { CODEX_REQUEST_USER_INPUT_METHOD } from "./userInput";
+import { decideCodexUserInput } from "./questionWait";
+import { CODEX_DYNAMIC_TOOL_CALL_METHOD, codexDynamicToolSpecs, serveCodexDynamicToolCall } from "./dynamicTools";
+import type { CodexActiveTurn, CodexRunnerSession } from "./types";
 import {
   createRunnerStreamTiming,
   observeRunnerStreamEvent,
@@ -57,24 +50,6 @@ import {
 } from "../shared/streamTiming";
 import { PersistentRunnerSessionHost } from "../shared/PersistentRunnerSessionHost";
 import { runnerDescriptor } from "../registry";
-
-interface JsonRpcActiveTurn {
-  runId: string;
-  queue: AsyncEventQueue<AgentRunnerEvent>;
-  finalEvent?: AgentRunnerEvent;
-  completedByProtocol: boolean;
-  turnId?: string;
-  exitStatus?: { code: number | null; signal: NodeJS.Signals | null };
-  failureCategory?: "process_error" | "process_exit" | "process_signal";
-}
-
-interface JsonRpcRunnerSession {
-  key: string;
-  client: JsonRpcLineClient;
-  child: ChildProcessWithoutNullStreams;
-  threadId: string;
-  activeTurn?: JsonRpcActiveTurn;
-}
 
 // Startup requests get generous ceilings: they are hang watchdogs, not SLAs.
 // A codex binary that never answers `initialize` or `thread/start` would
@@ -103,18 +78,18 @@ const CODEX_CLIENT_LABEL = "Codex app-server";
 
 export class CodexAppServerRunner implements AgentRunner {
   private readonly processes = new Map<string, ReturnType<typeof spawn>>();
-  private readonly activeJsonRpcTurns = new Map<string, { session: JsonRpcRunnerSession; turn: JsonRpcActiveTurn }>();
+  private readonly activeJsonRpcTurns = new Map<string, { session: CodexRunnerSession; turn: CodexActiveTurn }>();
   // Persistent per-session app-server children, their idle reaping, and the
   // native thread ids that outlive them: a session whose app-server died, was
   // killed by a slow cancel, or was idle-reaped resumes its conversation on the
   // next turn (`thread/resume`) instead of silently starting a fresh thread
   // with no memory.
-  private readonly sessions: PersistentRunnerSessionHost<JsonRpcRunnerSession>;
+  private readonly sessions: PersistentRunnerSessionHost<CodexRunnerSession>;
   private readonly startupTimeouts: { initializeMs: number; threadStartMs: number };
   private readonly interruptTimeoutMs: number;
   // Clarifying-question batches held open for a human answer, keyed by the
   // AgentRoom session. The app-server's `item/tool/requestUserInput` request
-  // reaches `decideUserInput` through the JSON-RPC request dispatcher and
+  // reaches `decideCodexUserInput` through the JSON-RPC request dispatcher and
   // waits here; the answer route settles it. Released with the turn, the
   // child, and the session.
   private readonly questions: PendingQuestionRequests;
@@ -199,7 +174,8 @@ export class CodexAppServerRunner implements AgentRunner {
       yield* this.runJsonRpc(input);
       return;
     }
-    yield* this.runExec(input);
+    // The exec protocol has no tool transport: required tools fail the turn.
+    yield* this.runExec({ ...input, prompt: promptWithRegisteredTools(input, new Set(), "codex") });
   }
 
   validateInputParts(inputParts: AgentRunnerInputPart[] | undefined): void {
@@ -267,8 +243,12 @@ export class CodexAppServerRunner implements AgentRunner {
 
   // A thread id hydrated from the durable session store: the next turn's
   // acquire miss takes the thread/resume branch exactly as after a reap.
-  rememberResumableId(input: { sessionId: string; nativeSessionId: string }): void {
-    this.sessions.rememberResumableId(input.sessionId, input.nativeSessionId);
+  rememberResumableId(input: { sessionId: string; nativeSessionId: string; registeredToolNames?: readonly string[] }): void {
+    this.sessions.rememberResumableId(input.sessionId, input.nativeSessionId, input.registeredToolNames);
+  }
+
+  nativeToolRegistration(sessionId: string): { nativeSessionId: string; names: string[] } | undefined {
+    return this.sessions.toolRegistration(sessionId);
   }
 
   answerQuestionRequest(input: { sessionId: string; requestId: string; answers: CanonicalQuestionAnswer[] }): QuestionAnswerResult {
@@ -443,12 +423,14 @@ export class CodexAppServerRunner implements AgentRunner {
     const timing = createRunnerStreamTiming();
     const codexArgs = jsonRpcArgs(this.config.codexArgs);
     const command = commandAudit(this.config.codexExecutable, codexArgs);
-    const activeTurn: JsonRpcActiveTurn = {
+    const activeTurn: CodexActiveTurn = {
       runId: input.runId,
       queue: new AsyncEventQueue<AgentRunnerEvent>(),
-      completedByProtocol: false
+      completedByProtocol: false,
+      ...(input.tools ? { tools: input.tools } : {}),
+      toolCalls: new AbortController()
     };
-    let session: JsonRpcRunnerSession | undefined;
+    let session: CodexRunnerSession | undefined;
 
     logger.info({
       runId: input.runId,
@@ -471,10 +453,11 @@ export class CodexAppServerRunner implements AgentRunner {
       const settings = effectiveSettings(this.config, input.settings);
       session = await this.getOrCreateJsonRpcSession(input, activeTurn, settings);
       this.activeJsonRpcTurns.set(input.runId, { session, turn: activeTurn });
+      const prompt = promptWithRegisteredTools(input, session.registeredToolNames, "codex");
 
       this.startJsonRpcTurn(session, activeTurn, {
         threadId: session.threadId,
-        input: jsonRpcTurnInput(input),
+        input: jsonRpcTurnInput({ ...input, prompt }),
         ...jsonRpcTurnSettings(settings)
       });
 
@@ -488,6 +471,7 @@ export class CodexAppServerRunner implements AgentRunner {
         error: error instanceof Error ? error.message : String(error)
       };
     } finally {
+      activeTurn.toolCalls.abort();
       this.activeJsonRpcTurns.delete(input.runId);
       if (session) {
         this.sessions.touch(session);
@@ -531,9 +515,9 @@ export class CodexAppServerRunner implements AgentRunner {
 
   private async getOrCreateJsonRpcSession(
     input: AgentRunnerInput,
-    activeTurn: JsonRpcActiveTurn,
+    activeTurn: CodexActiveTurn,
     settings: CodingAgentTurnSettings
-  ): Promise<JsonRpcRunnerSession> {
+  ): Promise<CodexRunnerSession> {
     const key = input.sessionId ?? input.runId;
     const existing = this.sessions.acquire(key);
     if (existing) {
@@ -550,7 +534,7 @@ export class CodexAppServerRunner implements AgentRunner {
     });
     const stderrTail = collectStderrTail(child);
     const client = new JsonRpcLineClient(child, CODEX_CLIENT_LABEL);
-    const session: JsonRpcRunnerSession = {
+    const session: CodexRunnerSession = {
       key,
       client,
       child,
@@ -592,14 +576,8 @@ export class CodexAppServerRunner implements AgentRunner {
 
     try {
       await withTimeout(client.request("initialize", {
-        clientInfo: {
-          name: "agentroom",
-          title: "AgentRoom",
-          version: "0.1.0"
-        },
-        capabilities: {
-          experimentalApi: true
-        }
+        clientInfo: { name: "agentroom", title: "AgentRoom", version: "0.1.0" },
+        capabilities: { experimentalApi: true }
       }), this.startupTimeouts.initializeMs, "Timed out initializing Codex app-server");
 
       // The shared thread params carry the operator's explicit runtime
@@ -618,10 +596,10 @@ export class CodexAppServerRunner implements AgentRunner {
       let threadResponse: Record<string, unknown> | undefined;
       if (resumeThreadId) {
         try {
-          threadResponse = objectValue(await withTimeout(client.request("thread/resume", {
-            threadId: resumeThreadId,
-            ...threadParams
-          }), this.startupTimeouts.threadStartMs, "Timed out resuming Codex app-server thread"));
+          threadResponse = objectValue(await withTimeout(client.request("thread/resume", { threadId: resumeThreadId, ...threadParams }),
+            this.startupTimeouts.threadStartMs, "Timed out resuming Codex app-server thread"));
+          // The restored thread keeps the catalog it started with; known only if this backend recorded it.
+          session.registeredToolNames = this.sessions.resumableToolNames(key);
         } catch (error) {
           // A hung child is a startup failure, not a resume miss.
           if (error instanceof TimeoutError) throw error;
@@ -637,8 +615,11 @@ export class CodexAppServerRunner implements AgentRunner {
         }
       }
       if (!threadResponse) {
+        const tools = input.tools?.catalog ?? [];
+        session.registeredToolNames = new Set(tools.map((tool) => tool.name));
         threadResponse = objectValue(await withTimeout(client.request("thread/start", {
           ...threadParams,
+          ...(tools.length > 0 ? { dynamicTools: codexDynamicToolSpecs(tools) } : {}),
           serviceName: "AgentRoom",
           ephemeral: false,
           experimentalRawEvents: false,
@@ -652,7 +633,7 @@ export class CodexAppServerRunner implements AgentRunner {
       }
 
       session.threadId = threadId;
-      this.sessions.rememberResumableId(key, threadId);
+      this.sessions.rememberResumableId(key, threadId, session.registeredToolNames);
       return session;
     } catch (error) {
       this.sessions.destroy(session);
@@ -662,8 +643,8 @@ export class CodexAppServerRunner implements AgentRunner {
   }
 
   private startJsonRpcTurn(
-    session: JsonRpcRunnerSession,
-    activeTurn: JsonRpcActiveTurn,
+    session: CodexRunnerSession,
+    activeTurn: CodexActiveTurn,
     params: Record<string, unknown>
   ): void {
     session.client.request("turn/start", params)
@@ -693,105 +674,26 @@ export class CodexAppServerRunner implements AgentRunner {
   }
 
   /**
-   * The app-server's own requests. `item/tool/requestUserInput` is the one
-   * served: the agent's `request_user_input` tool pausing the turn for the
-   * person driving the session. Anything else — the approval family under a
+   * The app-server's own requests. Two are served: `item/tool/requestUserInput`,
+   * the agent's `request_user_input` tool pausing the turn for the person
+   * driving the session, and `item/tool/call`, a call to an AgentRoom tool the
+   * thread declared at start. Anything else — the approval family under a
    * prompting `approvalPolicy`, a method a newer app-server invents — is
    * refused with `-32601` rather than left unanswered, which is what hung a
    * turn before the dispatcher existed.
    */
-  private async handleJsonRpcRequest(session: JsonRpcRunnerSession, request: JsonRpcRequest): Promise<unknown> {
+  private async handleJsonRpcRequest(session: CodexRunnerSession, request: JsonRpcRequest): Promise<unknown> {
     if (request.method === CODEX_REQUEST_USER_INPUT_METHOD) {
       // Defense in depth for a Codex process whose global config or version
       // still exposes the tool despite the per-thread false pins.
       if (this.config.clarifyingQuestionsEnabled === false) return { answers: {} };
-      return this.decideUserInput(session, request.params);
+      return decideCodexUserInput(session, request.params, { questions: this.questions, touch: (value) => this.sessions.touch(value) });
     }
+    if (request.method === CODEX_DYNAMIC_TOOL_CALL_METHOD) return serveCodexDynamicToolCall(session, request.params);
     throw new JsonRpcMethodNotFoundError(request.method);
   }
 
-  /**
-   * Hold a `request_user_input` batch open for a human answer.
-   *
-   * The questions become a canonical batch announced on the turn's event
-   * stream, the wait sits in the shared store until the answer route settles
-   * it (or the clock, or the turn's cancellation), and the answers go back as
-   * the request's response keyed by the agent's own question ids. A batch the
-   * backend cannot hold open — no live turn, a full session, a request outside
-   * the bounds — is announced as a record and answered empty, which the agent
-   * reads as "nobody answered": the channel never picks for the person.
-   */
-  private async decideUserInput(session: JsonRpcRunnerSession, params: unknown): Promise<unknown> {
-    const parsed = codexUserInputRequestSchema.safeParse(params);
-    if (!parsed.success) {
-      logger.warn({ runnerKind: "codex", threadId: session.threadId }, "Codex request_user_input params failed validation");
-      return { answers: {} };
-    }
-    const batch = codexUserInputBatch(parsed.data);
-    if ("error" in batch) {
-      logger.warn({ runnerKind: "codex", threadId: session.threadId, reason: batch.error }, "Codex request_user_input batch refused");
-      return { answers: {} };
-    }
-    this.sessions.touch(session);
-    const turn = session.activeTurn;
-    const requestId = `question-${randomUUID()}`;
-    const wait = turn && !turn.finalEvent
-      ? this.questions.wait({ sessionKey: session.key, requestId, sets: batch.sets })
-      : undefined;
-    const runner = {
-      nativeSessionId: session.threadId,
-      ...(parsed.data.turnId ? { nativeTurnId: parsed.data.turnId } : {}),
-      ...(parsed.data.itemId ? { nativeItemId: parsed.data.itemId } : {}),
-      native: { method: CODEX_REQUEST_USER_INPUT_METHOD }
-    };
-    const pushActivity = (activity: AgentRunnerActivity): void => {
-      const target = session.activeTurn;
-      if (target && !target.finalEvent) target.queue.push({ type: "agent_activity", activity });
-    };
-    pushActivity({
-      kind: "codex_question_requested",
-      title: "Questions for you",
-      content: { questionCount: batch.sets.length, ...(parsed.data.itemId ? { itemId: parsed.data.itemId } : {}) },
-      canonical: { kind: "question_requested", ...(wait ? { requestId } : {}), questionSets: batch.sets },
-      runner
-    });
-    if (!wait) {
-      pushActivity({
-        kind: "codex_question_resolved",
-        title: "Questions not presented",
-        content: { status: "cancelled" },
-        canonical: { kind: "question_resolved", status: "cancelled" },
-        runner
-      });
-      return codexUserInputResponse(batch, { status: "unavailable" });
-    }
-    const outcome: QuestionWaitOutcome = await wait;
-    pushActivity({
-      kind: "codex_question_resolved",
-      title: outcome.status === "answered" ? "Questions answered" : outcome.status === "timeout" ? "Questions timed out" : "Questions cancelled",
-      content: { status: outcome.status, ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}) },
-      canonical: {
-        kind: "question_resolved",
-        requestId,
-        status: outcome.status,
-        ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}),
-        ...(outcome.status === "answered"
-          ? {
-              // A sensitive set's text reaches the agent and nowhere else.
-              questionAnswers: outcome.answers.map((answer) =>
-                batch.sets.find((set) => set.setId === answer.setId)?.sensitive
-                  ? { setId: answer.setId, selectedOptionIds: answer.selectedOptionIds }
-                  : answer
-              )
-            }
-          : {})
-      },
-      runner
-    });
-    return codexUserInputResponse(batch, outcome);
-  }
-
-  private handleJsonRpcNotification(session: JsonRpcRunnerSession, notification: JsonRpcNotification): void {
+  private handleJsonRpcNotification(session: CodexRunnerSession, notification: JsonRpcNotification): void {
     const active = session.activeTurn;
     if (!active) return;
     this.sessions.touch(session);

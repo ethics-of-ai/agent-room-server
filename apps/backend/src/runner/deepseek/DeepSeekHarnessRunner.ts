@@ -33,6 +33,7 @@ import { runnerDescriptor } from "../registry";
 import { DeepSeekToolRelay } from "./cordis/DeepSeekToolRelay";
 import { AGENTROOM_DEEPSEEK_TOOLS_FD } from "./cordis/runtime";
 import { prepareDeepSeekNativeTools } from "./nativeTools";
+import { promptWithRegisteredTools } from "../shared/agentToolSets";
 import { testDeepSeekConnection } from "./connectionTest";
 import { prepareDeepSeekBootstrap } from "./bootstrap";
 import { deepseekCapabilities } from "./capabilities";
@@ -413,8 +414,8 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       session = await this.getOrCreateSession(input, activeTurn, settings);
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
       if (input.tools) session.toolRelay?.bind(input.tools.binding);
-
-      const contentBlocks = await deepseekContentBlocks(input.prompt, input.inputParts);
+      const prompt = promptWithRegisteredTools(input, session.toolRelay?.registeredNames() ?? new Set(), "deepseek");
+      const contentBlocks = await deepseekContentBlocks(prompt, input.inputParts);
       // From this point onward the runtime may have accepted model-visible state.
       // If the child is lost, a retry under the same AgentRoom session id would
       // be a fresh conversation and must be refused.
@@ -553,8 +554,12 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       // child rather than to the prompt. A different selection requires a new
       // runtime, which is allowed only when the descriptor proves restoration.
       if (existing.model === settings.model && existing.provider === settings.provider) {
+        // The child keeps the catalog it registered. A turn that requires a
+        // different one fails; an optional turn continues and is told which
+        // tools are missing, because replacing this child would lose the
+        // conversation.
         const signature = input.tools ? JSON.stringify(input.tools.catalog) : undefined;
-        if (existing.toolCatalogSignature !== signature) {
+        if (existing.toolCatalogSignature !== signature && input.tools?.required) {
           throw new Error("DeepSeek Harness tool catalog changed; create a new AgentRoom session");
         }
         if ((input.tools?.required ?? Boolean(input.tools?.binding.allowedNames.length)) && !existing.toolRelay) {

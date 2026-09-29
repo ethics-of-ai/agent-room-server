@@ -129,6 +129,10 @@ export type RunnerWorkspaceSkills =
  *   custom-tool callback envelope (Cursor's host `tools/invoke` request).
  * - `cordis_pipe` — the adapter registers definitions in its persistent Cordis
  *   child and relays calls over the private inherited pipe.
+ * - `dynamic_tools` — the adapter declares definitions on the native thread at
+ *   start and answers the server's per-call tool request (Codex app-server).
+ * - `sdk_mcp` — the adapter serves definitions from an in-process MCP server it
+ *   attaches to each SDK child (Claude Code).
  * - `none` — no AgentRoom tool transport. The runner keeps its own question
  *   path untouched; no tool is advertised and none is dispatched.
  *
@@ -138,8 +142,10 @@ export type RunnerWorkspaceSkills =
  */
 export type RunnerAgentTools =
   | {
-      readonly mode: "custom_tools" | "cordis_pipe";
+      readonly mode: "custom_tools" | "cordis_pipe" | "dynamic_tools" | "sdk_mcp";
       readonly capabilities: readonly AgentToolCapability[];
+      /** Absent means always; present, the transport exists only under this configuration. */
+      readonly availableWhen?: (config: ServiceConfig) => boolean;
     }
   | { readonly mode: "none" };
 
@@ -274,7 +280,8 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // Repo skills load natively with no isolation toggle; registering the
     // workspace is the trust decision (docs/safety/TRUST_AND_SAFETY.md).
     workspaceSkills: { mode: "native" },
-    agentTools: { mode: "none" },
+    // Questions stay native (`request_user_input`); exec mode has no tool channel.
+    agentTools: { mode: "dynamic_tools", capabilities: ["plans"], availableWhen: (config) => (config.codexRunnerProtocol ?? "jsonrpc") === "jsonrpc" },
     skillSourceDirs: [".codex/skills", ".agents/skills"],
     skillInvocationPrefix: "$",
     settingsKeyPrefix: "codex",
@@ -343,7 +350,8 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
       // only under `bypassPermissions`, and it stays the adapter's.
       gate: (config) => loadsWorkspaceSettings(config)
     },
-    agentTools: { mode: "none" },
+    // Questions stay on the native `AskUserQuestion` callback.
+    agentTools: { mode: "sdk_mcp", capabilities: ["plans"] },
     skillSourceDirs: [".claude/skills"],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "claudeCode",
@@ -418,7 +426,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // until that is verified against a real runtime: advertising invocations a
     // session would ignore is the failure the skills read exists to avoid.
     workspaceSkills: { mode: "none" },
-    agentTools: { mode: "cordis_pipe", capabilities: ["questions"] },
+    agentTools: { mode: "cordis_pipe", capabilities: ["questions", "plans"] },
     skillSourceDirs: [],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "deepseek",
@@ -495,7 +503,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // precedence.
     // The one custom-tools transport: the host relays every advertised
     // AgentRoom tool through its single `tools/invoke` request.
-    agentTools: { mode: "custom_tools", capabilities: ["questions"] },
+    agentTools: { mode: "custom_tools", capabilities: ["questions", "plans"] },
     skillSourceDirs: [".cursor/skills", ".agents/skills", ".claude/skills", ".codex/skills"],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "cursor",

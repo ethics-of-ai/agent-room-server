@@ -1,13 +1,9 @@
 import { randomUUID } from "node:crypto";
-import {
-  bindAgentTools,
-  unboundAgentToolResult,
-  type AgentToolBinding,
-  type AgentToolCallTelemetry,
-  type AgentToolHandler
-} from "../../agentTools/dispatch";
+import { unboundAgentToolResult, type AgentToolCallTelemetry } from "../../agentTools/dispatch";
 import { QUESTIONS_ASK_LOGICAL_ID } from "../../agentTools/questionAsk";
-import type { AgentRunnerActivity } from "../AgentRunner";
+import { prepareAgentRunnerToolSet } from "../../agentTools/runnerToolSet";
+import type { AgentRunnerActivity, AgentRunnerToolSet } from "../AgentRunner";
+import { combineRunnerToolSets } from "../shared/agentToolSets";
 import { logger } from "../../logging/logger";
 import {
   JsonRpcMethodNotFoundError,
@@ -81,9 +77,10 @@ async function dispatchCursorToolCall(
     const liveRunId = turn ? turn.cursorRunId ?? (await turn.cursorRunIdKnown) : undefined;
     if (liveRunId !== hostRunId || session.activeTurn !== turn) return unboundAgentToolResult(tool);
   }
-  const binding = session.toolBinding;
-  if (!binding) return unboundAgentToolResult(tool);
-  return binding.invoke(tool, input);
+  const bound = session.toolBinding;
+  if (!bound) return unboundAgentToolResult(tool);
+  // The host has no per-call cancel; turn disposal is what ends a call.
+  return bound.tools.binding.invoke({ callId: `cursor-call-${randomUUID()}`, name: tool, arguments: input, signal: bound.signal });
 }
 
 /**
@@ -92,42 +89,48 @@ async function dispatchCursorToolCall(
  * late relay from a settled or switched turn is answered with the tool's
  * unavailable text instead of being dispatched into the live turn.
  *
- * Handlers beyond the question tool arrive through `extraHandlers`, keyed by
- * logical id — the injection seam a new owning module uses. The catalog
- * contribution and the handler travel together: a bound tool with no handler
- * is a wiring error the bind itself refuses.
+ * Every other tool arrives in the session-supplied set, already bound to the
+ * AgentRoom turn; this adapter adds only the question tool it owns and never
+ * learns what the session's tools do.
  */
 export function bindCursorTurnTools(input: {
   session: CursorRunnerSession;
   turn: CursorActiveTurn;
-  allowed: readonly string[];
+  /** The adapter-owned question tool, when the question gate allows it. */
+  questionIds: readonly string[];
   questions: PendingQuestionRequests;
-  extraHandlers?: Readonly<Record<string, AgentToolHandler>>;
-}): AgentToolBinding {
+  sessionTools?: AgentRunnerToolSet;
+}): AgentRunnerToolSet {
   const { session, turn, questions } = input;
-  const binding = bindAgentTools({
-    allowed: input.allowed,
-    handlers: {
-      [QUESTIONS_ASK_LOGICAL_ID]: (toolInput) => runQuestionToolCall(session, turn, questions, toolInput),
-      ...input.extraHandlers
-    },
-    turn: {
-      sessionKey: session.key,
-      runId: turn.runId,
-      isLive: () => session.activeTurn === turn && !turn.completed
-    },
-    options: { onCall: logToolCall }
+  const prepared = prepareAgentRunnerToolSet({
+    runId: turn.runId,
+    sessionKey: session.key,
+    catalog: input.questionIds,
+    allowed: input.questionIds,
+    required: false,
+    handlers: { [QUESTIONS_ASK_LOGICAL_ID]: (toolInput) => runQuestionToolCall(session, turn, questions, toolInput) },
+    isLive: () => session.activeTurn === turn && !turn.completed,
+    onCall: logToolCall
   });
-  session.toolBinding = binding;
-  return binding;
+  const lifetime = new AbortController();
+  const tools = combineRunnerToolSets(input.sessionTools, prepared.tools);
+  session.toolBinding = {
+    tools,
+    signal: lifetime.signal,
+    dispose: () => {
+      lifetime.abort();
+      prepared.dispose();
+    }
+  };
+  return tools;
 }
 
 /** End the turn's binding; a racing newer binding is left alone. */
 export function disposeCursorTurnTools(session: CursorRunnerSession): void {
-  const binding = session.toolBinding;
-  if (!binding) return;
-  binding.dispose();
-  if (session.toolBinding === binding) session.toolBinding = undefined;
+  const bound = session.toolBinding;
+  if (!bound) return;
+  bound.dispose();
+  if (session.toolBinding === bound) session.toolBinding = undefined;
 }
 
 /** Safe metadata only — a tool's arguments and results never reach the log. */

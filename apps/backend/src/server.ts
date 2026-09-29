@@ -169,7 +169,8 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     runnerConfig: input.config,
     ...(sceneEngineEnabled ? { diagramInstruction: DIAGRAM_PROMPT_INSTRUCTION } : {}),
     ...(diagramHumanEdits ? { diagramHumanEdits } : {}),
-    ...(diagramRenderFeedback ? { diagramRenderFeedback } : {})
+    ...(diagramRenderFeedback ? { diagramRenderFeedback } : {}),
+    planPrompt: { promptForTurn: (session) => agentSessions.planTools.promptForTurn(session) }
   });
   // Session records outlive the process. The store is write-through, so the
   // flush at close only drains what a mark left in flight; a crash loses at
@@ -186,7 +187,8 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     contextAssembler,
     ...(artifactStore ? { artifacts: artifactStore } : {}),
     attachments: agentAttachments,
-    durableSessions
+    durableSessions,
+    runnerConfig: input.config
   });
   await agentSessions.initialize();
   const repositorySketches = new RepositorySketchService({

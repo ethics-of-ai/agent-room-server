@@ -52,6 +52,11 @@ export class DeepSeekToolRelay {
     }
   }
 
+  /** The tool names the plugin confirmed it registered; empty until then. */
+  registeredNames(): ReadonlySet<string> {
+    return new Set(this.ready && !this.closed ? this.catalog.map((tool) => tool.name) : []);
+  }
+
   bind(binding: AgentRunnerToolBinding): void {
     if (!this.ready || this.closed) throw new Error("AgentRoom Cordis tools plugin is unavailable");
     if (this.binding) throw new Error("AgentRoom Cordis tools already have a live turn binding");

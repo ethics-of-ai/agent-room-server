@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { prepareAgentRunnerToolSet } from "../../agentTools/runnerToolSet";
-import { unboundAgentToolResult } from "../../agentTools/dispatch";
 import { QUESTIONS_ASK_LOGICAL_ID } from "../../agentTools/questionAsk";
 import type { AgentRunnerActivity, AgentRunnerInput, AgentRunnerToolSet } from "../AgentRunner";
 import type { PendingQuestionRequests } from "../shared/PendingQuestionRequests";
+import { combineRunnerToolSets } from "../shared/agentToolSets";
 import { nativeQuestionBatch, nativeQuestionToolResult } from "../shared/nativeQuestions";
 
 /** Adds the adapter-owned question handler to the shared turn tool catalog. */
@@ -20,6 +20,7 @@ export function prepareDeepSeekNativeTools(input: {
     sessionKey,
     catalog: [QUESTIONS_ASK_LOGICAL_ID],
     allowed: [QUESTIONS_ASK_LOGICAL_ID],
+    required: true,
     isLive: input.isLive,
     handlers: {
       [QUESTIONS_ASK_LOGICAL_ID]: async (value, invocation) => {
@@ -57,19 +58,5 @@ export function prepareDeepSeekNativeTools(input: {
       }
     }
   });
-  const existing = input.turn.tools;
-  const questionNames = new Set(prepared.tools.catalog.map((entry) => entry.name));
-  return {
-    tools: {
-      required: existing?.required ?? Boolean(existing?.binding.allowedNames.length),
-      catalog: [...(existing?.catalog ?? []).filter((entry) => !questionNames.has(entry.name)), ...prepared.tools.catalog],
-      binding: {
-        runId: input.turn.runId,
-        allowedNames: [...(existing?.binding.allowedNames ?? []).filter((name) => !questionNames.has(name)), ...prepared.tools.binding.allowedNames],
-        invoke: (call) => questionNames.has(call.name) ? prepared.tools.binding.invoke(call)
-          : existing ? existing.binding.invoke(call) : Promise.resolve(unboundAgentToolResult(call.name))
-      }
-    },
-    dispose: prepared.dispose
-  };
+  return { tools: combineRunnerToolSets(input.turn.tools, prepared.tools), dispose: prepared.dispose };
 }

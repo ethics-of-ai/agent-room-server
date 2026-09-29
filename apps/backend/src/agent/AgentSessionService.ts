@@ -13,6 +13,7 @@ import type {
   AgentRunnerKind,
   CodingAgentTurnSettings,
   DurableAgentSessionDocument,
+  ServiceConfig,
   StatusSnapshot
 } from "../domain/models";
 import { DURABLE_AGENT_SESSION_SCHEMA_VERSION } from "../domain/schemas";
@@ -23,6 +24,7 @@ import {
   AgentRunnerInputError,
   type AgentRunner,
   type AgentRunnerInputPart,
+  type AgentRunnerToolSet,
   type CanonicalQuestionAnswer
 } from "../runner/AgentRunner";
 import { questionAnswerRefusal, type QuestionAnswerResult } from "../runner/shared/PendingQuestionRequests";
@@ -44,37 +46,22 @@ import { AgentSessionMessageStore } from "./AgentSessionMessageStore";
 import { AgentTurnEventApplier, type OutstandingQuestionRequest } from "./AgentTurnEventApplier";
 import { AgentTurnGitDiffTracker } from "./AgentTurnGitDiffTracker";
 import { AgentTurnTelemetryStore } from "./AgentTurnTelemetryStore";
+import {
+  AgentSessionError,
+  BACKEND_RESTARTED_TURN_ERROR,
+  type CreateAgentSessionInput,
+  type StartAgentTurnInput
+} from "./agentSessionTypes";
+import type { PlanReadResult, PlanTurnOutcome, ThreadPlanService } from "../plans/ThreadPlanService";
+import { createSessionPlans, type ThreadPlanTurnTools } from "../plans/planTurnTools";
+import type { PlanPersistedState } from "../plans/planModel";
 
-export class AgentSessionError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode = 400
-  ) {
-    super(message);
-  }
-}
-
-export interface CreateAgentSessionInput {
-  workspaceId: string;
-  runnerKind?: AgentRunnerKind;
-  gitBranch?: string;
-  settings?: CodingAgentTurnSettings;
-  title?: string;
-}
-
-export interface StartAgentTurnInput {
-  sessionId: string;
-  message: string;
-  context?: AgentTurnContext;
-  settings?: CodingAgentTurnSettings;
-}
-
-/**
- * The fixed reason a turn that was running when the backend ended settles
- * with. A restart is an interruption, not a decision: nobody chose, so the
- * turn fails rather than being reported as cancelled or completed.
- */
-export const BACKEND_RESTARTED_TURN_ERROR = "Backend restarted during this turn";
+export {
+  AgentSessionError,
+  BACKEND_RESTARTED_TURN_ERROR,
+  type CreateAgentSessionInput,
+  type StartAgentTurnInput
+} from "./agentSessionTypes";
 
 export class AgentSessionService {
   private readonly sessions = new Map<string, AgentSession>();
@@ -83,6 +70,10 @@ export class AgentSessionService {
     onChange: (sessionId) => this.persist(sessionId)
   });
   private readonly telemetry = new AgentTurnTelemetryStore();
+  /** Thread plans, committed through the durable store's own per-session chain. */
+  readonly plans: ThreadPlanService;
+  /** Per-turn plan tool bindings and the plan prompt each turn carries. */
+  readonly planTools: ThreadPlanTurnTools;
   private readonly runnerEvents: AgentTurnEventApplier;
   private readonly turnGitDiffs: AgentTurnGitDiffTracker;
   private readonly cancelledTurnIds = new Set<string>();
@@ -105,13 +96,19 @@ export class AgentSessionService {
       eventBus: EventBus;
       contextAssembler: AgentTurnContextAssembler;
       artifacts?: ArtifactStore;
-      attachments?: {
-        deleteSessionAttachments(session: Pick<AgentSession, "workspaceId" | "id">): Promise<void>;
-      };
+      attachments?: { deleteSessionAttachments(session: Pick<AgentSession, "workspaceId" | "id">): Promise<void> };
+      /** Decides which descriptor tool transports exist under this configuration. */
+      runnerConfig?: ServiceConfig;
       /** Optional durable session store; absent keeps sessions process-scoped. */
-      durableSessions?: Pick<DurableAgentSessionStore, "initialize" | "schedule" | "remove">;
+      durableSessions?: Pick<DurableAgentSessionStore, "initialize" | "schedule" | "remove" | "commit" | "hasUnresolvedCommit" | "reconcile">;
     }
   ) {
+    ({ plans: this.plans, planTools: this.planTools } = createSessionPlans({
+      eventBus: deps.eventBus,
+      store: deps.durableSessions,
+      snapshot: (id, plan) => this.snapshot(id, plan),
+      runnerConfig: deps.runnerConfig
+    }));
     this.runnerEvents = new AgentTurnEventApplier({
       eventBus: deps.eventBus,
       messages: this.messages,
@@ -155,6 +152,7 @@ export class AgentSessionService {
       this.turns.set(turn.id, turn);
     }
     this.messages.restore(session.id, document.messages);
+    this.plans.hydrate(session.id, document);
 
     const interruptedTurns = document.turns.filter((turn) => turn.status === "running");
     for (const turn of interruptedTurns) {
@@ -181,7 +179,8 @@ export class AgentSessionService {
     this.deps.runners[session.runnerKind]?.rememberResumableId?.({
       sessionId: session.id,
       nativeSessionId,
-      interrupted
+      interrupted,
+      ...(document.nativeToolRegistration?.nativeSessionId === nativeSessionId ? { registeredToolNames: document.nativeToolRegistration.names } : {})
     });
   }
 
@@ -196,16 +195,18 @@ export class AgentSessionService {
    * Taken at write time, not at mark time, so the file always reflects the
    * newest state however many marks coalesced into the write.
    */
-  private snapshot(sessionId: string): DurableAgentSessionDocument {
+  private snapshot(sessionId: string, plan: PlanPersistedState = this.plans.persistedState(sessionId)): DurableAgentSessionDocument {
     const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error("Agent session is no longer in memory");
-    }
+    if (!session) throw new Error("Agent session is no longer in memory");
+    const toolRegistration = this.deps.runners[session.runnerKind]?.nativeToolRegistration?.(sessionId);
     return {
       schemaVersion: DURABLE_AGENT_SESSION_SCHEMA_VERSION,
       session: { ...session },
       turns: [...this.turns.values()].filter((turn) => turn.sessionId === sessionId).map((turn) => ({ ...turn })),
-      messages: this.messages.list(sessionId)
+      messages: this.messages.list(sessionId),
+      plan: plan.plan,
+      planMutationReceipts: plan.planMutationReceipts,
+      ...(toolRegistration ? { nativeToolRegistration: toolRegistration } : {})
     };
   }
 
@@ -215,6 +216,11 @@ export class AgentSessionService {
 
   getSession(sessionId: string): AgentSession | undefined {
     return this.sessions.get(sessionId);
+  }
+
+  /** The thread's plan, or undefined for an unknown session. */
+  readPlan(sessionId: string): Promise<PlanReadResult> | undefined {
+    return this.sessions.has(sessionId) ? this.plans.read(sessionId) : undefined;
   }
 
   listSessionMessages(sessionId: string): AgentSessionMessage[] | undefined {
@@ -294,6 +300,11 @@ export class AgentSessionService {
         409
       );
     }
+    const planToolsUnsupported = this.planTools.unsupportedReason(session.runnerKind, input.context);
+    if (planToolsUnsupported) throw new AgentSessionError(planToolsUnsupported, 409);
+    if (!(await this.plans.prepareForTurn(session.id))) {
+      throw new AgentSessionError("This thread's plan state could not be saved; retry shortly", 503);
+    }
     // Turn start only needs the workspace to still be registered; the branch
     // restore below probes git itself, so skip the full snapshot refresh here.
     const workspace = await this.deps.registry.findByIdWithoutGitRefresh(session.workspaceId);
@@ -326,19 +337,13 @@ export class AgentSessionService {
       totalTokens: 0
     };
     this.turns.set(turn.id, turn);
-    const acceptedAtMs = Date.now();
-    this.telemetry.accept(turn.id, requestStartedAtMs, acceptedAtMs);
-    logger.info({
-      sessionId: session.id,
-      turnId: turn.id,
-      workspaceId: session.workspaceId,
-      runnerKind: session.runnerKind,
-      acceptDurationMs: acceptedAtMs - requestStartedAtMs,
+    this.telemetry.logAccepted(session, turn, {
+      requestStartedAtMs,
       promptBytes: Buffer.byteLength(input.message, "utf8"),
       contextPathCount: input.context?.paths?.length ?? 0,
       attachmentCount: input.context?.attachments?.length ?? 0,
       runnerInputPartCount: runnerInput.inputParts.length
-    }, "Agent turn accepted");
+    });
     this.messages.append({
       sessionId: session.id,
       turnId: turn.id,
@@ -361,14 +366,14 @@ export class AgentSessionService {
       workspacePath: session.workspacePath,
       runnerKind: session.runnerKind
     });
-    void this.consumeTurn(
-      runner,
+    // A fresh binding: live only while this turn is the session's running turn.
+    const tools = this.planTools.bind({
       session,
-      turn,
-      runnerInput.prompt,
-      runnerInput.inputParts,
-      session.settings
-    );
+      turnId: turn.id,
+      context: input.context,
+      isLive: () => session.activeTurnId === turn.id && turn.status === "running" && !this.cancelledTurnIds.has(turn.id)
+    });
+    void this.consumeTurn(runner, session, turn, runnerInput.prompt, runnerInput.inputParts, session.settings, tools);
     return turn;
   }
 
@@ -488,6 +493,7 @@ export class AgentSessionService {
     // the file rather than losing it. Nothing below this line awaits, so no
     // late runner event can mark the record between the unlink and the
     // in-memory delete that makes the session not live.
+    await this.plans.closeSession(sessionId);
     await this.deps.durableSessions?.remove(sessionId);
     this.uncontinuableSessionIds.delete(sessionId);
     this.hydratedSeeds.delete(sessionId);
@@ -560,18 +566,10 @@ export class AgentSessionService {
     turn: AgentSessionTurn,
     message: string,
     inputParts: AgentRunnerInputPart[] | undefined,
-    settings: CodingAgentTurnSettings | undefined
+    settings: CodingAgentTurnSettings | undefined,
+    tools: AgentRunnerToolSet | undefined
   ): Promise<void> {
-    const telemetry = this.telemetry.markRunnerStarted(turn.id);
-    logger.info({
-      sessionId: session.id,
-      turnId: turn.id,
-      workspaceId: session.workspaceId,
-      runnerKind: session.runnerKind,
-      timeToRunnerStartMs: telemetry.runnerStartedAtMs && telemetry.requestStartedAtMs
-        ? telemetry.runnerStartedAtMs - telemetry.requestStartedAtMs
-        : undefined
-    }, "Agent turn runner consumption started");
+    this.telemetry.logRunnerStarted(session, turn);
     // Runners without native turn diffs get one settle-time Git delta.
     if (runnerDescriptor(session.runnerKind).turnDiffSource === "settle_time_git") {
       await this.turnGitDiffs.beginTurn(turn.id, session.workspaceId);
@@ -584,7 +582,8 @@ export class AgentSessionService {
         prompt: message,
         inputParts,
         title: session.title,
-        settings
+        settings,
+        ...(tools ? { tools } : {})
       })) {
         if (event.type === "run_succeeded" || event.type === "run_failed") {
           // Before the terminal event applies, so the diff precedes
@@ -613,6 +612,7 @@ export class AgentSessionService {
       // consumes the baseline synchronously at entry, so this cannot yank one
       // out from under an in-flight settle.
       this.turnGitDiffs.releaseTurn(turn.id);
+      this.planTools.release(turn.id);
       if (session.activeTurnId === turn.id && turn.status !== "running") {
         session.activeTurnId = undefined;
       }
@@ -649,12 +649,18 @@ export class AgentSessionService {
     }
   }
 
+  /** Every settlement path ends the turn's question requests and plan binding here, first. */
+  private endTurnTools(session: AgentSession, turn: AgentSessionTurn, outcome: PlanTurnOutcome): void {
+    this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
+    void this.planTools.settle(session.id, turn.id, outcome);
+  }
+
   private succeedTurn(
     session: AgentSession,
     turn: AgentSessionTurn,
     event: { message?: string; inputTokens?: number; outputTokens?: number; totalTokens?: number }
   ): void {
-    this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
+    this.endTurnTools(session, turn, "succeeded");
     const finalMessage = event.message && !turn.lastMessage ? event.message : undefined;
     if (finalMessage) {
       const content = `${turn.lastMessage ?? ""}${finalMessage}`;
@@ -681,11 +687,7 @@ export class AgentSessionService {
     session.updatedAt = now;
     this.persist(session.id);
     this.deps.eventBus.publish("agent_turn_succeeded", { sessionId: session.id, turnId: turn.id });
-    this.publishCodingEvent(codingTurnCompletedEvent({
-      sessionId: session.id,
-      turnId: turn.id,
-      runnerKind: session.runnerKind
-    }));
+    this.publishCodingEvent(codingTurnCompletedEvent({ sessionId: session.id, turnId: turn.id, runnerKind: session.runnerKind }));
     this.telemetry.logTurnTiming(session, turn, "succeeded");
   }
 
@@ -743,7 +745,7 @@ export class AgentSessionService {
       return;
     }
 
-    this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
+    this.endTurnTools(session, turn, "failed");
     const now = new Date().toISOString();
     turn.status = "failed";
     turn.error = error;
@@ -771,7 +773,7 @@ export class AgentSessionService {
     turn: AgentSessionTurn,
     options: { publishEvents?: boolean } = {}
   ): void {
-    this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
+    this.endTurnTools(session, turn, "cancelled");
     this.runnerEvents.releaseTurn(turn.id);
     const now = new Date().toISOString();
     turn.status = "cancelled";

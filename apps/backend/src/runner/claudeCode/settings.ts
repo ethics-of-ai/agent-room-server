@@ -97,13 +97,21 @@ export function claudeCodeQueryOptions(
   // transcript) after the child process was lost; every other option —
   // including the settings-isolation posture — is rebuilt as for a fresh
   // session, so resuming cannot relax the documented gating.
-  options: { forceIsolation?: boolean; resume?: string; canUseTool?: ClaudeCodeCanUseTool } = {}
+  // AgentRoom tools: the in-process MCP server, its exact pre-approved names,
+  // and their standing instructions for the cached system prompt.
+  options: {
+    forceIsolation?: boolean;
+    resume?: string;
+    canUseTool?: ClaudeCodeCanUseTool;
+    agentTools?: { mcpServers: Record<string, unknown>; allowedTools: string[]; instructions?: string };
+  } = {}
 ): Record<string, unknown> {
   const permissionMode = config.claudeCodePermissionMode ?? defaultClaudeCodePermissionMode;
   const loadWorkspaceSettings = !options.forceIsolation && loadsWorkspaceSettings(config);
   const diagramInstruction = !options.forceIsolation && config.sceneEngineEnabled !== false
     ? DIAGRAM_PROMPT_INSTRUCTION
     : undefined;
+  const append = [diagramInstruction, options.agentTools?.instructions].filter(Boolean).join("\n\n");
   return {
     cwd: workspacePath,
     env: claudeCodeChildEnv(config),
@@ -117,7 +125,7 @@ export function claudeCodeQueryOptions(
     systemPrompt: {
       type: "preset",
       preset: "claude_code",
-      ...(diagramInstruction ? { append: diagramInstruction } : {})
+      ...(append ? { append } : {})
     },
     permissionMode,
     ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
@@ -128,6 +136,9 @@ export function claudeCodeQueryOptions(
     // every other tool the callback sees is refused exactly as the headless
     // CLI refuses it today.
     ...(options.canUseTool ? { canUseTool: options.canUseTool } : {}),
+    // Exact `mcp__agentroom__<name>` entries: they pre-approve AgentRoom's own
+    // tools under every permission mode without widening any other tool.
+    ...(options.agentTools ? { mcpServers: options.agentTools.mcpServers, allowedTools: options.agentTools.allowedTools } : {}),
     ...(settings.model ? { model: settings.model } : {}),
     ...(settings.effort ? { effort: settings.effort } : {}),
     ...(config.claudeCodeExecutable ? { pathToClaudeCodeExecutable: config.claudeCodeExecutable } : {})

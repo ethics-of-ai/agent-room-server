@@ -477,7 +477,11 @@ export function writeThenHangRunner(write: (workspacePath: string) => Promise<vo
  */
 export function nativeSessionRunner(
   nativeSessionId: string,
-  options: { seeds?: Array<{ sessionId: string; nativeSessionId: string; interrupted: boolean }> } = {}
+  options: {
+    seeds?: Array<{ sessionId: string; nativeSessionId: string; interrupted: boolean; registeredToolNames?: readonly string[] }>;
+    /** Report these as the tool names the native conversation registered. */
+    toolNames?: string[];
+  } = {}
 ): AgentRunner {
   return {
     async getCapabilities() {
@@ -500,10 +504,13 @@ export function nativeSessionRunner(
     async cancel() {},
     ...(options.seeds
       ? {
-          rememberResumableId(input: { sessionId: string; nativeSessionId: string; interrupted: boolean }) {
+          rememberResumableId(input: { sessionId: string; nativeSessionId: string; interrupted: boolean; registeredToolNames?: readonly string[] }) {
             options.seeds?.push({ ...input });
           }
         }
+      : {}),
+    ...(options.toolNames
+      ? { nativeToolRegistration: () => ({ nativeSessionId, names: [...options.toolNames!] }) }
       : {})
   };
 }

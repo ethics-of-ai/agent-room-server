@@ -57,7 +57,7 @@ describe.skipIf(!checkout)("managed DeepSeek real runtime", () => {
     try {
       for (const runId of ["question", "probe"]) {
         const prepared = prepareAgentRunnerToolSet({ runId, sessionKey: "combined", catalog: [PROBE_TOOL_LOGICAL_ID],
-          allowed: [PROBE_TOOL_LOGICAL_ID], isLive: () => true,
+          allowed: [PROBE_TOOL_LOGICAL_ID], required: true, isLive: () => true,
           handlers: { [PROBE_TOOL_LOGICAL_ID]: async () => { reads++; return "fixture probe"; } } });
         const events: AgentRunnerEvent[] = [];
         try {

@@ -53,6 +53,12 @@ export interface AgentRunnerToolBinding {
 export interface AgentRunnerToolSet {
   /** Explicit turn context requires these tools; optional native helpers may degrade. */
   readonly required?: boolean;
+  /**
+   * Standing instructions for these tools. An adapter whose descriptor says
+   * `promptDelivery: "system"` installs them in its system prompt; for `turn`
+   * delivery the context assembler already put them in the prompt.
+   */
+  readonly instructions?: string;
   /** Stable serializable definitions installed once for a persistent child. */
   readonly catalog: readonly AgentToolAdvertisement[];
   /** The narrower names and live invocation operation for this exact turn. */
@@ -365,7 +371,22 @@ export interface AgentRunner {
      * flight.
      */
     interrupted: boolean;
+    /**
+     * The AgentRoom tool names that conversation registered, as persisted from
+     * `nativeToolRegistration`. Absent when unknown.
+     */
+    registeredToolNames?: readonly string[];
   }): void;
+  /**
+   * The AgentRoom tool names a session's native conversation registered, with
+   * that conversation's id. The service persists it beside the resume id and
+   * hands the names back through `rememberResumableId` after a restart.
+   *
+   * Optional: only a transport whose restore brings back a stored catalog
+   * without describing it (Codex dynamic tools) needs it. Undefined when the
+   * runner does not know.
+   */
+  nativeToolRegistration?(sessionId: string): { nativeSessionId: string; names: string[] } | undefined;
   // Release per-session runner resources (persistent child processes, queues)
   // when the AgentRoom session is deleted.
   closeSession?(sessionId: string): Promise<void>;

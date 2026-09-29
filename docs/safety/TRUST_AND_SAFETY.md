@@ -140,7 +140,8 @@ lifecycle.
 
 Each session is written through to `STATE_DIR/sessions/<sessionId>.json`, in a
 directory created with mode `0700`. The record contains the session, turns,
-messages, and native resume id. It is intentionally not redacted because a
+messages, native resume id, and the [thread plan](#thread-plans) with its
+mutation receipts. It is intentionally not redacted because a
 redacted transcript would corrupt the conversation, and its reads require the
 bearer token when configured.
 
@@ -158,8 +159,13 @@ descriptor has no restore strategy refuses its next turn with `409`.
 
 Deleting a session tears down its runner and attachments, prevents late writes
 from recreating the document, then removes the record before reporting success.
-Newer or invalid session documents are left untouched and not served. There is
-no retention cap on session count, age, or thread length.
+Newer or invalid session documents are left untouched and not served. The
+document is schema version 2. A version 1 document is migrated in memory with
+no plan and rewritten at version 2 by its next change of any kind, not by a
+read. A build that predates version 2 leaves those rewritten documents alone
+and does not serve them, so downgrading hides every session changed since the
+upgrade until a newer build runs again. There is no retention cap on session
+count, age, or thread length.
 
 ### Permission approval
 
@@ -219,6 +225,59 @@ public turn remains open.
 `clarifyingQuestionsEnabled`, env `CLARIFYING_QUESTIONS_ENABLED`, is a tier-1
 preference and defaults on. When off, no runner receives a question channel and
 Codex's per-thread flags are pinned false.
+
+### Thread plans
+
+Plan tools add no authority. `execute_plan` only records that work started;
+the agent does the work with the runner's existing posture, sandbox, and
+approvals. No plan transition starts a turn, runs a command, or changes a
+permission, and there is no HTTP route that mutates a plan or dispatches a
+tool. A call's session and turn come only from the binding, never from its
+arguments, and the backend refuses a call whose turn is no longer live. The
+liveness check runs immediately before the write starts, after any earlier
+write for the session finishes, so a turn that ends while its call waits
+changes nothing.
+Completion is the agent's own report. The backend checks transitions and
+bounds, not whether the work was done.
+
+Claude Code runs the tools from an in-process MCP server. Under every
+permission mode the runner puts exactly the `mcp__agentroom__<name>` entries
+derived from the bound catalog in `allowedTools`. While the clarifying-question
+channel is enabled, `canUseTool` also allows exactly those names if one reaches
+it; with the channel disabled there is no `canUseTool` callback and
+`allowedTools` alone approves them. No wildcard or other MCP tool gains
+approval through this path. Codex, Cursor,
+and managed DeepSeek run the tools as backend callbacks with no provider
+approval step, so their postures are unchanged.
+
+Every text field is bounded in UTF-16 code units, and a plan is at most 64
+steps and 32 KiB serialized. Mutation input and each tool result are at most
+40 KiB, and the per-turn plan context is at most 2 KiB. Oversized input is
+refused whole, never truncated. The session document keeps the latest 64
+mutation receipts: operation id, tool id, a SHA-256 of the arguments, the
+applied plan id and revision, and the turn id. Receipts hold no plan text and
+never leave the backend. For Codex it also keeps `nativeToolRegistration`: the
+thread id and the AgentRoom tool names that thread declared, so a restored
+thread's tools can be confirmed. It holds names only, never arguments or
+results, and is not part of the session summary.
+
+A plan mutation succeeds only after the session document with the new plan
+and its receipt is written and renamed into place. Ordinary transcript writes
+go through the same per-session writer and always carry the committed plan, so
+a failed candidate cannot be saved later. When a write's outcome is unknown,
+the backend reads the file back and holds later writes for that session until
+it knows; the plan read answers `503` meanwhile. It also answers `503` while
+a turn-end pause or restart recovery is not yet saved, because the committed
+snapshot could still say `running`. The guarantee covers backend
+process restart, not power loss beyond the existing file-store behavior.
+
+The plan read is bearer-gated. `agent_plan_changed` carries only ids and a
+revision, is not written to durable audit, and dispatcher telemetry never
+records tool arguments or results. Plan text stays out of status snapshots and
+session lists. A runner's own tool activity can still carry plan tool
+arguments on the broadcast stream, as it can for any tool call; Claude Code's
+tool activity includes the call input. That exposure is the existing
+[broadcast gap](#security-model).
 
 ### Context compaction telemetry
 

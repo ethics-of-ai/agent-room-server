@@ -25,12 +25,14 @@ For a focused change, start with the matching sections:
 | Git history and commit diffs | [History reads](api/API.md#git-history-and-historical-diffs) | [Git safety](safety/TRUST_AND_SAFETY.md#git-operations) |
 | Permission input | [Permission answers](api/API.md#permission-answers) | [Approval](safety/TRUST_AND_SAFETY.md#permission-approval) |
 | Question input | [Question answers](api/API.md#clarifying-question-answers) | [Questions and storage](safety/TRUST_AND_SAFETY.md#clarifying-questions) |
+| Thread plans | [Plan read and event](api/API.md#thread-plans) | [Plan bounds and storage](safety/TRUST_AND_SAFETY.md#thread-plans) |
 | Language services | [Semantic protocol](api/API.md#editor-language-services) | [Execution](safety/TRUST_AND_SAFETY.md#language-services) |
 
 ## Runners
 
 - [Runner architecture](engineering/RUNNERS.md) defines registry ownership,
-  canonical events, lifecycle, settings, permissions, and questions.
+  canonical events, lifecycle, settings, permissions, questions, and
+  AgentRoom tools, including thread plans.
 - [DeepSeek Harness](engineering/DEEPSEEK_HARNESS_RUNNER.md) covers its runtime
   and composition.
 - [Cursor SDK](engineering/CURSOR_SDK_RUNNER.md) covers SDK integration,
@@ -46,6 +48,13 @@ For a focused change, start with the matching sections:
   source structure and quality rules.
 - [Open-source mirror](operations/OPEN_SOURCE_MIRROR.md) defines publication,
   release, and private/public boundaries.
+
+## Implementation plans
+
+- [Agent plan tools](plans/AGENT_PLAN_TOOLS_PLAN.md) records the worker sequence
+  and implementation contract for one durable plan per thread across the four
+  built-in runners, with the handoff record of each stage and its open live
+  checks. The implemented behavior lives in the references above.
 
 The visionOS client and its Apple evidence stay in the private repository.
 Some shared references may describe those contracts without publishing the

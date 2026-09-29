@@ -16,6 +16,7 @@ export type AgentRoomEventType =
   | "agent_turn_cancelled"
   | "agent_permission_resolved"
   | "agent_question_resolved"
+  | "agent_plan_changed"
   | "workspace_registered"
   | "workspace_removed"
   | "workspace_branch_changed"
@@ -120,6 +121,19 @@ export interface AgentQuestionResolvedPayload {
     decidedBy?: string;
     answers?: Array<{ setId: string; selectedOptionIds: string[] }>;
   };
+}
+
+// Emitted after a thread plan change is committed, including the system pause
+// at turn end and restart recovery. Metadata only, like the sketch event: plan
+// text, notes, and summaries never ride this ungated broadcast. Clients treat
+// it as invalidation and reread `GET /api/agent-sessions/:id/plan`. Revision
+// order is meaningful only within one planId; a replacement needs a reread even
+// when its revision is lower.
+export interface AgentPlanChangedPayload {
+  schemaVersion: number;
+  sessionId: string;
+  planId: string;
+  revision: number;
 }
 
 // Emitted for each fixed mutating Git operation on a registered workspace.

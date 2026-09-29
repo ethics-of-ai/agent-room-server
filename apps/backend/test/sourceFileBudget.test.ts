@@ -55,7 +55,7 @@ const allowlist: Readonly<Record<string, number>> = {
   "apps/macos/AgentRoomMac/Supervision/BackendSupervisor.swift": 1749,
   "apps/visionos/AgentRoom/State/Spatial/SpatialSceneStore.swift": 1277,
   "apps/visionos/AgentRoom/Views/SpatialScene/Rendering/SpatialSceneRealityView.swift": 1189,
-  "apps/backend/src/runner/deepseek/DeepSeekHarnessRunner.ts": 1046,
+  "apps/backend/src/runner/deepseek/DeepSeekHarnessRunner.ts": 1043,
   "apps/backend/src/config/settingsStore.ts": 1030,
   "apps/backend/src/runner/acp/AcpRunner.ts": 1028,
   "apps/backend/src/scene/diagram/mermaidImport.ts": 1006,
@@ -70,17 +70,17 @@ const allowlist: Readonly<Record<string, number>> = {
   // wide callback seam across the hydration path
   // `docs/safety/TRUST_AND_SAFETY.md` pins under *Session persistence*.
   // Recorded here rather than attempted.
-  "apps/backend/src/agent/AgentSessionService.ts": 894,
+  "apps/backend/src/agent/AgentSessionService.ts": 853,
   "apps/backend/src/scene/diagram/compose.ts": 866,
-  "apps/backend/src/runner/codex/CodexAppServerRunner.ts": 844,
-  "apps/shared/AgentRoomClient/Sources/AgentRoomClient/APIClient.swift": 817,
-  "apps/backend/src/runner/cursor/CursorSdkRunner.ts": 810,
+  "apps/backend/src/runner/codex/CodexAppServerRunner.ts": 746,
+  "apps/shared/AgentRoomClient/Sources/AgentRoomClient/APIClient.swift": 816,
+  "apps/backend/src/runner/cursor/CursorSdkRunner.ts": 732,
   "apps/backend/src/runner/registry.ts": 800,
   // File opening still belongs beside the window actions that raise the editor.
   // The shared decision policy keeps classification out of the view; these two
   // thin entry-point adapters retain the scene's existing openWindow ownership.
   "apps/visionos/AgentRoom/Views/Workspace/WorkspaceWindowView.swift": 813,
-  "apps/backend/src/domain/models.ts": 683,
+  "apps/backend/src/domain/models.ts": 680,
   "apps/backend/src/scene/diagram/humanEdits.ts": 639,
   "apps/visionos/AgentRoom/State/AppStore/AppStore.swift": 623,
   "apps/visionos/AgentRoom/Views/WorkspaceScene/WorkspaceRunnerBuddyView.swift": 621,

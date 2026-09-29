@@ -1,6 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import type { AgentRunnerEvent, RunnerMetadata } from "../AgentRunner";
-import type { AgentToolBinding } from "../../agentTools/dispatch";
+import type { AgentRunnerEvent, AgentRunnerToolSet, RunnerMetadata } from "../AgentRunner";
 import type { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import type { JsonRpcLineClient } from "../shared/JsonRpcLineClient";
 import type { CursorTurnState } from "./messageMapper";
@@ -48,5 +47,7 @@ export interface CursorRunnerSession {
    * disposed at turn end, so a relayed call is dispatched only while the turn
    * that originated it is still the session's live turn.
    */
-  toolBinding?: AgentToolBinding;
+  toolBinding?: { tools: AgentRunnerToolSet; signal: AbortSignal; dispose(): void };
+  /** The tool names this host registered at `agent/start`; fixed for the child's life. */
+  registeredToolNames?: ReadonlySet<string>;
 }

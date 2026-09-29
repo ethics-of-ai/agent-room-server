@@ -39,10 +39,10 @@ downgrade guard and update its compatibility vocabulary with any new built-in.
 
 | Runner | Prompt | Turn diff | Questions | AgentRoom tools | Workspace skills | Restore | Configured when |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `codex` | Per turn | Native runner diff | Native request | None | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
-| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | None | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
-| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay; questions | None advertised | `unsupported` | Executable and Cordis composition are both configured |
-| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
+| `codex` | Per turn | Native runner diff | Native request | App-server dynamic tools in JSON-RPC mode: plans | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
+| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | In-process SDK MCP server: plans | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
+| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay: questions, plans | None advertised | `unsupported` | Executable and Cordis composition are both configured |
+| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay: questions, plans | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
 | `acp_*` | Descriptor-owned | Descriptor-owned | None in the current external adapter | None | Descriptor-owned | A restore path is required at admission | Its admitted executable definition is present |
 
 The registry and `apps/backend/test/runnerRegistry.test.ts` are the executable
@@ -225,8 +225,12 @@ a generic emission would double them. Telemetry carries logical id, name,
 correlation id, outcome, and duration only; arguments and results never reach
 it. The correlation id is observability, not a durable mutation id.
 
-`RunnerDescriptor.agentTools` owns both transport mode and capabilities. Cursor
-uses `custom_tools` for the question capability. Its host registers every
+`RunnerDescriptor.agentTools` owns both transport mode and capabilities, plus
+an optional `availableWhen(config)` gate for a transport that exists only under
+some configuration. The gate fails closed: a caller that supplies no
+configuration gets no tools from a gated descriptor. Codex declares `dynamic_tools` only in JSON-RPC mode,
+because the `exec` protocol has no tool channel. Cursor uses `custom_tools`
+for the question and plan capabilities. Its host registers every
 advertised definition as a custom tool
 whose `execute` sends one `tools/invoke` request carrying the tool's name and
 the host's current run id; that run id is the generation handle, so a late
@@ -240,12 +244,59 @@ unchanged; `mode: "none"` records exactly that.
 DeepSeek uses `cordis_pipe` for managed-mode questions. The persistent Harness
 child receives the descriptor/gate-derived catalog once over an inherited,
 versioned, bounded pipe and registers it through Cordis's `tools` service.
-Every prompt gets a new `bind`/`unbind` generation. Catalog changes require a
-fresh child. Missing optional tool readiness leaves ordinary turns usable and
+Every prompt gets a new `bind`/`unbind` generation. A live child keeps the
+catalog it registered, because replacing it would lose the conversation. A
+turn that requires a different catalog fails, and an optional turn continues
+with the shared registration notice. Missing optional tool readiness leaves ordinary turns usable and
 reports a separate capability check; `AgentRunnerToolSet.required` can require
 tool readiness for callers that depend on it. Sketches do not supply tools or
 turn bindings. The relay never receives bearer auth or route authority. See the
 [DeepSeek runner guide](DEEPSEEK_HARNESS_RUNNER.md#agentroom-cordis-tools).
+
+Codex uses `dynamic_tools`. The adapter derives `thread/start.dynamicTools`
+from the catalog and answers the app-server's `item/tool/call` request only
+when its `threadId` and `turnId` name the live turn; any other call gets the
+tool's unavailable text with `success: false`. Every other server request
+method is still refused with `-32601`. `thread/resume` carries no tool list
+and does not report the catalog it restores, so the adapter records the names
+it declared at `thread/start` beside the resumable thread id. The record
+survives an idle reap in the session host. `nativeToolRegistration` hands it
+to the service, which persists it as `nativeToolRegistration` in the session
+document, and `rememberResumableId` returns it after a backend restart when
+the stored thread id still matches. A restored thread with no record (one
+started before plan tools, or by a build that did not record it) has an
+unknown catalog: a turn that requires tools fails, and an optional turn gets
+the unconfirmed-tools notice and still dispatches whatever the thread calls.
+Questions stay on native `request_user_input`. See
+`runner/codex/dynamicTools.ts`.
+
+Claude Code uses `sdk_mcp`. Each SDK child gets an in-process MCP server named
+`agentroom` whose low-level `tools/list` and `tools/call` handlers serve the
+catalog verbatim; the SDK's `tool()` helper is not used, because it strips
+unknown keys that the strict schemas must refuse. The permission path adds the
+exact `mcp__agentroom__<name>` entries to `allowedTools`, derived from the
+bound catalog; there is no wildcard. `canUseTool` is supplied only while the
+clarifying-question channel is enabled, and it allows exactly those names if
+one reaches it. With questions disabled, `allowedTools` alone approves them. A call dispatches into the turn that owns the assistant `tool_use`
+id in `_meta["claudecode/toolUseId"]`, never into whichever turn is active,
+and fails closed when that id was never observed. Registration is confirmed
+once per child through `mcpServerStatus()`. A live child keeps its catalog; a
+change takes effect on the next child, including a resumed one. See
+`runner/claudeCode/agentTools.ts`.
+
+`runner/shared/agentToolSets.ts` holds the rules every transport shares. An
+adapter's own question tool joins the session's tools through
+`combineRunnerToolSets`. `promptWithRegisteredTools` compares the turn's
+allowed names with what the native transport registered and returns the prompt
+to send. A turn with `AgentRunnerToolSet.required` fails when any tool is
+missing or cannot be confirmed. An optional turn proceeds with a shared notice
+in front of the prompt: one names the missing tools, and the other says the
+transport could not confirm any of them. Both tell the model not to claim a
+tool's effects. The runner's display name in its errors comes from the
+descriptor. Standing instructions
+travel in `AgentRunnerToolSet.instructions`; a `system` delivery runner
+appends them to its system prompt, and the context assembler places them in
+the prompt for the others.
 
 The minimal recipe for adding a tool:
 
@@ -272,6 +323,45 @@ The minimal recipe for adding a runner transport:
 3. Reuse the shared dispatcher and owning handlers. Prove startup failure,
    cancellation, late/refused calls, replay protection, clean rebinding, and a
    second tool without adding tool-specific branches to the adapter.
+
+### Thread plan tools
+
+`apps/backend/src/plans/` owns thread plans. Each AgentRoom session has zero or
+one plan, and every built-in descriptor declares the `plans` capability, so a
+supporting runner's model sees six tools: `create_plan`, `get_plan`,
+`edit_plan`, `execute_plan`, `update_plan_step`, and `finish_plan`. The owners
+are:
+
+- `planModel.ts`: statuses, bounds, the stored plan and receipt schemas, and
+  structural invariants.
+- `planToolContract.ts`: the six strict input schemas, error codes, and the
+  result envelope.
+- `planTransitions.ts` and `planReceipts.ts`: pure transitions, settlement and
+  restart recovery, and the 64-receipt retry window.
+- `ThreadPlanService.ts`: the per-session serialized mutation path and its
+  acknowledged commits through the session store.
+- `planTools.ts`: catalog definitions, the single handler, result
+  serialization, the standing instruction, and the per-turn context.
+- `planTurnTools.ts`: composition from descriptor capabilities, a fresh
+  binding per turn, disposal before the turn-end transition, and the
+  `agent_plan_changed` event. It advertises nothing without acknowledged
+  storage, since every call would then report `tools_unavailable`.
+
+Adapters translate these definitions and never restate a name, schema,
+description, or instruction. `agentTools/jsonSchema.ts` converts each zod
+input schema into the advertised JSON Schema and throws on anything it cannot
+express. No transport branches on a plan tool name.
+`test/agentToolConformance.test.ts` runs one suite against all four transports,
+including a non-plan probe tool that no adapter knows about.
+
+Creating, editing, and turn settlement never start a turn. `execute_plan`
+records that work started and returns to the calling agent, which does the
+work with its existing permissions. When a turn ends, fails, or is cancelled,
+a running plan pauses; a later user turn resumes it. The standing instruction
+treats the stored plan as authoritative and plan text as task data, not
+instructions. Wire behavior is in the
+[API](../api/API.md#thread-plans), and storage and trust limits are in
+[trust and safety](../safety/TRUST_AND_SAFETY.md#thread-plans).
 
 ## Images and turn settings
 
@@ -370,5 +460,13 @@ protocol, admission, permission, image, discovery, or restore change.
 - Cursor release checks remain in
   [`CURSOR_SDK_RUNNER.md`](CURSOR_SDK_RUNNER.md), including redistribution,
   signed nested binaries, account requirements, and live SDK drift.
+- Plan tools have live evidence for Codex (codex-cli 0.158.0-alpha.2.1) and
+  Claude Code (SDK 0.3.283 under `bypassPermissions`) only. Still open:
+  Claude Code's exact `allowedTools` entries under `default`, `acceptEdits`,
+  and `dontAsk`; Codex `thread/resume` restoring the recorded dynamic tools,
+  including a thread started before plan tools; and Cursor and managed DeepSeek
+  model turns calling the tools. Cursor and DeepSeek advertise plan tools on
+  the strength of the transport conformance suite, which is what "verified"
+  means for default advertisement.
 - Legacy runner metadata remains until the advertised coding-event contract
   floor moves past version 2.

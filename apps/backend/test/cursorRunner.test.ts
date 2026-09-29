@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import type { ServiceConfig } from "../src/domain/models";
 import type { AgentRunnerEvent } from "../src/runner/AgentRunner";
 import { registerAgentTool, unregisterAgentTool } from "../src/agentTools/catalog";
+import { prepareAgentRunnerToolSet } from "../src/agentTools/runnerToolSet";
 import { CursorSdkRunner } from "../src/runner/cursor/CursorSdkRunner";
 import { fallbackCursorCapabilities } from "../src/runner/cursor/capabilities";
 import { buildServer } from "../src/server";
@@ -268,10 +269,10 @@ describe("CursorSdkRunner", () => {
     expect(collected.at(-1)).toMatchObject({ type: "run_succeeded" });
   });
 
-  it("binds a second registered tool and handler with no new host callback or per-tool boolean", async () => {
-    // The B04 recipe end to end: one catalog registration plus one injected
-    // handler. The host was never taught this tool; it registered the
-    // advertised definition and relayed `tools/invoke` like any other.
+  it("relays a session-supplied tool with no new host callback or per-tool boolean", async () => {
+    // One catalog registration plus a session-bound handler. The host was
+    // never taught this tool; it registered the advertised definition and
+    // relayed `tools/invoke` like any other.
     registerAgentTool({
       logicalId: "test.hello",
       name: "test_hello",
@@ -284,22 +285,28 @@ describe("CursorSdkRunner", () => {
     try {
       const host = await writeFakeHost({ callExtraTool: "test_hello" });
       const serviceConfig = await config();
-      const runner = new CursorSdkRunner(serviceConfig, {
-        hostModulePath: host,
-        toolHandlers: {
-          "test.hello": async (input) => `hello tool saw ${(input as { value: string }).value}`
-        }
+      const runner = new CursorSdkRunner(serviceConfig, { hostModulePath: host });
+      const sessionTools = prepareAgentRunnerToolSet({
+        runId: "agentroom-turn-extra",
+        sessionKey: "agent-session-extra",
+        catalog: ["test.hello"],
+        allowed: ["test.hello"],
+        required: false,
+        handlers: { "test.hello": async (input) => `hello tool saw ${(input as { value: string }).value}` },
+        isLive: () => true
       });
       const events = await collect(runner.run({
         runId: "agentroom-turn-extra",
         sessionId: "agent-session-extra",
         workspacePath: serviceConfig.workspaceRoot,
-        prompt: "Use the hello tool"
+        prompt: "Use the hello tool",
+        tools: sessionTools.tools
       }));
+      sessionTools.dispose();
       await runner.dispose();
 
-      // Questions stayed advertised beside the new tool, sketches off or on.
-      expect(assistantText(events)).toContain('advertised=["ask_user_question","test_hello"]');
+      // Questions stayed advertised beside the session's tool.
+      expect(assistantText(events)).toContain('advertised=["test_hello","ask_user_question"]');
       expect(assistantText(events)).toContain("extra=hello tool saw hi");
       expect(events.at(-1)).toMatchObject({ type: "run_succeeded" });
     } finally {

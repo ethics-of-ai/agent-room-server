@@ -579,12 +579,11 @@ public struct APIClient {
         message: String,
         contextPaths: [String] = [],
         attachmentIds: [String] = [],
-        settings: CodingAgentTurnSettings? = nil
+        settings: CodingAgentTurnSettings? = nil,
+        planToolsRequired: Bool = false
     ) async throws -> AgentSessionTurn {
-        let context = (contextPaths.isEmpty && attachmentIds.isEmpty)
-            ? nil
-            : AgentTurnContext(paths: contextPaths.isEmpty ? nil : contextPaths,
-                               attachments: attachmentIds.isEmpty ? nil : attachmentIds)
+        let context = AgentTurnContext.forTurn(paths: contextPaths, attachments: attachmentIds,
+                                               planToolsRequired: planToolsRequired)
         let payload = SendAgentTurnRequest(message: message, context: context, settings: settings)
         let response: AgentSessionTurnResponse = try await request(
             ["api", "agent-sessions", sessionId, "turns"],

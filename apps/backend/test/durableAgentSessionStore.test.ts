@@ -12,7 +12,7 @@ async function stateDir(): Promise<string> {
 
 function document(sessionId: string, overrides: Partial<DurableAgentSessionDocument> = {}): DurableAgentSessionDocument {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     session: {
       id: sessionId,
       workspaceId: "workspace-1",
@@ -56,7 +56,9 @@ function document(sessionId: string, overrides: Partial<DurableAgentSessionDocum
         at: "2026-08-26T00:00:10.000Z"
       }
     ],
-    ...overrides
+    ...overrides,
+    plan: null,
+    planMutationReceipts: []
   };
 }
 
@@ -143,7 +145,7 @@ describe("DurableAgentSessionStore", () => {
     const dir = await stateDir();
     await mkdir(join(dir, "sessions"), { recursive: true });
     const path = join(dir, "sessions", "agent-session-future.json");
-    const bytes = JSON.stringify({ schemaVersion: 2, session: { id: "agent-session-future" }, future: true });
+    const bytes = JSON.stringify({ schemaVersion: 3, session: { id: "agent-session-future" }, future: true });
     await writeFile(path, bytes);
 
     const store = new DurableAgentSessionStore({ stateDir: dir });
@@ -200,14 +202,42 @@ describe("DurableAgentSessionStore", () => {
   });
 
   it("passes a document at this version through the migration step untouched", () => {
-    // Version 1 has no predecessor, so the step is the identity today. It is
-    // exercised here so the first real migration has a test to extend rather
-    // than a reader to restructure.
     const current = document("agent-session-current") as unknown as Record<string, unknown>;
     expect(migrateDurableAgentSessionDocument(current)).toEqual({ document: current, migrated: false });
     expect(migrateDurableAgentSessionDocument({ ...current, schemaVersion: 0 })).toBeUndefined();
     expect(migrateDurableAgentSessionDocument({ ...current, schemaVersion: 1.5 })).toBeUndefined();
-    expect(migrateDurableAgentSessionDocument({ ...current, schemaVersion: 2 })).toBeUndefined();
+    expect(migrateDurableAgentSessionDocument({ ...current, schemaVersion: 3 })).toBeUndefined();
+  });
+
+  it("migrates a v1 document to an empty plan in memory without rewriting it on read", async () => {
+    const dir = await stateDir();
+    await mkdir(join(dir, "sessions"), { recursive: true });
+    const { plan: _plan, planMutationReceipts: _receipts, ...v2 } = document("agent-session-v1");
+    const v1 = { ...v2, schemaVersion: 1, session: { ...v2.session, runnerKind: "retired_runner" } };
+    const path = join(dir, "sessions", "agent-session-v1.json");
+    const bytes = JSON.stringify(v1);
+    await writeFile(path, bytes);
+
+    const inventory = await new DurableAgentSessionStore({ stateDir: dir }).initialize();
+    expect(inventory.migrated).toBe(1);
+    expect(inventory.documents[0]).toMatchObject({
+      schemaVersion: 2,
+      plan: null,
+      planMutationReceipts: [],
+      session: { runnerKind: "retired_runner", runner: { nativeSessionId: "native-agent-session-v1" } }
+    });
+    expect(await readFile(path, "utf8")).toBe(bytes);
+  });
+
+  it("reads a v2 document without plan fields as a thread with no plan", async () => {
+    const dir = await stateDir();
+    await mkdir(join(dir, "sessions"), { recursive: true });
+    const { plan: _plan, planMutationReceipts: _receipts, ...bare } = document("agent-session-bare");
+    await writeFile(join(dir, "sessions", "agent-session-bare.json"), JSON.stringify(bare));
+
+    const inventory = await new DurableAgentSessionStore({ stateDir: dir }).initialize();
+    expect(inventory.unreadable).toBe(0);
+    expect(inventory.documents[0]).toMatchObject({ schemaVersion: 2, plan: null, planMutationReceipts: [] });
   });
 
   it("reads a document whose runner is not registered in this process", async () => {
@@ -274,6 +304,41 @@ describe("DurableAgentSessionStore", () => {
     await store.schedule("agent-session-1", () => document("agent-session-1"));
     await store.flush();
     expect(await readdir(join(dir, "sessions"))).toEqual(["agent-session-1.json"]);
+  });
+
+  it("keeps an ordinary mark that was pending behind a withdrawn commit", async () => {
+    const dir = await stateDir();
+    const store = new DurableAgentSessionStore({ stateDir: dir });
+    await store.initialize();
+    let content = "before";
+    const snapshot = () => document("agent-session-1", {
+      messages: [
+        {
+          id: "message-1",
+          sessionId: "agent-session-1",
+          role: "assistant",
+          content,
+          status: "running",
+          at: "2026-08-26T00:00:00.000Z"
+        }
+      ]
+    });
+    // The first write takes its snapshot now and stays in flight while the
+    // commit and the next mark queue behind it.
+    void store.schedule("agent-session-1", snapshot);
+    const outcome = store.commit("agent-session-1", {
+      snapshot: () => document("agent-session-1"),
+      verify: () => true,
+      proceed: () => false,
+      settle: () => undefined
+    });
+    content = "after";
+    void store.schedule("agent-session-1", snapshot);
+
+    expect(await outcome).toBe("withdrawn");
+    await store.flush();
+    const written = JSON.parse(await readFile(join(dir, "sessions", "agent-session-1.json"), "utf8")) as DurableAgentSessionDocument;
+    expect(written.messages[0]?.content).toBe("after");
   });
 
   it("refuses a session id that is not a plain file name", async () => {

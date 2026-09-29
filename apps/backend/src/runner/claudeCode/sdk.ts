@@ -16,6 +16,8 @@ export interface ClaudeCodeQuery extends AsyncIterable<unknown> {
   getContextUsage?(): Promise<unknown>;
   /** The signed-in account, read from the child without a model call. */
   accountInfo?(): Promise<unknown>;
+  /** Connection status of each configured MCP server; a control round trip, not a model call. */
+  mcpServerStatus?(): Promise<unknown[]>;
   return?(value?: unknown): Promise<IteratorResult<unknown>>;
 }
 
@@ -41,6 +43,25 @@ export type ClaudeCodeQueryFunction = (params: {
 
 export type ClaudeCodeQueryLoader = () => Promise<ClaudeCodeQueryFunction>;
 
+/**
+ * The SDK's `createSdkMcpServer`, typed to the low-level server surface the
+ * AgentRoom tool server uses. Injectable beside the query loader so tests can
+ * run the real in-process server against a fake child.
+ */
+export type ClaudeCodeMcpServerFactory = (options: { name: string; tools?: unknown[] }) => {
+  type: string;
+  name: string;
+  instance: {
+    server: {
+      registerCapabilities(capabilities: Record<string, unknown>): void;
+      setRequestHandler(schema: unknown, handler: (request: any, extra: any) => Promise<unknown>): void;
+    };
+    connect(transport: unknown): Promise<void>;
+  };
+};
+
+export type ClaudeCodeMcpServerLoader = () => Promise<ClaudeCodeMcpServerFactory>;
+
 // The SDK is ESM-only and this package compiles to CommonJS; a literal
 // import() would be transformed into require() by tsc, so route through an
 // untransformed dynamic import.
@@ -48,25 +69,35 @@ const dynamicImport = new Function("specifier", "return import(specifier)") as (
   specifier: string
 ) => Promise<Record<string, unknown>>;
 
-let cachedQuery: Promise<ClaudeCodeQueryFunction> | undefined;
+let cachedModule: Promise<Record<string, unknown>> | undefined;
 
-export function loadClaudeCodeQuery(): Promise<ClaudeCodeQueryFunction> {
-  if (!cachedQuery) {
-    const loading = dynamicImport("@anthropic-ai/claude-agent-sdk").then((module) => {
-      const query = module.query;
-      if (typeof query !== "function") {
-        throw new Error("@anthropic-ai/claude-agent-sdk did not export a query function");
-      }
-      return query as ClaudeCodeQueryFunction;
-    });
+function loadSdkModule(): Promise<Record<string, unknown>> {
+  if (!cachedModule) {
+    const loading = dynamicImport("@anthropic-ai/claude-agent-sdk");
     // A rejected import must not poison the cache: drop it so the next call
     // retries instead of failing forever until a backend restart.
     loading.catch(() => {
-      if (cachedQuery === loading) {
-        cachedQuery = undefined;
+      if (cachedModule === loading) {
+        cachedModule = undefined;
       }
     });
-    cachedQuery = loading;
+    cachedModule = loading;
   }
-  return cachedQuery;
+  return cachedModule;
+}
+
+export async function loadClaudeCodeQuery(): Promise<ClaudeCodeQueryFunction> {
+  const query = (await loadSdkModule()).query;
+  if (typeof query !== "function") {
+    throw new Error("@anthropic-ai/claude-agent-sdk did not export a query function");
+  }
+  return query as ClaudeCodeQueryFunction;
+}
+
+export async function loadClaudeCodeMcpServerFactory(): Promise<ClaudeCodeMcpServerFactory> {
+  const factory = (await loadSdkModule()).createSdkMcpServer;
+  if (typeof factory !== "function") {
+    throw new Error("@anthropic-ai/claude-agent-sdk did not export createSdkMcpServer");
+  }
+  return factory as ClaudeCodeMcpServerFactory;
 }
