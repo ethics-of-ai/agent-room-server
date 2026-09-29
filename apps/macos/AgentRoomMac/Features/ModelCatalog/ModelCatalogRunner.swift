@@ -21,9 +21,9 @@ enum ModelCatalogRunner: String, CaseIterable, Hashable {
     var listSummary: String {
         switch self {
         case .codex:
-            "Shown only when the codex CLI cannot report its own models."
+            "Shown only when the codex CLI cannot report its own models. To get newer models, update the codex CLI rather than adding them here."
         case .claudeCode:
-            "Shown only when the claude CLI cannot report its own models."
+            "Shown only when the claude CLI cannot report its own models. To get newer models, update the claude CLI rather than adding them here."
         case .cursor:
             "Shown only when Cursor cannot report its own models."
         case .deepseek:

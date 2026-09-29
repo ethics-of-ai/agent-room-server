@@ -40,7 +40,7 @@ struct RunnerSettingsPane: View {
             }
             Section {
                 SettingsCaption(text: "Executable paths and arguments stay in Keychain and apply after the next backend restart.", systemImage: "terminal")
-                SettingsCaption(text: "Claude Code can use a local CLI or the version bundled with its SDK. That CLI determines which models the picker offers.")
+                SettingsCaption(text: "Codex and Claude Code pickers list the models their CLI reports. If a new model is missing, update that CLI, then restart the backend. Claude Code without a CLI path uses the CLI bundled with AgentRoom, which updates with the app.", systemImage: "arrow.down.circle")
                 SettingsCaption(text: "Setup checks inspect this Mac and work while the backend is stopped. Runtime status appears above after the backend probes a runner.", systemImage: "stethoscope")
             }
 

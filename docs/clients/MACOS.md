@@ -188,6 +188,13 @@ credential file is SDK-owned. Its required `filePresence` probe stats
 required by the measured SDK. Sign-in and renewal commands are in the
 [Cursor guide](../engineering/CURSOR_SDK_RUNNER.md#credentials-and-billing).
 
+Codex and Claude Code model pickers show what the runner's CLI reports through
+live discovery, so a missing new model usually means an outdated CLI. The
+Runners pane tells the operator to update that CLI and restart the backend. A
+Claude Code runner with no CLI path uses the SDK's bundled CLI, which moves only
+with AgentRoom releases. The Models pane footers say the same for the fallback
+lists, because adding a model there does not replace a live list.
+
 Only the default runner's unmet required probes block initial setup. A missing
 runner not selected as default does not prevent backend launch.
 
