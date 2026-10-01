@@ -4,52 +4,35 @@ struct StatusHeroCard: View {
     @Environment(BackendSupervisor.self) private var supervisor
 
     var body: some View {
-        HStack(alignment: .top, spacing: 24) {
-            StatusOrb(state: supervisor.serverState)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(supervisor.serverState.statusTitle)
-                    .font(.title2.bold())
-                Text(supervisor.serverState.statusDetail)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: DashboardTheme.elementSpacing) {
-                    StatusPill(
-                        label: supervisor.connectionState.rawValue,
-                        systemImage: supervisor.connectionState.systemImage,
-                        tint: supervisor.connectionState.tint
-                    )
-
-                    if let release = supervisor.health?.release {
-                        Text("Backend \(release.backendVersion) · API \(release.apiVersion)")
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
+        VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
+            HStack(alignment: .top, spacing: DashboardTheme.cardSpacing) {
+                BackendStateSymbol(state: supervisor.serverState).font(.title2)
+                VStack(alignment: .leading, spacing: DashboardTheme.tightSpacing) {
+                    Text(supervisor.serverState.statusTitle).font(.title2.bold())
+                    Text(supervisor.serverState.statusDetail)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.top, 4)
-
+                Spacer(minLength: 0)
                 StatusHeroActionButton()
-                    .padding(.top, 4)
             }
-
-            Spacer(minLength: 12)
-
-            VStack(alignment: .trailing, spacing: DashboardTheme.tightSpacing) {
-                Text("Local URL")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .textCase(.uppercase)
+            HStack(spacing: DashboardTheme.elementSpacing) {
+                StatusPill(
+                    label: supervisor.connectionState.rawValue,
+                    systemImage: supervisor.connectionState.systemImage,
+                    tint: supervisor.connectionState.tint
+                )
                 Text(supervisor.localServerURLString)
                     .font(.callout.monospaced())
                     .textSelection(.enabled)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                if let release = supervisor.health?.release {
+                    Text("Backend \(release.backendVersion) · API \(release.apiVersion)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             }
         }
-        .cardBackground()
+        .padding(.vertical, DashboardTheme.elementSpacing)
     }
 }

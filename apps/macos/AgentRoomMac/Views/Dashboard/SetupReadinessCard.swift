@@ -6,10 +6,10 @@ struct SetupReadinessCard: View {
     var body: some View {
         let readiness = supervisor.setupReadiness
 
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
             HStack(alignment: .top) {
                 CardHeader(
-                    title: "Ready for visionOS",
+                    title: "Pairing readiness",
                     systemImage: readiness.isReadyForVisionOS ? "visionpro.fill" : "visionpro",
                     subtitle: readiness.isReadyForVisionOS
                         ? "Backend, credentials, and LAN pairing look healthy."
@@ -24,14 +24,14 @@ struct SetupReadinessCard: View {
             }
 
             if !readiness.isReadyForVisionOS {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: DashboardTheme.elementSpacing) {
                     ForEach(readiness.blockingItems, id: \.self) { item in
                         SetupChecklistRow(label: item, isComplete: false)
                     }
                 }
             }
 
-            HStack(spacing: 10) {
+            HStack(spacing: DashboardTheme.elementSpacing) {
                 Button("Run safe checks", systemImage: "checkmark.seal", action: refreshConnectionStatus)
                     .buttonStyle(.bordered)
 

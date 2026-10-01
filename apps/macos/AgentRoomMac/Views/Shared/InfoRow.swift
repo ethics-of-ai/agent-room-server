@@ -10,6 +10,7 @@ struct InfoRow: View {
             Text(value)
                 .font(isMonospaced ? .system(.body, design: .monospaced) : .body)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

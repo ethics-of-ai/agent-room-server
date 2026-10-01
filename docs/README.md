@@ -51,6 +51,10 @@ For a focused change, start with the matching sections:
 
 ## Implementation plans
 
+- [macOS app design](plans/MACOS_APP_DESIGN_PLAN.md) records the implementation
+  batches and remaining visual acceptance checks. Shipped behavior lives in
+  [macOS](clients/MACOS.md).
+
 - [Agent plan tools](plans/AGENT_PLAN_TOOLS_PLAN.md) records the worker sequence
   and implementation contract for one durable plan per thread across the four
   built-in runners, with the handoff record of each stage and its open live

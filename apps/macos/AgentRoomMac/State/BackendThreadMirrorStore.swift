@@ -11,7 +11,11 @@ final class BackendThreadMirrorStore {
     private(set) var lastError: String?
     private(set) var lastRefreshedAt: Date?
     private(set) var cancellingSessionIDs: Set<String> = []
-    var selectedSessionID: String?
+    private var selection = ThreadSelectionState()
+    var selectedSessionID: String? {
+        get { selection.id }
+        set { selection.select(newValue) }
+    }
     /// `updatedAt:status` of a session at its last transcript fetch, used to
     /// skip refetching an unchanged idle session's messages on every poll tick.
     private var messagesSyncKeyBySessionID: [String: String] = [:]
@@ -42,11 +46,11 @@ final class BackendThreadMirrorStore {
     }
 
     var failedCount: Int {
-        sessions.filter { $0.status.lowercased() == "failed" }.count
+        sessions.filter { ThreadStatusFilter.failed.matches($0) }.count
     }
 
     var idleCount: Int {
-        sessions.filter { $0.status.lowercased() == "idle" }.count
+        sessions.filter { ThreadStatusFilter.idle.matches($0) }.count
     }
 
     var totalTokens: Int {
@@ -95,7 +99,7 @@ final class BackendThreadMirrorStore {
                 lastError = nil
             }
 
-            if let selectedSessionID {
+            if let selectedSessionID, selectedSession != nil {
                 await refreshMessagesIfStale(for: selectedSessionID, using: client)
             }
         } catch {
@@ -104,7 +108,7 @@ final class BackendThreadMirrorStore {
     }
 
     func refreshSelectedMessages(using client: APIClient) async {
-        guard let selectedSessionID else {
+        guard let selectedSessionID, selectedSession != nil else {
             return
         }
         await refreshMessages(for: selectedSessionID, using: client)
@@ -145,11 +149,13 @@ final class BackendThreadMirrorStore {
             || messagesSyncKeyBySessionID[sessionID] != syncKey else {
             return
         }
-        await refreshMessages(for: sessionID, using: client)
-        messagesSyncKeyBySessionID[sessionID] = syncKey
+        if await refreshMessages(for: sessionID, using: client) {
+            messagesSyncKeyBySessionID[sessionID] = syncKey
+        }
     }
 
-    private func refreshMessages(for sessionID: String, using client: APIClient) async {
+    @discardableResult
+    private func refreshMessages(for sessionID: String, using client: APIClient) async -> Bool {
         do {
             let response = try await client.fetchAgentSessionMessages(sessionId: sessionID)
             if messagesBySessionID[sessionID] != response.messages {
@@ -158,16 +164,15 @@ final class BackendThreadMirrorStore {
             if lastError != nil {
                 lastError = nil
             }
+            return true
         } catch {
             lastError = error.localizedDescription
+            return false
         }
     }
 
     private func reconcileSelection() {
-        if let selectedSessionID, sessions.contains(where: { $0.id == selectedSessionID }) {
-            return
-        }
-        selectedSessionID = sessions.first?.id
+        selection.reconcile(availableIDs: sessions.map(\.id))
     }
 
     private func upsert(_ session: AgentSession) {

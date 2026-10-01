@@ -9,7 +9,7 @@ struct WorkspaceSettingsRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: DashboardTheme.tightSpacing) {
             HStack {
                 Label(workspace.name, systemImage: workspace.git.isRepository ? "chevron.left.forwardslash.chevron.right" : "folder")
                     .font(.callout.weight(.medium))

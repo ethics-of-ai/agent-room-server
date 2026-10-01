@@ -6,7 +6,7 @@ struct DiagnosticsControlsCard: View {
     var exportAction: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
             CardHeader(
                 title: "Diagnostics",
                 systemImage: "stethoscope",

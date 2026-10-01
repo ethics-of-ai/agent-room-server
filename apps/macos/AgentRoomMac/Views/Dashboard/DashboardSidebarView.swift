@@ -14,11 +14,13 @@ struct DashboardSidebarView: View {
                     .tag(DashboardSection.diagnostics)
             }
 
-            Section("Backend") {
-                SidebarStatusSummary()
-            }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            SidebarStatusSummary()
+                .padding(DashboardTheme.cardPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .navigationTitle("AgentRoom")
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
     }

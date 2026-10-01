@@ -10,7 +10,7 @@ struct MenuBarAction: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: DashboardTheme.elementSpacing) {
                 Image(systemName: systemImage)
                     .font(.system(size: 13, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)

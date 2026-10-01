@@ -2,34 +2,36 @@ import SwiftUI
 
 struct ThreadSessionListCard: View {
     var sessions: [AgentSession]
+    var hasSessions: Bool
     @Binding var selectedSessionID: String?
+    @Binding var query: String
+    @Binding var filter: ThreadStatusFilter
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            CardHeader(
-                title: "Sessions",
-                systemImage: "list.bullet.rectangle",
-                subtitle: "Backend threads visible to all clients"
-            )
-
+        VStack(alignment: .leading, spacing: DashboardTheme.elementSpacing) {
+            TextField("Search threads", text: $query)
+                .textFieldStyle(.roundedBorder)
+            Picker("Status", selection: $filter) {
+                ForEach(ThreadStatusFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
+                }
+            }
             if sessions.isEmpty {
                 ContentUnavailableView(
-                    "No threads",
+                    hasSessions ? "No matching threads" : "No threads",
                     systemImage: "text.bubble",
-                    description: Text("Create a session from a client and it will appear here.")
+                    description: Text(hasSessions ? "Change the search or status filter." : "Sessions created from a client appear here.")
                 )
-                .frame(minHeight: 420)
+                .frame(maxHeight: .infinity)
             } else {
                 List(selection: $selectedSessionID) {
                     ForEach(sessions) { session in
-                        ThreadSessionRow(session: session)
-                            .tag(session.id)
+                        ThreadSessionRow(session: session).tag(session.id)
                     }
                 }
                 .listStyle(.inset)
-                .frame(minHeight: 420, idealHeight: 520)
             }
         }
-        .cardBackground()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }

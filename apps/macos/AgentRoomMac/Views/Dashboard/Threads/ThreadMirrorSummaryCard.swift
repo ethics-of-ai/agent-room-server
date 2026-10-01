@@ -12,7 +12,7 @@ struct ThreadMirrorSummaryCard: View {
     var refreshAction: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
             HStack(alignment: .firstTextBaseline) {
                 CardHeader(
                     title: "Thread mirror",

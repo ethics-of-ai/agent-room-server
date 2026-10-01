@@ -7,6 +7,8 @@ struct SupervisionDashboardView: View {
     @State private var selectedSection: DashboardSection = .backend
     @State private var isExportingDiagnostics = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         NavigationSplitView {
             DashboardSidebarView(selectedSection: $selectedSection)
@@ -21,8 +23,8 @@ struct SupervisionDashboardView: View {
         .task {
             await supervisor.refreshConnectionStatus()
         }
-        .animation(DashboardTheme.stateAnimation, value: supervisor.serverState)
-        .animation(DashboardTheme.stateAnimation, value: supervisor.connectionState)
+        .animation(reduceMotion ? nil : DashboardTheme.stateAnimation, value: supervisor.serverState)
+        .animation(reduceMotion ? nil : DashboardTheme.stateAnimation, value: supervisor.connectionState)
     }
 
     private func exportDiagnostics() {

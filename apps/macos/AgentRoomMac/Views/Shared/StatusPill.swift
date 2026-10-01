@@ -6,7 +6,7 @@ struct StatusPill: View {
     var tint: Color = .accentColor
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: DashboardTheme.tightSpacing) {
             Image(systemName: systemImage)
                 .symbolRenderingMode(.hierarchical)
             Text(label)

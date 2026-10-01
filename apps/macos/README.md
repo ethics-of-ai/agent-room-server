@@ -30,7 +30,7 @@ generated `.xcodeproj`.
 - Inspect backend sessions, stored messages, metadata, and recent events.
 - Export redacted diagnostics and supervise app-owned backend crashes.
 - Check for and install signed updates from the Overview dashboard or the
-  application menu on updater-enabled builds.
+  menu bar panel or application menu on updater-enabled builds.
 
 The Threads view is for supervision. It can stop an active turn, but it does
 not send prompts or act as another chat client. Stopping a DeepSeek turn ends
@@ -116,7 +116,7 @@ prerelease-only `rc` appcast.
 Install the first RC from its versioned release, then publish the next RC
 through the private manual `release-candidate.yml` workflow and choose
 **Check for Updates…** to test the signed replacement and relaunch path. The
-action is available from the Overview dashboard and application menu. The
+action is available from the Overview dashboard, menu bar panel, and application menu. The
 dashboard always shows the installed version; in a source, unsigned, or
 updater-disabled build it disables the button and explains that no feed or
 signing key is present.

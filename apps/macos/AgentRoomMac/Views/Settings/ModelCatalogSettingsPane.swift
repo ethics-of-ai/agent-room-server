@@ -5,7 +5,7 @@ import SwiftUI
 /// offers a restart, the same apply rule as managed settings.
 struct ModelCatalogSettingsPane: View {
     @Environment(BackendSupervisor.self) private var supervisor
-    @State private var store = ModelCatalogEditorStore()
+    @Environment(ModelCatalogEditorStore.self) private var store
     @State private var runner = ModelCatalogRunner.codex
 
     var body: some View {
@@ -36,12 +36,6 @@ struct ModelCatalogSettingsPane: View {
             )
         }
         .formStyle(.grouped)
-        .task(id: supervisor.settings.agentRoomHomePath) { load() }
-        .onChange(of: supervisor.serverState) { _, state in
-            if state == .starting {
-                store.backendDidRestart()
-            }
-        }
     }
 
     private var localFileURL: URL {
@@ -51,10 +45,6 @@ struct ModelCatalogSettingsPane: View {
     private var bundledCatalogURL: URL? {
         (try? BackendRuntimeLocator().locateBackendEntrypoint())
             .map(ModelCatalogFileStore.bundledCatalogURL(forBackendEntrypoint:))
-    }
-
-    private func load() {
-        store.load(bundledCatalogURL: bundledCatalogURL, localFileURL: localFileURL)
     }
 
     private func save() {

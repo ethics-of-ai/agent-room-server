@@ -9,12 +9,11 @@ struct PairingURLsCard: View {
         // reference below.
         let hostnameURL = supervisor.macHostnameServerURLString
         let lanIPURLs = supervisor.lanIPAddressServerURLStrings
-        let primaryLANURL = hostnameURL ?? lanIPURLs.first
         VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
             CardHeader(
                 title: "Pairing URLs",
                 systemImage: "network",
-                subtitle: "Endpoints for the Vision Pro Simulator and Physical Vision Pro"
+                subtitle: "Connect a simulator or Vision Pro on the same network"
             )
 
             VStack(alignment: .leading, spacing: 8) {
@@ -39,20 +38,6 @@ struct PairingURLsCard: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: DashboardTheme.elementSpacing) {
-                CopyButton(value: supervisor.localServerURLString, title: "Copy Simulator URL", showsTitle: true)
-                    .buttonStyle(.bordered)
-
-                CopyButton(
-                    value: primaryLANURL ?? "No LAN address detected",
-                    title: "Copy Physical Vision Pro URL",
-                    showsTitle: true,
-                    isEnabled: primaryLANURL != nil
-                )
-                .buttonStyle(.bordered)
-            }
-            .padding(.top, 2)
         }
         .cardBackground()
     }

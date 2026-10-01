@@ -6,7 +6,7 @@ struct CardHeader: View {
     var subtitle: String?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: DashboardTheme.elementSpacing) {
             if let systemImage {
                 Image(systemName: systemImage)
                     .font(.callout.weight(.semibold))

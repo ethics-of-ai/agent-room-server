@@ -5,7 +5,7 @@ struct MenuBarHeader: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            StatusOrb(state: supervisor.serverState, size: 40)
+            BackendStateSymbol(state: supervisor.serverState).font(.title2)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(supervisor.serverState.statusTitle)
@@ -17,8 +17,7 @@ struct MenuBarHeader: View {
                 Text(supervisor.localServerURLString)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
 

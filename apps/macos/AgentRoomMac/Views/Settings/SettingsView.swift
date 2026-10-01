@@ -1,27 +1,37 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(BackendSupervisor.self) private var supervisor
+    @State private var selection: SettingsSection = .setup
+    @State private var modelCatalogStore = ModelCatalogEditorStore()
+
     var body: some View {
-        TabView {
-            SetupSettingsPane()
-                .tabItem { Label("Setup", systemImage: "wand.and.stars") }
-
-            CredentialsSettingsPane()
-                .tabItem { Label("Credentials", systemImage: "key.fill") }
-
-            RunnerSettingsPane()
-                .tabItem { Label("Runner", systemImage: "cpu") }
-
-            ModelCatalogSettingsPane()
-                .tabItem { Label("Models", systemImage: "list.bullet.rectangle") }
-
-            EditorCatalogSettingsPane()
-                .tabItem { Label("Languages", systemImage: "curlybraces") }
-
-            AdvancedSettingsPane()
-                .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
+        NavigationSplitView {
+            List(SettingsSection.allCases, selection: $selection) { section in
+                Label(section.title, systemImage: section.systemImage)
+                    .tag(section)
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+        } detail: {
+            SettingsPaneContent(section: selection)
+                .environment(modelCatalogStore)
+                .navigationTitle(selection.title)
         }
-        .frame(width: 580, height: 560)
-        .scenePadding(.horizontal)
+        .background(SettingsWindowToolbar())
+        .frame(minWidth: 720, minHeight: 560)
+        .task(id: supervisor.settings.agentRoomHomePath) { loadModelCatalog() }
+        .onChange(of: supervisor.serverState) { _, state in
+            if state == .starting { modelCatalogStore.backendDidRestart() }
+        }
+    }
+
+    private func loadModelCatalog() {
+        let bundledURL = (try? BackendRuntimeLocator().locateBackendEntrypoint())
+            .map(ModelCatalogFileStore.bundledCatalogURL(forBackendEntrypoint:))
+        modelCatalogStore.load(
+            bundledCatalogURL: bundledURL,
+            localFileURL: ModelCatalogFileStore.fileURL(forAgentRoomHomePath: supervisor.settings.agentRoomHomePath)
+        )
     }
 }

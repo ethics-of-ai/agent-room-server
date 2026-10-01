@@ -10,6 +10,8 @@ struct CopyButton: View {
 
     @State private var didCopy = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         Button(action: copy) {
             let label = Label(didCopy ? "Copied" : title, systemImage: didCopy ? "checkmark" : "doc.on.doc")
@@ -32,6 +34,6 @@ struct CopyButton: View {
 
     private func copy() {
         Clipboard.copy(value)
-        withAnimation { didCopy = true }
+        withAnimation(reduceMotion ? nil : DashboardTheme.stateAnimation) { didCopy = true }
     }
 }

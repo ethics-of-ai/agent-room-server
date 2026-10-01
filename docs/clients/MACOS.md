@@ -28,6 +28,33 @@ The Threads dashboard is read and control UI over backend sessions. It does not
 create sessions, send turns, select context or model settings, upload
 attachments, or execute a runner.
 
+## Dashboard and appearance
+
+The main window uses native sidebar navigation for Overview, Threads, and
+Diagnostics. Backend status stays in the sidebar footer. Overview puts status,
+ownership, and one primary lifecycle action first. Secondary lifecycle actions
+remain in the toolbar menu with the existing restart confirmation. Setup
+readiness stays visible and expanded directly below status in every backend
+state. App updates remain visible below readiness, ahead of pairing and
+configuration.
+Pairing and configuration use two columns when the detail content can fit two
+320-point groups plus spacing, and stack below that width. Long values wrap and
+remain selectable; pairing rows have individually labeled copy controls.
+
+Settings uses a sidebar for Setup, Credentials, Runners, Models, Languages,
+Appearance, and Advanced. It opens on Setup and keeps its selection while open.
+The default size is 820 by 640 points with a 720 by 560 minimum. Existing grouped
+forms retain offline editing, environment locks, pending restart, schema repair,
+and Keychain masking behavior.
+
+Appearance is an app-local, non-secret System, Light, or Dark preference. One
+observable owner persists it in UserDefaults and applies it to the main window,
+Settings, and menu bar panel. System supplies no color-scheme override, and an
+unknown stored value falls back to System. The menu bar glyph remains a system
+appearance-adaptive template image. Grouped content uses flat system backgrounds
+and subtle borders. Increased contrast strengthens group outlines; optional
+state transitions respect Reduce Motion.
+
 ## Backend launch
 
 The app launches the compiled backend with app-support, bind, port, workspace,
@@ -204,6 +231,32 @@ The app reads health, config, runners, status, sessions, messages, logs, audit,
 and workspace metadata from the backend. It may cancel the active turn through
 the fixed endpoint.
 
+Threads uses a full-height session list and detail with independent scrolling.
+Local search matches the displayed title, workspace name, or runner id with a
+case-insensitive substring after trimming whitespace. Status filters preserve
+the newest-updated order. Running includes an active turn even if the status
+string differs; Idle and Failed exclude running sessions. All includes unknown
+statuses. Summary counts describe all sessions independently of search/filter.
+
+The store initially selects the first available session. Refresh and sorting
+preserve that id. Filtering out the selected session shows a Clear filters
+placeholder and hides its controls; removing it shows an unavailable placeholder
+until another selection. Failed refresh retains the last successful data and
+selection alongside its error. Failed transcript reads remain retryable.
+
+Each new selection opens Transcript at the latest content. Transcript and Events
+keep independent reading positions while switching tabs. A reader follows
+appends and growth of the last message until the operator scrolls away. Returning
+within 24 points of the bottom or using Jump to latest resumes following.
+Unchanged refresh leaves scrolling untouched. Stable row identities preserve a
+paused anchor; eviction of an anchor from bounded recent events does not resume
+following. Events shows at most the latest 30 session events available in the
+status snapshot, in chronological order, rather than a complete event history.
+Polling remains scene-aware and cancellation remains a backend request.
+
+Diagnostics puts process logs and secret-redacted export first, with backend
+endpoint snapshots and local app events behind disclosures.
+
 A context-window bar displays runner-supplied occupancy and compaction threshold
 only. It never invents a threshold for a runner that did not publish one. The
 accessible headroom text carries the same numeric meaning as the visual marker.
@@ -246,8 +299,10 @@ The app writes the file directly and atomically, so editing works while the
 backend is stopped. It checks the backend's rules first, trims fields the way
 the backend schema does, and refuses to save while any rule fails. The backend
 reads the file only at startup. A save made while the backend runs therefore
-offers a restart, the same apply rule as managed settings. An existing file the
-app cannot read is reported, and saving replaces it.
+offers a restart, the same apply rule as managed settings. The Settings window
+owns the editor store, so switching sidebar sections preserves model drafts and
+the pending-restart notice. Restart observation stays active in every section.
+An existing file the app cannot read is reported, and saving replaces it.
 
 ## Updates
 
@@ -260,6 +315,11 @@ Signed stable builds use the fixed latest-stable feed. Exact
 immutable versioned RC asset. `macos-sparkle.mjs` owns this closed mapping.
 Packaging rejects a disabled build containing metadata or an enabled build
 missing its fixed feed, key, or signing identity.
+
+Overview always shows an App Updates card with the installed version and a
+prominent Check for Updates button. The menu bar panel and application menu also
+offer Check for Updates, so operators can reach it while the main window is
+closed. Disabled builds keep these controls disabled with an explanation.
 
 Sparkle checks enabled channels daily and shows its standard install prompt.
 It never installs silently and refuses downgrade. `SUSendProfileInfo` is false.

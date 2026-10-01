@@ -7,8 +7,12 @@ struct DiagnosticsSection: View {
 
     var body: some View {
         DiagnosticsControlsCard(isExporting: $isExporting, exportAction: exportAction)
-        DiagnosticsEndpointsCard(openEndpoint: openEndpoint)
         BackendLogsCard()
-        LocalDiagnosticsCard()
+        DisclosureGroup("Backend endpoints") {
+            DiagnosticsEndpointsCard(openEndpoint: openEndpoint)
+        }
+        DisclosureGroup("Local app events") {
+            LocalDiagnosticsCard()
+        }
     }
 }

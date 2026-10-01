@@ -131,39 +131,29 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     ))).toBe("");
   });
 
-  test("reveals the visionOS home mark once with a reduce-motion-safe path", async () => {
-    const source = await readFile(
-      resolve(visionOSRoot, "AgentRoom/Views/Home/HomeSpatialMarkView.swift"),
-      "utf8"
+  test("delegates home artwork playback to the panel-owned presentation module", async () => {
+    const home = await readFile(
+      resolve(visionOSRoot, "AgentRoom/Views/Home/HomeDiscoverContentView.swift"), "utf8"
     );
-    const animationSource = await readFile(
-      resolve(visionOSRoot, "AgentRoom/Views/Home/HomeSpatialMarkLightSweepView.swift"),
-      "utf8"
+    const artwork = await readFile(
+      resolve(visionOSRoot, "AgentRoom/Views/Home/HomeSpatialMarkView.swift"), "utf8"
+    );
+    const appearance = await readFile(
+      resolve(visionOSRoot, "AgentRoom/Presentation/DesignTreatment/DesignTreatmentAppearance.swift"), "utf8"
     );
 
-    expect(source).toContain("@Environment(\\.accessibilityReduceMotion) private var reduceMotion");
-    expect(source).toContain("let cornerRadius = iconSize * 0.18");
-    expect(source).toContain("@State private var hasArrived = false");
-    expect(source).toContain("@State private var lightSweepProgress: CGFloat = 0");
-    expect(source).toContain("ZStack");
-    expect(source).toContain("HomeSpatialMarkLightSweepView(");
-    expect(source).toContain("iconSize: iconSize");
-    expect(source).toContain("reduceMotion: reduceMotion");
-    expect(source).toContain(".scaleEffect(reduceMotion || hasArrived ? 1 : 0.96)");
-    expect(source).toContain(".offset(z: reduceMotion ? 0 : (hasArrived ? iconSize * 0.045 : 0))");
-    expect(source).toContain(".shadow(color: .black.opacity(0.18), radius: iconSize * 0.05, y: iconSize * 0.03)");
-    expect(source).toContain(".task(id: reduceMotion)");
-    expect(source).toContain("withAnimation(.smooth(duration: 0.45))");
-    expect(source).toContain("} completion: {");
-    expect(source).toContain("withAnimation(.easeOut(duration: 0.2))");
-    expect(animationSource).toContain("struct HomeSpatialMarkLightSweepView: View");
-    expect(animationSource).toContain("LinearGradient(");
-    expect(animationSource).toContain(".white.opacity(0.28)");
-    expect(animationSource).toContain("let sweepOpacity = reduceMotion");
-    expect(animationSource).not.toContain("TimelineView");
-    expect(animationSource).not.toContain(".repeatForever");
-    expect(source).not.toContain("TimelineView");
-    expect(source).not.toContain("RealityView");
+    expect(home).toContain("@State private var playback = PanelPlayback()");
+    expect(home).toContain("HomeSpatialMarkView(playback: playback)");
+    expect(artwork).toContain("let playback: PanelPlayback");
+    expect(artwork).toContain(".designTreatment(.lightSweep, sequence: playback");
+    expect(artwork).toContain(".designTreatment(.popIn, sequence: playback");
+    expect(artwork).toContain(".accessibilityHidden(true)");
+    expect(artwork).not.toContain("@State");
+    expect(artwork).not.toContain("withAnimation");
+    expect(artwork).not.toContain(".task(");
+    expect(appearance).toContain(".mask { content.accessibilityHidden(true) }");
+    expect(appearance).toContain(".allowsHitTesting(false)");
+    expect(appearance).toContain("!reduceMotion");
   });
 
   test("compiles shared AgentRoomClient sources without loading a duplicate local package", async () => {

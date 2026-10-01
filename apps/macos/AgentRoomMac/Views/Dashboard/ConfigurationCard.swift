@@ -4,18 +4,20 @@ struct ConfigurationCard: View {
     @Environment(BackendSupervisor.self) private var supervisor
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
             CardHeader(
                 title: "Configuration",
                 systemImage: "slider.horizontal.3",
-                subtitle: "Active settings injected into the backend at launch"
+                subtitle: "Local backend configuration"
             )
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: DashboardTheme.elementSpacing) {
                 InfoRow(label: "Port", value: String(supervisor.settings.serverPort))
+                DisclosureGroup("Local paths") {
                 InfoRow(label: "Workspace path", value: supervisor.settings.workspacePath)
                 InfoRow(label: "State path", value: supervisor.settings.statePath)
                 InfoRow(label: "AgentRoom home", value: supervisor.settings.agentRoomHomePath)
+                }
                 InfoRow(
                     label: "Launch at login",
                     value: supervisor.settings.launchAtLoginEnabled ? "Enabled" : "Disabled",

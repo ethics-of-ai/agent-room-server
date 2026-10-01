@@ -4,7 +4,7 @@ struct LocalDiagnosticsCard: View {
     @Environment(BackendSupervisor.self) private var supervisor
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
             CardHeader(
                 title: "App diagnostics",
                 systemImage: "list.bullet.rectangle",

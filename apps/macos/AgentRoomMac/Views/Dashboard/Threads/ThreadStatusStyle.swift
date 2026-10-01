@@ -5,6 +5,10 @@ struct ThreadStatusStyle {
     var systemImage: String
     var tint: Color
 
+    static func style(for session: AgentSession) -> ThreadStatusStyle {
+        style(for: session.threadIsRunning ? "running" : session.status)
+    }
+
     static func style(for status: String) -> ThreadStatusStyle {
         switch status.lowercased() {
         case "running":

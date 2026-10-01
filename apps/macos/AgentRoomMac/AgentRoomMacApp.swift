@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct AgentRoomMacApp: App {
     @NSApplicationDelegateAdaptor(AppTerminationDelegate.self) private var appDelegate
+    @State private var appearance = AppAppearanceStore()
     @State private var supervisor: BackendSupervisor
     @State private var threadMirrorStore: BackendThreadMirrorStore
     @State private var updateController: AppUpdateController
@@ -27,6 +28,8 @@ struct AgentRoomMacApp: App {
         WindowGroup("AgentRoom", id: "main") {
             SupervisionDashboardView()
                 .environment(supervisor)
+                .environment(appearance)
+                .preferredColorScheme(appearance.selection.colorScheme)
                 .environment(threadMirrorStore)
                 .environment(updateController)
                 .frame(minWidth: 920, minHeight: 620)
@@ -49,11 +52,19 @@ struct AgentRoomMacApp: App {
         Settings {
             SettingsView()
                 .environment(supervisor)
+                .environment(appearance)
+                .preferredColorScheme(appearance.selection.colorScheme)
         }
+
+        .defaultSize(width: 820, height: 640)
+        .windowResizability(.contentMinSize)
 
         MenuBarExtra {
             MenuBarStatusView()
+                .environment(updateController)
                 .environment(supervisor)
+                .environment(appearance)
+                .preferredColorScheme(appearance.selection.colorScheme)
         } label: {
             MenuBarLabel(state: supervisor.serverState)
         }

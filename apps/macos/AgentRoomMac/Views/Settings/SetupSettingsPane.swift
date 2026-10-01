@@ -14,7 +14,7 @@ struct SetupSettingsPane: View {
 
     var body: some View {
         Form {
-            Section("First-Run Setup") {
+            Section("Initial setup") {
                 TextField("Port", text: $portText)
                     .focused($focusedField, equals: .port)
                     .onSubmit(savePort)
@@ -26,7 +26,7 @@ struct SetupSettingsPane: View {
                 SettingsCaption(text: "The backend defaults to port 8787 and binds to 0.0.0.0 for LAN clients.")
             }
 
-            Section("visionOS Pairing Help") {
+            Section("Pairing") {
                 SettingsCaption(text: "Keep the simulator set to http://localhost:8787 unless you changed the backend port.")
                 SettingsCaption(text: "Use the Mac hostname URL or LAN IP URL for a physical Vision Pro on the same network.", systemImage: "visionpro")
             }
@@ -38,8 +38,8 @@ struct SetupSettingsPane: View {
                             .font(.callout.weight(.medium))
                         Text(supervisor.settings.workspacePath)
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
                     }
                     Button("Add Another Workspace", systemImage: "folder.badge.plus", action: chooseWorkspaceDirectories)

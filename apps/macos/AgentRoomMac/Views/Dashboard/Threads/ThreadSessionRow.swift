@@ -4,11 +4,11 @@ struct ThreadSessionRow: View {
     var session: AgentSession
 
     private var style: ThreadStatusStyle {
-        ThreadStatusStyle.style(for: session.status)
+        ThreadStatusStyle.style(for: session)
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: DashboardTheme.elementSpacing) {
             Image(systemName: style.systemImage)
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(style.tint)
