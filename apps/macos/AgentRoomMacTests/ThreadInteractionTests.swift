@@ -75,6 +75,25 @@ final class ThreadInteractionTests: XCTestCase {
         XCTAssertTrue(ThreadReadingState().isFollowing)
     }
 
+    func testNativeScrollPausesFollowingDuringUserInputAndResumesAtBottom() {
+        var reading = ThreadReadingState()
+        reading.scrollPhaseChanged(isUserScrolling: true, distanceToBottom: 0)
+        XCTAssertTrue(reading.isFollowing)
+        XCTAssertFalse(reading.contentChanged(retainedIDs: ["one"]))
+        reading.scrollPhaseChanged(isUserScrolling: false, distanceToBottom: 0)
+        XCTAssertTrue(reading.shouldFollowUpdates)
+    }
+
+    func testNativeScrollEndRetainsPausedAnchorAndProgrammaticMovementDoesNotResume() {
+        var reading = ThreadReadingState()
+        reading.scrollPhaseChanged(isUserScrolling: true, distanceToBottom: 100)
+        reading.anchorID = "one"
+        reading.scrollPhaseChanged(isUserScrolling: false, distanceToBottom: 100)
+        reading.scrollPhaseChanged(isUserScrolling: false, distanceToBottom: 0)
+        XCTAssertFalse(reading.shouldFollowUpdates)
+        XCTAssertEqual(reading.anchorID, "one")
+    }
+
     private func session(_ id: String, title: String = "Title", status: String = "idle",
                          activeTurn: String? = nil) -> AgentSession {
         AgentSession(id: id, workspaceId: "workspace", workspacePath: "/tmp/workspace", runnerKind: "codex",

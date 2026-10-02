@@ -10,6 +10,13 @@ Backend setup and recovery recipes are in
 in [DeepSeek Harness](../engineering/DEEPSEEK_HARNESS_RUNNER.md) and
 [Cursor SDK](../engineering/CURSOR_SDK_RUNNER.md).
 
+## Build requirements
+
+Build with Xcode 27.0 or newer for the current SwiftUI overloads. The app keeps
+Swift 5 language mode and a macOS 14 deployment floor; OS 27-only styles use
+availability guards. Generate the project from `apps/macos/project.yml` with
+XcodeGen. CI and public release select Xcode 27.0.
+
 ## Responsibilities
 
 - Start, stop, restart, and health-check the bundled backend.
@@ -244,6 +251,8 @@ placeholder and hides its controls; removing it shows an unavailable placeholder
 until another selection. Failed refresh retains the last successful data and
 selection alongside its error. Failed transcript reads remain retryable.
 
+On macOS 27, Transcript and Events use the native tabs picker for content
+navigation. Earlier supported systems retain the segmented picker.
 Each new selection opens Transcript at the latest content. Transcript and Events
 keep independent reading positions while switching tabs. A reader follows
 appends and growth of the last message until the operator scrolls away. Returning
@@ -252,6 +261,9 @@ Unchanged refresh leaves scrolling untouched. Stable row identities preserve a
 paused anchor; eviction of an anchor from bounded recent events does not resume
 following. Events shows at most the latest 30 session events available in the
 status snapshot, in chronological order, rather than a complete event history.
+On macOS 15 and later, native scroll geometry and phases distinguish user
+movement from content growth and programmatic scrolling. The macOS 14 fallback
+retains its AppKit observer. Following pauses while native user input is active.
 Polling remains scene-aware and cancellation remains a backend request.
 
 Diagnostics puts process logs and secret-redacted export first, with backend

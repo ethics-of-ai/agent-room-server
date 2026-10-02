@@ -2945,12 +2945,30 @@ The knowledge map includes the Apple WWDC 2023 spatial video manifest at
 sessions can use to find paraphrased per-video indexes and jump to exact video
 timestamps for visual examples.
 
+For Apple client modernization, the knowledge map also points to
+`docs/engineering/SWIFTUI_STANDARDS.md`, the dated adoption plan at
+`docs/plans/APPLE_PLATFORM_UPLIFT_PLAN.md`, and the workflow at
+`.agents/skills/apple-platform-uplift/SKILL.md`. The plan and skill entries are
+marked as private-source references and are absent from the public mirror.
+The profile directs agents to refresh relevant official Apple guidance,
+verify shipping-toolchain and deployment-target compatibility, and record
+adoption decisions and verification in the plan. Accepted behavior belongs in
+its owning client or engineering reference. Shipped runner policy remains
+registry-owned, as described in `docs/engineering/RUNNERS.md`.
+
+This endpoint advertises guidance; fetching it does not load references into
+a runner turn or invoke a skill. Repository entry-point guidance and skill
+discovery provide that task-specific steering.
+
 The response also includes `visionOSDesignGrounding`, a required preflight for
 visionOS design questions, reviews, and UI implementation. Agents must consult
 `docs/engineering/VISIONOS_DESIGN_PRINCIPLES.md`, the Apple spatial video
 manifest, and `docs/engineering/SWIFTUI_STANDARDS.md`; identify the relevant
 Apple cue or timestamp; and restate the AgentRoom client boundary before
 proposing or editing UI.
+For design uplift, this preflight also points to `apple-platform-uplift` for
+current evidence and symbol availability while retaining the recorded spatial
+design cues.
 
 `POST /api/harness/visionos/xcodegen` runs the fixed `xcodegen generate`
 workflow in `apps/visionos` for a registered workspace. The resolved

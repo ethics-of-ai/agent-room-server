@@ -6,6 +6,7 @@ the backend, and reports diagnostics.
 
 ## Build the app
 
+Use the toolchain in the [macOS build requirements](../../docs/clients/MACOS.md#build-requirements).
 Build the backend before opening the Mac project:
 
 ```bash

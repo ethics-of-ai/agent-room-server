@@ -10,7 +10,7 @@ export function buildHarnessProfile(config: ServiceConfig): HarnessProfile {
       publishedAt: "2026-02-11"
     },
     summary:
-      "AgentRoom exposes registered local workspaces, safe file context, and turn-based Codex sessions through a Mac-hosted API so visionOS and macOS clients can drive agentic tools without running them directly.",
+      "AgentRoom exposes registered local workspaces, safe file context, and turn-based coding-agent sessions through a Mac-hosted API so visionOS and macOS clients can drive agentic tools without running them directly.",
     principles: [
       "The Mac backend is the only local agent host.",
       "Clients send typed session and turn requests; they do not execute tools directly.",
@@ -28,6 +28,10 @@ export function buildHarnessProfile(config: ServiceConfig): HarnessProfile {
         purpose: "Claude Code guidance kept in sync with repository guardrails."
       },
       {
+        path: "docs/README.md",
+        purpose: "Task-specific reference routing; owning documents define shipped behavior."
+      },
+      {
         path: "docs/architecture/ARCHITECTURE.md",
         purpose: "System boundary map for the local-agent bridge, backend runner adapter, and clients."
       },
@@ -38,6 +42,22 @@ export function buildHarnessProfile(config: ServiceConfig): HarnessProfile {
       {
         path: "docs/safety/TRUST_AND_SAFETY.md",
         purpose: "Safety posture for local runner execution and credential handling."
+      },
+      {
+        path: "docs/engineering/RUNNERS.md",
+        purpose: "Registry-owned runner admission, policy, skill discovery, and runtime boundaries."
+      },
+      {
+        path: "docs/engineering/SWIFTUI_STANDARDS.md",
+        purpose: "Shared Apple source structure, state ownership, accessibility, and verification standards."
+      },
+      {
+        path: "docs/plans/APPLE_PLATFORM_UPLIFT_PLAN.md",
+        purpose: "Private source repository: dated Apple documentation evidence, compatibility decisions, and adoption backlog. Refresh relevant sources before modernization."
+      },
+      {
+        path: ".agents/skills/apple-platform-uplift/SKILL.md",
+        purpose: "Private source repository: bounded Apple design uplift, SDK/toolchain upgrade, and modernization-review workflow."
       },
       {
         path: "docs/engineering/VISIONOS_DESIGN_PRINCIPLES.md",
@@ -84,6 +104,7 @@ export function buildHarnessProfile(config: ServiceConfig): HarnessProfile {
         "Cite the selected Apple reference index entry or timestamp cue when making a spatial design claim.",
         "State the AgentRoom client boundary: visionOS is a REST/WebSocket client and must not run agents, shell commands, or provider tools.",
         "Map the change to the SwiftUI standards for structure, state ownership, accessibility, and verification.",
+        "For design uplift, use apple-platform-uplift to refresh relevant Apple guidance and check symbol availability; retain the recorded spatial design cues.",
         "Prefer native visionOS windows, system materials, ornaments, comfortable input targets, and familiar navigation before adding custom spatial novelty."
       ]
     },
@@ -114,13 +135,18 @@ export function buildHarnessProfile(config: ServiceConfig): HarnessProfile {
         purpose: "Run fixed visionOS build or targeted test checks inside a registered workspace and stream bounded coding-agent activity."
       },
       {
+        name: "Apple platform adoption record",
+        artifact: "docs/plans/APPLE_PLATFORM_UPLIFT_PLAN.md",
+        purpose: "Private source repository: record adoption or retention decisions, source dates, compatibility, measured verification, and pending attended checks; promote accepted behavior into its owning reference."
+      },
+      {
         name: "verification commands",
         artifact: "AGENTS.md / CLAUDE.md",
         purpose: "Give agents a stable completion checklist before claiming backend work is done."
       }
     ],
     guardrails: [
-      "Use registered local workspaces and Codex runner as the normal runtime path.",
+      "Use registered local workspaces and admitted runners whose policy is owned by the runner registry.",
       "Keep runner implementations behind AgentRunner.",
       "Require bearer auth for mutating routes when AUTH_TOKEN is configured.",
       "Require bearer auth for workspace tree and file-preview reads when AUTH_TOKEN is configured.",
@@ -128,6 +154,7 @@ export function buildHarnessProfile(config: ServiceConfig): HarnessProfile {
       "Preserve user-selected workspaces unless deletion is explicitly requested.",
       "Keep provider credentials out of clients and diagnostics.",
       "Keep workspace context registered-workspace-relative, bounded, and symlink-safe.",
+      "For Apple client modernization, follow apple-platform-uplift when available and verify current Apple guidance against shipping-toolchain and deployment-target compatibility.",
       "Ground visionOS design questions and implementation in the Apple spatial design references before proposing or editing UI."
     ],
     verificationCommands: [

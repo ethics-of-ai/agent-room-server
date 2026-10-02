@@ -19,8 +19,13 @@ struct ThreadReadingScrollView<Item: Identifiable & Equatable, Row: View>: View 
                         Color.clear.frame(height: 1).id(bottomID)
                     }
                     .scrollTargetLayout()
-                    .background(ThreadScrollObserver(userScrolled: observeScroll))
+                    .background {
+                        if #unavailable(macOS 15) {
+                            ThreadScrollObserver(userScrolled: observeScroll)
+                        }
+                    }
                 }
+                .modifier(ThreadReadingScrollTracking(reading: $reading))
                 .scrollPosition(id: reading.isFollowing ? .constant(nil) : $reading.anchorID, anchor: .top)
                 .defaultScrollAnchor(.bottom)
                 .onChange(of: items) {
@@ -29,8 +34,8 @@ struct ThreadReadingScrollView<Item: Identifiable & Equatable, Row: View>: View 
                     }
                 }
                 .onAppear { if reading.isFollowing { proxy.scrollTo(bottomID, anchor: .bottom) } }
-                .onChange(of: reading.isFollowing) {
-                    if reading.isFollowing { scrollToLatest(using: proxy) }
+                .onChange(of: reading.shouldFollowUpdates) {
+                    if reading.shouldFollowUpdates { scrollToLatest(using: proxy) }
                 }
 
                 if !reading.isFollowing {
@@ -47,7 +52,7 @@ struct ThreadReadingScrollView<Item: Identifiable & Equatable, Row: View>: View 
         Task { @MainActor in
             // Let the layout release its paused anchor and place new content.
             await Task.yield()
-            guard reading.isFollowing else { return }
+            guard reading.shouldFollowUpdates else { return }
             proxy.scrollTo(bottomID, anchor: .bottom)
         }
     }

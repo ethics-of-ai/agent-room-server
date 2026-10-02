@@ -110,7 +110,7 @@ No headset? Drive the backend with `curl` or your own client. The
 
 ## Build from source
 
-You need Xcode 26, Node.js 24 or newer, pnpm 9.15.4 (`npx pnpm` works), and
+You need Xcode 27.0, Node.js 24 or newer, pnpm 9.15.4 (`npx pnpm` works), and
 XcodeGen.
 
 ```bash

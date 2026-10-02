@@ -63,3 +63,7 @@ For a focused change, start with the matching sections:
 The visionOS client and its Apple evidence stay in the private repository.
 Some shared references may describe those contracts without publishing the
 private app source.
+The [harness profile](api/API.md#harness) also advertises private Apple uplift
+plan and skill paths, labeled as private-source references. Public users can
+use the shared SwiftUI standards and current official Apple documentation;
+the profile does not fetch those documents or invoke skills automatically.

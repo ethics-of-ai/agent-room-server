@@ -245,6 +245,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
   test("renders windowed Apple-style dashboard and workspace windows", async () => {
     const app = await readFile(resolve(visionOSRoot, "AgentRoom/AgentRoomApp.swift"), "utf8");
     const dashboardView = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Dashboard/DashboardView.swift"), "utf8");
+    const dashboardDetail = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Dashboard/DashboardWorkspaceDetailView.swift"), "utf8");
     const infoPlist = await readFile(resolve(visionOSRoot, "AgentRoom/Info.plist"), "utf8");
     const projectYaml = await readFile(resolve(visionOSRoot, "project.yml"), "utf8");
     const workspaceThreads = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceThreadPanel.swift"), "utf8");
@@ -263,15 +264,19 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(app).not.toContain('WindowGroup("Blender Scene"');
     expect(app).toContain(".windowStyle(.volumetric)");
     expect(dashboardView).toContain("TabView(selection: $selectedNavigationItem)");
-    expect(dashboardView).toContain(".tabItem");
+    expect(dashboardView).not.toContain(".tabItem");
+    expect(dashboardView).not.toContain(".tag(DashboardNavigationItem.");
     expect(dashboardView).toContain("NavigationSplitView");
     expect(dashboardView).toContain(".navigationSplitViewStyle(.balanced)");
     expect(dashboardView).toContain("DashboardWorkspaceListView()");
     expect(dashboardView).toContain("DashboardWorkspaceDetailView(");
-    expect(dashboardView).toContain(".toolbar");
-    expect(dashboardView).toContain('Button("Refresh", systemImage: "arrow.clockwise"');
-    expect(dashboardView).toContain("Label(DashboardNavigationItem.workspaces.title");
-    expect(dashboardView).toContain("Label(DashboardNavigationItem.settings.title");
+    expect(dashboardDetail).toContain(".toolbar");
+    expect(dashboardDetail).toContain('Button("Refresh", systemImage: "arrow.clockwise"');
+    for (const item of ["home", "workspaces", "settings"]) {
+      expect(dashboardView).toContain(`DashboardNavigationItem.${item}.title,`);
+      expect(dashboardView).toContain(`systemImage: DashboardNavigationItem.${item}.systemImage,`);
+      expect(dashboardView).toContain(`value: DashboardNavigationItem.${item}`);
+    }
     expect(dashboardView).not.toContain("NavigationStack");
     expect(dashboardView).not.toContain("SpatialDashboardPanel");
     expect(dashboardView).not.toContain("RealityView");

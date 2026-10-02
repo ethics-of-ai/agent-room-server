@@ -56,6 +56,17 @@ describe("harness profile", () => {
       expect.arrayContaining([
         expect.objectContaining({ path: "AGENTS.md", purpose: expect.stringContaining("entry point") }),
         expect.objectContaining({ path: "docs/api/API.md", purpose: expect.stringContaining("REST") }),
+        expect.objectContaining({ path: "docs/README.md" }),
+        expect.objectContaining({ path: "docs/engineering/RUNNERS.md" }),
+        expect.objectContaining({ path: "docs/engineering/SWIFTUI_STANDARDS.md" }),
+        expect.objectContaining({
+          path: "docs/plans/APPLE_PLATFORM_UPLIFT_PLAN.md",
+          purpose: expect.stringContaining("Private source repository")
+        }),
+        expect.objectContaining({
+          path: ".agents/skills/apple-platform-uplift/SKILL.md",
+          purpose: expect.stringContaining("Private source repository")
+        }),
         expect.objectContaining({
           path: "docs/reference/apple-wwdc2023-spatial-video-manifest.json",
           purpose: expect.stringContaining("collection")
@@ -66,12 +77,22 @@ describe("harness profile", () => {
     expect(payload.feedbackLoops).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "status snapshot", endpoint: "/api/status" }),
-        expect.objectContaining({ name: "runtime event stream", endpoint: "/api/events" })
+        expect.objectContaining({ name: "runtime event stream", endpoint: "/api/events" }),
+        expect.objectContaining({
+          name: "Apple platform adoption record",
+          artifact: "docs/plans/APPLE_PLATFORM_UPLIFT_PLAN.md"
+        })
       ])
     );
     const removedProjectionEndpoint = ["/api/events", ["a", "g"].join("") + "-" + ["u", "i"].join("")].join("/");
     expect(JSON.stringify(payload)).not.toContain(removedProjectionEndpoint);
     expect(payload.verificationCommands).toContain("pnpm typecheck");
+    expect(payload.guardrails).toContain(
+      "Use registered local workspaces and admitted runners whose policy is owned by the runner registry."
+    );
+    expect(payload.guardrails).toEqual(expect.arrayContaining([
+      expect.stringContaining("shipping-toolchain and deployment-target compatibility")
+    ]));
     expect(JSON.stringify(payload)).not.toContain("secret");
 
     await app.close();
@@ -94,7 +115,8 @@ describe("harness profile", () => {
       preflightChecklist: expect.arrayContaining([
         expect.stringContaining("WWDC spatial reference"),
         expect.stringContaining("timestamp"),
-        expect.stringContaining("AgentRoom client boundary")
+        expect.stringContaining("AgentRoom client boundary"),
+        expect.stringContaining("apple-platform-uplift")
       ])
     });
     expect(payload.guardrails).toContain(

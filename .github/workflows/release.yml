@@ -43,7 +43,7 @@ concurrency:
 jobs:
   dmg:
     name: Apple Silicon DMG
-    runs-on: macos-26
+    runs-on: xcode-27
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       # Production updates are a reviewed source policy, not an Actions
@@ -99,12 +99,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Select the newest Xcode 26 on the image
+      - name: Select Xcode 27.0
         run: |
           set -euo pipefail
-          XCODE="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
-          sudo xcode-select -s "$XCODE/Contents/Developer"
+          sudo xcode-select -s /Applications/Xcode_27.0.app/Contents/Developer
           xcodebuild -version
+          swift --version
       - run: brew install xcodegen
 
       - name: Download the pinned Sparkle release tools

@@ -16,7 +16,7 @@ struct ThreadSelectedDetail: View {
                     Text(tab.title).tag(tab)
                 }
             }
-            .pickerStyle(.segmented)
+            .modifier(ThreadContentPickerStyle())
             ZStack {
                 ThreadMessageListCard(messages: messages)
                     .opacity(tab == .transcript ? 1 : 0)

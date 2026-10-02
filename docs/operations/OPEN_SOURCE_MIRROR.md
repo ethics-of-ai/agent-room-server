@@ -157,7 +157,10 @@ workspaces, Keychain, settings, and sessions.
 
 ## Public release workflow
 
-The public `release.yml` handles stable and RC `v*` tags on macOS 26 arm64.
+The public `release.yml` handles stable and RC `v*` tags on the arm64
+`xcode-27` image. It selects Xcode 27.0 and prints the Xcode and Swift versions,
+matching the public Swift CI jobs. The app retains its macOS 14 minimum.
+The hosted image remains a public preview; its exact build can lag local Xcode.
 It performs the following closed procedure:
 
 1. Install pinned build tools. For enabled Sparkle channels, download the pinned
