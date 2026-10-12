@@ -10,7 +10,7 @@ enum ModelCatalogValidator {
     /// `codingAgentReasoningEffortIdSchema`.
     private static let effortIDPattern = /^[A-Za-z0-9._:-]{1,80}$/
     /// The levels the Claude Code runner accepts.
-    static let claudeCodeEffortIDs = ["low", "medium", "high", "xhigh"]
+    static let claudeCodeEffortIDs = ["low", "medium", "high", "xhigh", "max"]
 
     static func issues(in runners: ModelCatalogDocument.Runners) -> [String] {
         var issues: [String] = []

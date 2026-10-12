@@ -407,9 +407,9 @@ mapped the same way, plus a bounded error string.
 
 For `claude_code`, the backend discovers models live through the Claude Agent
 SDK `supportedModels()` control request and maps them into the same shape with
-reasoning effort choices (`low`, `medium`, `high`, `xhigh`) and an empty
-`serviceTiers` list (Claude Code has no speed-tier analog). Successful
-discovery results are cached briefly per backend process so repeated
+each model's reasoning effort choices from `low`, `medium`, `high`, `xhigh`,
+and `max`, and an empty `serviceTiers` list (Claude Code has no speed-tier
+analog). Successful discovery results are cached briefly per backend process so repeated
 capability reads do not each spawn an SDK session. If discovery fails, a
 fallback catalog of current Claude model aliases from the backend's
 [model catalog](../engineering/RUNNERS.md#model-catalog) is returned with a

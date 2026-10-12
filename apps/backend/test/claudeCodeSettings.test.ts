@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ServiceConfig } from "../src/domain/models";
 import { codingAgentTurnSettingsSchema } from "../src/domain/schemas";
 import { capabilitiesFromSupportedModels, fallbackClaudeCodeCapabilities } from "../src/runner/claudeCode/capabilities";
@@ -8,6 +8,7 @@ import {
   claudeCodeQueryOptions,
   effectiveClaudeCodeSettings
 } from "../src/runner/claudeCode/settings";
+import { bundledModelCatalog, installModelCatalog } from "../src/runner/modelCatalog";
 import { DIAGRAM_PROMPT_INSTRUCTION } from "../src/scene/diagram/prompt";
 
 const config = (overrides: Partial<ServiceConfig> = {}): ServiceConfig => ({
@@ -31,6 +32,7 @@ describe("claude code settings", () => {
     expect(claudeCodeEffort("medium")).toBe("medium");
     expect(claudeCodeEffort("high")).toBe("high");
     expect(claudeCodeEffort("xhigh")).toBe("xhigh");
+    expect(claudeCodeEffort("max")).toBe("max");
     expect(() => claudeCodeEffort("ultra")).toThrow(
       'Claude Code does not offer the reasoning effort "ultra"'
     );
@@ -229,15 +231,41 @@ describe("claude code capabilities", () => {
     });
   });
 
-  it("advertises no effort levels for a fallback model that does not accept them", () => {
+  it("advertises every effort level for the Haiku fallback", () => {
     const capabilities = fallbackClaudeCodeCapabilities(config({ claudeCodeModel: "haiku" }));
     const haiku = capabilities.settings.models.find((model) => model.id === "haiku");
 
-    // Haiku takes no effort level; advertising one would both break the client
-    // picker and send an unsupported effortLevel to the SDK.
-    expect(haiku?.reasoningEfforts).toEqual([]);
-    expect(haiku?.defaultReasoningEffort).toBeUndefined();
-    expect(capabilities.settings.defaultSettings).toEqual({ model: "haiku" });
+    // The `haiku` alias resolves to Haiku 5.5 from CLI 2.1.296, which takes
+    // every effort level through max.
+    expect(haiku?.reasoningEfforts.map((effort) => effort.id)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(haiku?.defaultReasoningEffort).toBe("high");
+    expect(capabilities.settings.defaultSettings).toEqual({ model: "haiku", reasoningEffort: "high" });
+  });
+
+  describe("with a fallback model that takes no effort level", () => {
+    afterEach(() => installModelCatalog(bundledModelCatalog));
+
+    it("advertises no effort levels for it", () => {
+      const claudeCode = bundledModelCatalog.runners.claude_code;
+      installModelCatalog({
+        ...bundledModelCatalog,
+        runners: {
+          ...bundledModelCatalog.runners,
+          claude_code: {
+            ...claudeCode,
+            fallbackModels: [{ id: "claude-haiku-4-5", label: "Haiku 4.5", reasoningEfforts: [] }]
+          }
+        }
+      });
+      const capabilities = fallbackClaudeCodeCapabilities(config());
+      const haiku = capabilities.settings.models.find((model) => model.id === "claude-haiku-4-5");
+
+      // Advertising an effort here would both break the client picker and send
+      // an unsupported effortLevel to the SDK.
+      expect(haiku?.reasoningEfforts).toEqual([]);
+      expect(haiku?.defaultReasoningEffort).toBeUndefined();
+      expect(capabilities.settings.defaultSettings).toEqual({ model: "claude-haiku-4-5" });
+    });
   });
 
   it("maps SDK supportedModels output into the AgentRoom capabilities shape", () => {
@@ -273,7 +301,8 @@ describe("claude code capabilities", () => {
               { id: "low", label: "Low", description: "Minimal thinking, fastest responses" },
               { id: "medium", label: "Medium", description: "Moderate thinking" },
               { id: "high", label: "High", description: "Deep reasoning" },
-              { id: "xhigh", label: "Xhigh", description: "Deeper than high on supported models" }
+              { id: "xhigh", label: "Xhigh", description: "Deeper than high on supported models" },
+              { id: "max", label: "Max", description: "Deepest reasoning, highest token spend" }
             ],
             defaultReasoningEffort: "high",
             serviceTiers: []

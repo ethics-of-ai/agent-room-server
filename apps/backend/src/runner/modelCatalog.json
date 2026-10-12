@@ -18,7 +18,8 @@
         { "id": "low", "label": "Low", "description": "Minimal thinking, fastest responses" },
         { "id": "medium", "label": "Medium", "description": "Moderate thinking" },
         { "id": "high", "label": "High", "description": "Deep reasoning" },
-        { "id": "xhigh", "label": "Xhigh", "description": "Deeper than high on supported models" }
+        { "id": "xhigh", "label": "Xhigh", "description": "Deeper than high on supported models" },
+        { "id": "max", "label": "Max", "description": "Deepest reasoning, highest token spend" }
       ],
       "fallbackModels": [
         { "id": "opus", "label": "Opus", "description": "Latest Opus, best for everyday, complex tasks" },
@@ -28,12 +29,7 @@
           "description": "Most capable for your hardest and longest-running tasks"
         },
         { "id": "sonnet", "label": "Sonnet", "description": "Latest Sonnet, efficient for routine tasks" },
-        {
-          "id": "haiku",
-          "label": "Haiku",
-          "description": "Latest Haiku, fastest for quick answers",
-          "reasoningEfforts": []
-        }
+        { "id": "haiku", "label": "Haiku", "description": "Latest Haiku, fastest for quick answers" }
       ]
     },
     "cursor": {

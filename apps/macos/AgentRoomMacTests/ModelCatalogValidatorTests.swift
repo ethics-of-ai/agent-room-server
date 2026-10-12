@@ -23,11 +23,11 @@ final class ModelCatalogValidatorTests: XCTestCase {
 
     func testRejectsAClaudeCodeEffortTheRunnerRefuses() {
         let runners = ModelCatalogDocument.Runners(claudeCode: ClaudeCodeModelCatalog(
-            reasoningEfforts: [ModelCatalogEffortLevel(id: "max", label: "Max")],
+            reasoningEfforts: [ModelCatalogEffortLevel(id: "ultra", label: "Ultra")],
             fallbackModels: [ClaudeCodeCatalogModel(id: "opus", label: "Opus")]
         ))
 
-        XCTAssertEqual(ModelCatalogValidator.issues(in: runners), ["Claude Code: effort levels must be low, medium, high, xhigh."])
+        XCTAssertEqual(ModelCatalogValidator.issues(in: runners), ["Claude Code: effort levels must be low, medium, high, xhigh, max."])
     }
 
     func testRejectsTwoCursorDefaultsAndAStrayDepthDefault() {

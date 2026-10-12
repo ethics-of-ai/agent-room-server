@@ -10,7 +10,7 @@ import { commandAudit } from "../shared/commandAudit";
 import type { ClaudeCodeCanUseTool } from "./sdk";
 import { DIAGRAM_PROMPT_INSTRUCTION } from "../../scene/diagram/prompt";
 
-export type ClaudeCodeEffortLevel = "low" | "medium" | "high" | "xhigh";
+export type ClaudeCodeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface ClaudeCodeEffectiveSettings {
   model?: string;
@@ -30,7 +30,7 @@ export function effectiveClaudeCodeSettings(
 }
 
 /**
- * Map a requested effort onto the four levels the Claude Code CLI accepts.
+ * Map a requested effort onto the five levels the Claude Code CLI accepts.
  *
  * The parameter is a bounded id rather than `CodingAgentReasoningEffort` because
  * a turn's effort is the *advertising runner's* vocabulary under
@@ -44,7 +44,7 @@ export function effectiveClaudeCodeSettings(
 export function claudeCodeEffort(value: string | undefined): ClaudeCodeEffortLevel | undefined {
   if (value === undefined) return undefined;
   if (value === "none" || value === "minimal" || value === "low") return "low";
-  if (value === "medium" || value === "high" || value === "xhigh") return value;
+  if (value === "medium" || value === "high" || value === "xhigh" || value === "max") return value;
   throw new Error(`Claude Code does not offer the reasoning effort "${value}"`);
 }
 

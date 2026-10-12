@@ -29,7 +29,7 @@ const labelSchema = z.string().trim().min(1).max(80);
 const descriptionSchema = z.string().trim().min(1).max(200);
 
 /** The levels `claudeCodeEffort()` accepts; a wider catalog would advertise efforts turns then refuse. */
-const claudeCodeEffortIdSchema = z.enum(["low", "medium", "high", "xhigh"]);
+const claudeCodeEffortIdSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 
 const claudeCodeEffortSchema = z
   .object({ id: claudeCodeEffortIdSchema, label: labelSchema, description: descriptionSchema.optional() })

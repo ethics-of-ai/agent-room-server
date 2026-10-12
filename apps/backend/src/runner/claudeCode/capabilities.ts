@@ -16,8 +16,8 @@ function claudeCodeEffortValues(): CodingAgentSettingValue[] {
 // supportedModels() control request, which reflects whatever `claude` CLI the
 // runner spawns. The list lives in the model catalog; keep it aligned with
 // current Claude model aliases when it drifts. A model with an empty effort
-// list (Haiku) does not accept an effort level; advertising one would send an
-// unsupported effortLevel to the SDK.
+// list (Haiku 4.5, for one) does not accept an effort level; advertising one
+// would send an unsupported effortLevel to the SDK.
 function fallbackClaudeCodeModels(): CodingAgentModelOption[] {
   const vocabulary = claudeCodeEffortValues();
   return currentModelCatalog().runners.claude_code.fallbackModels.map((model) => {
