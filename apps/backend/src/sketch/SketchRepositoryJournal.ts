@@ -6,18 +6,27 @@ import { sketchDigest } from "./SketchWorkspaceFiles";
 import { SketchServiceError } from "./sketchErrors";
 import {
   parseSketchState,
+  sketchRevisionLogSchema,
   SKETCH_LEGACY_SCHEMA_VERSION,
+  SKETCH_MAX_REVISION_LOG_ENTRIES,
   SKETCH_SCHEMA_VERSION,
   SKETCH_V2_SCHEMA_VERSION,
   type SketchDocument,
+  type SketchRevisionLog,
   type SketchState
 } from "./core";
 
+// The revision log and the file versions are optional evidence for the
+// relaxed revision rule. A record without them, or with an unreadable one,
+// still loads and simply gets the strict rule. An older backend's envelope
+// parser drops both keys, so a downgrade loses only that evidence.
 const auxiliaryEnvelopeSchema = z.object({
   fileVersion: z.string(),
   history: z.unknown(),
   receipts: z.unknown(),
   expiredRequestIds: z.unknown().optional(),
+  revisionLog: z.unknown().optional(),
+  fileVersions: z.unknown().optional(),
   pending: z.object({
     beforeVersion: z.string().optional(),
     digest: z.string(),
@@ -25,14 +34,32 @@ const auxiliaryEnvelopeSchema = z.object({
     document: z.unknown(),
     history: z.unknown(),
     receipts: z.unknown(),
-    expiredRequestIds: z.unknown()
+    expiredRequestIds: z.unknown(),
+    revisionLog: z.unknown().optional(),
+    fileVersions: z.unknown().optional()
   }).optional()
 });
+
+/**
+ * The file version the service saw or wrote at each revision since its
+ * history last started, oldest first. A request built on an older revision
+ * names that revision's file version. It may proceed only when that pair is
+ * here, which proves no external writer changed the file in between.
+ */
+export interface SketchFileVersionEntry { revision: number; fileVersion: string }
+export const SKETCH_MAX_FILE_VERSIONS = SKETCH_MAX_REVISION_LOG_ENTRIES + 1;
+const fileVersionsSchema = z.array(z.object({
+  revision: z.number().int().min(0),
+  fileVersion: z.string().min(1).max(128)
+}).strict()).max(SKETCH_MAX_FILE_VERSIONS);
+
 export interface SketchAuxiliary {
   fileVersion: string;
   history: SketchState["history"];
   receipts: SketchState["receipts"];
   expiredRequestIds: SketchState["expiredRequestIds"];
+  revisionLog?: SketchRevisionLog;
+  fileVersions?: SketchFileVersionEntry[];
   pending?: {
     beforeVersion?: string;
     digest: string;
@@ -40,6 +67,9 @@ export interface SketchAuxiliary {
     history: SketchState["history"];
     receipts: SketchState["receipts"];
     expiredRequestIds: SketchState["expiredRequestIds"];
+    revisionLog?: SketchRevisionLog;
+    // The versions before publication; recovery appends the published one.
+    fileVersions?: SketchFileVersionEntry[];
   };
 }
 
@@ -68,7 +98,8 @@ export class SketchRepositoryJournal {
           document: state.document,
           history: state.history,
           receipts: state.receipts,
-          expiredRequestIds: state.expiredRequestIds
+          expiredRequestIds: state.expiredRequestIds,
+          ...relaxedRuleEvidence(envelope.data.pending.revisionLog, envelope.data.pending.fileVersions)
         };
       })();
       return {
@@ -76,6 +107,7 @@ export class SketchRepositoryJournal {
         history: current.history,
         receipts: current.receipts,
         expiredRequestIds: current.expiredRequestIds,
+        ...relaxedRuleEvidence(envelope.data.revisionLog, envelope.data.fileVersions),
         ...(pending === undefined ? {} : { pending })
       };
     } catch {
@@ -83,6 +115,8 @@ export class SketchRepositoryJournal {
     }
   }
   async save(key: string, value: SketchAuxiliary): Promise<void> { await this.write(key, value); }
+  /** Discards a deleted file's history, so nothing can recover it. */
+  async remove(key: string): Promise<void> { await rm(this.path(key), { force: true }); }
   private async raw(key: string): Promise<unknown | undefined> {
     let serialized: string;
     try { serialized = await readFile(this.path(key), "utf8"); }
@@ -101,8 +135,19 @@ export class SketchRepositoryJournal {
   }
   private path(key: string): string { return join(this.directory, `${sketchDigest(key)}.json`); }
 }
-export function auxiliary(state: SketchState, fileVersion: string): SketchAuxiliary {
-  return { fileVersion, history: state.history, receipts: state.receipts, expiredRequestIds: state.expiredRequestIds };
+export function auxiliary(state: SketchState, fileVersion: string, fileVersions?: SketchFileVersionEntry[]): SketchAuxiliary {
+  return { fileVersion, history: state.history, receipts: state.receipts, expiredRequestIds: state.expiredRequestIds,
+    ...(state.revisionLog === undefined ? {} : { revisionLog: state.revisionLog }),
+    ...(fileVersions === undefined ? {} : { fileVersions }) };
+}
+
+function relaxedRuleEvidence(revisionLog: unknown, fileVersions: unknown): Pick<SketchAuxiliary, "revisionLog" | "fileVersions"> {
+  const log = sketchRevisionLogSchema.safeParse(revisionLog);
+  const versions = fileVersionsSchema.safeParse(fileVersions);
+  return {
+    ...(log.success ? { revisionLog: log.data } : {}),
+    ...(versions.success ? { fileVersions: versions.data } : {})
+  };
 }
 
 function normalizeStateParts(

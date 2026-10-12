@@ -7,6 +7,8 @@ import {
   SKETCH_KNOWN_OBJECT_KINDS,
   SKETCH_MAX_BATCH_OPERATIONS,
   SKETCH_MAX_EXPIRED_REQUEST_IDS,
+  SKETCH_MAX_REVISION_LOG_ENTRIES,
+  SKETCH_MAX_REVISION_LOG_IDS,
   SKETCH_MAX_BOX_DIMENSION,
   SKETCH_MAX_OBJECTS,
   SKETCH_MAX_STROKE_POINTS,
@@ -513,6 +515,26 @@ export const sketchHistoryEntrySchema = z
   })
   .strict();
 
+// One entry per revision since `floor`: the object ids that revision changed,
+// or `all` for a clear or a change too wide to list. A request based on a
+// revision older than the current one applies only if no entry after its base
+// touched an id the request reads or writes. A base below `floor` cannot be
+// checked and is refused, as is every older base when there is no log.
+export const sketchRevisionLogEntrySchema = z.union([
+  z.object({
+    revision: z.number().int().min(1),
+    objectIds: z.array(sketchObjectIdSchema).max(SKETCH_MAX_REVISION_LOG_IDS)
+  }).strict(),
+  z.object({ revision: z.number().int().min(1), all: z.literal(true) }).strict()
+]);
+
+export const sketchRevisionLogSchema = z
+  .object({
+    floor: z.number().int().min(0),
+    entries: z.array(sketchRevisionLogEntrySchema).max(SKETCH_MAX_REVISION_LOG_ENTRIES)
+  })
+  .strict();
+
 export const sketchStateSchema = z
   .object({
     schemaVersion: z.literal(SKETCH_SCHEMA_VERSION),
@@ -527,7 +549,9 @@ export const sketchStateSchema = z
     receipts: z.array(sketchReceiptSchema),
     // Request ids whose receipts were evicted. Defaults so a state written
     // before expiry tracking existed parses unchanged.
-    expiredRequestIds: z.array(sketchRequestIdSchema).max(SKETCH_MAX_EXPIRED_REQUEST_IDS).default([])
+    expiredRequestIds: z.array(sketchRequestIdSchema).max(SKETCH_MAX_EXPIRED_REQUEST_IDS).default([]),
+    // Optional so a state written before the log existed parses unchanged.
+    revisionLog: sketchRevisionLogSchema.optional()
   })
   .strict();
 
@@ -564,3 +588,5 @@ export type SketchUndoRedoRequest = z.infer<typeof sketchUndoRedoRequestSchema>;
 export type SketchReceipt = z.infer<typeof sketchReceiptSchema>;
 export type SketchHistoryEntry = z.infer<typeof sketchHistoryEntrySchema>;
 export type SketchState = z.infer<typeof sketchStateSchema>;
+export type SketchRevisionLog = z.infer<typeof sketchRevisionLogSchema>;
+export type SketchRevisionLogEntry = z.infer<typeof sketchRevisionLogEntrySchema>;

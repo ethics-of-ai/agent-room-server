@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  SKETCH_COORDINATE_LIMIT,
   SKETCH_MAX_SHAPE_SEGMENTS,
   checkSketchObjects,
   createSketchState,
@@ -128,7 +129,7 @@ describe("text-box sketch objects", () => {
       size: [0.4, 0.2],
       outlineWidth: 0.1,
       transform: {
-        translation: [0, 4.9, 0],
+        translation: [0, SKETCH_COORDINATE_LIMIT - 0.1, 0],
         rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
         scale: [1, 1, 1]
       }

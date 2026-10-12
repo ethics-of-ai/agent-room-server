@@ -62,7 +62,8 @@ export function serializeSketchState(state: SketchState): string {
       redo: state.history.redo.map(canonicalHistoryEntry)
     },
     receipts: state.receipts.map(canonicalReceipt),
-    expiredRequestIds: [...state.expiredRequestIds]
+    expiredRequestIds: [...state.expiredRequestIds],
+    ...(state.revisionLog === undefined ? {} : { revisionLog: structuredClone(state.revisionLog) })
   });
 }
 

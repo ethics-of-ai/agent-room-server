@@ -98,7 +98,9 @@ The response never includes `AUTH_TOKEN`, `CODEX_EXECUTABLE`, `CODEX_ARGS`,
 `languageServicesEnabled` to decide whether semantic execution can be offered,
 `sceneEngineEnabled` to decide whether to offer the spatial scene volume, and
 `repositorySketches: true` advertises the repository document API below, available
-independently of runner readiness. An absent field means unsupported.
+independently of runner readiness. `sketchIndex: true` advertises the
+[sketch index](#sketch-index) route, `undoHead` and `redoHead` on sketch reads,
+and `sketchToolsAvailable` on sessions. An absent field means unsupported.
 
 ### Managed settings metadata
 
@@ -489,6 +491,17 @@ runner-reported value. A valid Claude Code response that says auto-compaction
 is disabled, or has no usable threshold, clears the cached value. The value is
 persisted with the session record, so a restored thread carries its pre-restart
 threshold until a later authoritative read replaces or clears it.
+
+`sketchToolsAvailable` says whether the session's thread has the AgentRoom
+sketch tools ([Sketch tools](#sketch-tools)). A native thread keeps the tool
+catalog it started with, so the turn that starts a session's thread records
+the AgentRoom tool logical ids it registered in `threadAgentToolIds`, and
+`sketchToolsAvailable` is `true` when those ids hold every sketch tool the
+backend offers. A new session reports what its runner offers now. A session
+whose thread started before the fields existed reports `false`, and a client
+offers a new thread rather than starting one itself. A session whose runner
+offers no sketch tools now, such as Codex on the `exec` protocol, has no
+`sketchToolsAvailable`, because a new thread would not have them either.
 
 ## Editor Language Catalog
 
@@ -2566,7 +2579,10 @@ person answers. Claude Code raises it through `AskUserQuestion`, Codex through
 `request_user_input`, and DeepSeek Harness through the shared Cordis question
 tool in managed mode or a bounded assistant-text block in custom mode. A runner
 whose descriptor declares neither a native nor prompt-contract channel has
-nothing outstanding and answers `404`. Gated as a whole by the tier-1 managed setting
+nothing outstanding and answers `404`. A backend tool can also ask, such as the
+sketch tools confirming a delete; its batch arrives as the same
+`question_requested` activity on the running turn and is answered at the same
+route, and it never reaches the runner. Gated as a whole by the tier-1 managed setting
 `global.clarifyingQuestionsEnabled` (default on): off, no runner is given the
 channel and each behaves exactly as before it existed.
 
@@ -2727,11 +2743,14 @@ plan.
 bearer authentication for reads and writes when configured. They never start a
 runner or a turn. A sketch is any `*.sketch.json` file in a registered
 workspace, addressed by its workspace-relative path. Threads do not link
-sketches. Clients discover sketches through the bounded file index, as they do
-diagrams.
+sketches. When `GET /api/config` also advertises `sketchIndex: true`, clients
+list sketches through `GET /api/workspaces/:workspaceId/sketches`, the same
+index agents read. An older backend has no list route, and clients discover
+sketches through the bounded file index, as they do diagrams.
 
 | Route | Behavior |
 | --- | --- |
+| `GET /api/workspaces/:workspaceId/sketches` | List the workspace's sketches from the backend's sketch index, rescanning the workspace first. See [Sketch index](#sketch-index). |
 | `POST /api/workspaces/:workspaceId/sketch` | Create an empty document named from `{ name }` (trimmed, 1–120 characters); return `201 { sketch }`. |
 | `GET /api/workspaces/:workspaceId/sketch?path=...` | Read a document. Reading publishes nothing. A missing file returns `409 file_missing`. |
 | `POST /api/workspaces/:workspaceId/sketch/commits?path=...` | Apply human operations using `{ requestId, baseRevision, fileVersion, label?, operations }`. |
@@ -2739,7 +2758,11 @@ diagrams.
 | `POST /api/workspaces/:workspaceId/sketch/reset-history?path=...` | After inspecting current bytes, explicitly discard auxiliary history and ambiguous recovery evidence using `{ fileVersion }`. Geometry is unchanged. Use new request ids afterward. |
 
 Repository reads return `{ sketch: { workspaceId, path, sketchId, revision,
-document, fileVersion, undoDepth, redoDepth, historyReset, outcomeUnknown } }`.
+document, fileVersion, undoDepth, redoDepth, undoHead, redoHead, historyReset,
+outcomeUnknown } }`. `undoHead` and `redoHead` describe what the next undo and
+redo would reverse or replay, as `{ label, actorKind }` with `actorKind`
+`human` or `agent`, or `null` when that stack is empty. Undo is shared by
+every actor, so the next undo may reverse an agent's step.
 Creation prefers an existing `docs/sketches` directory, otherwise workspace root.
 Names derive from the supplied name. Occupied names, including a name another
 writer takes during the create-only write, move on to suffixes `-2` through
@@ -2772,7 +2795,7 @@ Version 2 also accepts `planarShape` objects with `shapeType` (`rectangle`,
 (`outline`, `fill`, or `fillAndOutline`). `fillColor` and `outlineColor` are
 independent `#RRGGBB` or `#RRGGBBAA` values; `outlineWidth` is 1 mm–100 mm and
 defaults to 4 mm. Shape dimensions are 1 mm–10 m. Transforms and parent groups
-place the shape in the same 10-meter sketch cube as other geometry. The
+place the shape in the same 1-kilometer sketch cube as other geometry. The
 document-wide `shapeSegments` limit is 8,192 polygon segments across visible
 fill and outline passes; exceeding it returns `422 limit_exceeded`.
 
@@ -2855,10 +2878,12 @@ never discards content this backend cannot edit.
 }
 ```
 
-Core caps: 128 objects, 2,048 points per stroke, 16,384 points in total,
+Core caps: 1,024 objects, 2,048 points per stroke, 16,384 points in total,
 8,192 pattern segments, 8,192 shape segments, 1,000 text characters, 280
 characters per extruded text box and 560 across them, 256 spans per text box, four
-nested group levels, and a 10-meter cube centered on the sketch origin. A batch
+nested group levels, and a 1-kilometer cube (±500 m) centered on the sketch
+origin. The object and coordinate caps rose from 128 and ±5 m on 2026-10-05;
+raising a cap keeps existing files valid. A batch
 holds at most 32 operations and 256 KiB; a larger batch is refused `413` before
 parsing. Semantic refusals (unknown object, duplicate id, cycle, bounds,
 per-kind caps) return `422` with the core error code and, where applicable, the
@@ -2876,23 +2901,38 @@ repository requests accept neither `actor` nor `turnId`.
 
 Deleting a session or unregistering a workspace never removes saved geometry.
 A renamed, moved, or deleted file returns `409 file_missing` at its old path;
-open it again at its new path or create a new sketch. The backend never scans
-by sketch id. Renaming or replacing a document invalidates its prior auxiliary
+open it again at its new path or create a new sketch. An edit never follows a
+file to a new path; only the sketch index and the agent tools look a sketch up
+by id. Renaming or replacing a document invalidates its prior auxiliary
 undo history.
 
 Every new edit requires both revision and the opaque file-version token returned
 by the read. A changed token returns `409 file_changed`, even if an external edit
-reused the revision. A stale revision returns `409 stale_revision` with
-`currentRevision`; refresh and retry explicitly. A missing target returns
+reused the revision. The one exception is a token this backend wrote or read at
+that revision, with every later revision made through these routes: such a
+request is checked against the later revisions instead.
+
+A request whose `baseRevision` is older than the current revision applies when
+no later revision touched an object it reads or writes. An undo or redo reads
+and writes the objects of the entry it reverses or replays. A transform also
+reads its parent chain, a group delete writes its current subtree, group and
+ungroup touch the members and the parent they move under, and `clear` touches
+every object. The backend keeps the object ids of the last 256 revisions for
+this check, logging a revision that changed more than 64 objects as touching
+every object. An overlap, a base older than those 256 revisions, or any older
+base when history was reset returns `409 stale_revision` with
+`currentRevision` and, for an overlap, `conflictingObjectIds` (empty after a
+`clear`); refresh and retry explicitly. A missing target returns
 `409 file_missing` and is never recreated by an edit. Unsupported schemas,
 invalid files, and symlinks are refused without altering the file. Unknown
 object kinds retain their fields. Edits to one file run one at a time, and
 every window on that file shares its lock. Edits to different files in the
 same workspace run independently. Creation holds a workspace-wide lock while
-it probes names. No geometry is merged or rebased.
+it probes names. A stale request that passes the check runs its operations as
+written against the current document. No geometry is merged.
 
-Success returns `{ receipt, revision, fileVersion, undoDepth, redoDepth }` after
-publication and receipt persistence. Identical retained requests return their
+Success returns `{ receipt, revision, fileVersion, undoDepth, redoDepth,
+undoHead, redoHead }` after publication and receipt persistence. Identical retained requests return their
 original receipts, with the current file token. Changed request input returns
 `409 request_id_conflict`. A retry of a request id that has aged out of the
 receipt ring returns `409 outcome_unknown`; read the document and retry with a
@@ -2911,15 +2951,97 @@ request rather than assuming the gesture failed.
 Workspace publication uses a sibling exclusive temporary file, create-only link
 or atomic replacement, and a final identity check. These are optimistic checks,
 with the same external filesystem race limits as text PUT, not universal
-filesystem transactions. Publication emits metadata-only `workspace_file_written`
-and `sketch_document_changed` events with workspace id, relative path, and
-revision. Read geometry through authenticated routes.
+filesystem transactions. A human edit publishes metadata-only
+`workspace_file_written` and `sketch_document_changed` events with workspace
+id, relative path, and revision. An agent edit publishes only
+`sketch_document_changed`. Read geometry through authenticated routes.
+
+### Sketch index
+
+The backend keeps one index per registered workspace in
+`STATE_DIR/sketch-index/`. It holds identity, not geometry: path, title,
+sketch id, revision, object count, last change time, and the last actor kind.
+The title is the file name without `.sketch.json`, with `-` and `_` shown as
+spaces. `GET /api/workspaces/:workspaceId/sketches` returns
+`{ sketches, total, truncated, limit }`, where each entry is
+`{ path, title, state, sketchId?, revision?, objectCount?, lastChangedAt?,
+lastActorKind?, invalidReason? }`. `state` is `ok`, or `invalid` for a file
+that does not read as a sketch, which stays listed with its error code.
+
+Every list rescans the workspace through the file index's ignore rules,
+re-reading only files whose size, modification time, or inode changed, so a
+file changed outside AgentRoom appears in the next list. The scan keeps 200
+sketch files; `total` counts every one it saw, and `truncated` means the
+file index itself stopped early. `lastActorKind` is absent after a change
+made outside AgentRoom's routes and tools. A missing or corrupt index is
+rebuilt by the next scan.
 
 ### Sketch turn context
 
-Sketches are not agent context. New `context.sketch` turn requests return `400`
+Sketches are not turn context. New `context.sketch` turn requests return `400`
 before starting a turn. Selections recorded in earlier transcripts still
-decode.
+decode. Agents reach sketches only through the sketch tools below.
+
+### Sketch tools
+
+A runner whose descriptor declares the `sketches` capability offers its model
+`agentroom_sketch_list`, `agentroom_sketch_inspect`, `agentroom_sketch_create`,
+`agentroom_sketch_edit`, `agentroom_sketch_history`, `agentroom_sketch_rename`,
+and `agentroom_sketch_delete` on every turn, with no setting to turn them on.
+Every tool but list and create takes `sketch`,
+resolved against the session's own workspace in the [sketch index](#sketch-index):
+an exact path or sketch id first, then the exact title, the title ignoring
+case, and a title prefix. The first of those with one match wins; one with
+several matches returns `ambiguous_sketch` with their paths. An exact path the
+index does not hold yet is read before the answer is `unknown_sketch`, which
+names the closest titles. No route dispatches them; they run only through a
+live turn's tool binding ([Runners](../engineering/RUNNERS.md#repository-sketch-tools)).
+
+- `agentroom_sketch_list` returns one JSON line per sketch: title, path, id,
+  revision, object count, last change, and who made it (`agent`, `person`, or
+  `unknown`). An optional `filter` matches the title or path ignoring case.
+- `agentroom_sketch_inspect` returns the sketch id, revision, coordinate
+  convention, and one compact JSON line per object: id, kind, parent,
+  transform, world bounds, colors, and a text excerpt. Strokes report their
+  point count. `detail`, up to 64 object ids, adds those objects in full.
+- `agentroom_sketch_edit` commits `{ sketch, baseRevision, label, operations }`
+  as one transaction with up to 32 caller operations, under the same relaxed
+  revision rule as the routes. The actor is `{ kind: "agent", runnerId }` with
+  the turn id. An overlap returns `stale_revision` with the current compact
+  lines of the overlapping objects.
+
+- `agentroom_sketch_create` takes `{ name }` and creates an empty sketch the
+  way the create route does, as the agent.
+- `agentroom_sketch_history` takes `{ sketch, step }` with `step` `undo` or
+  `redo`. It acts only when the newest step to undo, or the newest undone step
+  to redo, is the calling session's own (its turn belongs to that session), and
+  otherwise returns `not_own_step` naming the step in the way.
+- `agentroom_sketch_rename` takes `{ sketch, newName }` and renames the file
+  inside its folder, keeping the suffix. The sketch id and undo history follow
+  the file; an occupied name returns `name_collision`.
+- `agentroom_sketch_delete` takes `{ sketch }` and deletes the file.
+
+Rename and delete check the file against the version the sketch index last
+read. A file changed outside AgentRoom since then returns `file_changed`, and
+nothing changes until `agentroom_sketch_list` re-reads it.
+
+Deleting a file, and an edit that empties a non-empty sketch (it contains
+`clear`, or a dry run leaves no objects), first ask the person through a
+[clarifying question](#clarifying-question-answers) that names the sketch,
+path, object count, and for an edit its label. The trust rule behind this is
+in [Agent sketch tools](../safety/TRUST_AND_SAFETY.md#agent-sketch-tools).
+Only a yes proceeds. A no
+returns `declined`; a timeout, a withdrawn question, or questions turned off
+return `confirmation_timeout`, `confirmation_cancelled`, or
+`confirmation_unavailable`. If the sketch changed while the question was open
+the tool returns `sketch_changed_during_confirmation` and changes nothing.
+Deleting objects inside a sketch asks nothing.
+
+Results are text, at most 48 KiB, and say what they left out. A result starts
+with `ok:` or `error <code>:`. The codes are the core's, plus `unknown_sketch`
+and `ambiguous_sketch`, `invalid_document` for an indexed file that does not
+read as a sketch, and `read_only` when the runner's posture forbids file
+changes.
 
 ### Sketch events
 
@@ -2927,8 +3049,14 @@ decode.
 re-read through the authenticated routes above. `sketch_document_changed`
 (fired after the revision is durable, and kept in the audit log) carries
 `workspaceId`, `path`, `sketchId`, `revision`, `kind`
-(`created` | `commit` | `undo` | `redo`), and `actorKind`. It never carries
-geometry, labels, text, or tokens.
+(`created` | `commit` | `undo` | `redo` | `renamed` | `deleted`), and
+`actorKind` (`human` or `agent`). A `renamed` event names the new `path` and
+the old one in `previousPath`; a `deleted` event names the removed path and
+the last revision. An agent change also carries the `sessionId` and `turnId`
+that made it, so a client can name the thread; a human change carries neither.
+A client that does not know a kind treats it as a change and re-reads, which
+finds a deleted or moved file missing. It never
+carries geometry, labels, text, or tokens.
 
 ## Auth
 

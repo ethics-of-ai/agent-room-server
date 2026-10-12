@@ -19,6 +19,8 @@ import type { ClaudeCodeMcpServerFactory, ClaudeCodeQuery } from "./sdk";
  */
 
 export const AGENTROOM_MCP_SERVER_NAME = "agentroom";
+/** The prefix Claude Code gives tools from AgentRoom's in-process MCP server. */
+export const CLAUDE_CODE_AGENTROOM_TOOL_PREFIX = `mcp__${AGENTROOM_MCP_SERVER_NAME}__`;
 const TOOL_USE_META = "claudecode/toolUseId";
 /** How long a call waits for its `tool_use` block to be read off the SDK stream. */
 const ORIGIN_WAIT_MS = 2_000;
@@ -27,7 +29,7 @@ const STATUS_POLL_MS = 50;
 
 /** Exact permission entries for the bound tool names; never a wildcard. */
 export function claudeAllowedToolNames(names: readonly string[]): string[] {
-  return names.map((name) => `mcp__${AGENTROOM_MCP_SERVER_NAME}__${name}`);
+  return names.map((name) => `${CLAUDE_CODE_AGENTROOM_TOOL_PREFIX}${name}`);
 }
 
 /** Maps a native tool-use id to the AgentRoom turn whose stream carried it. */

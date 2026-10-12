@@ -1,6 +1,8 @@
 import type { AgentRunnerEvent, RunnerMetadata } from "../AgentRunner";
 import { arrayValue, booleanValue, nonnegativeIntegerValue, objectValue, positiveIntegerValue, stringValue } from "../shared/jsonValues";
 import { compactDisplayText } from "../shared/displayText";
+import { isAgentRoomToolName } from "../shared/agentToolPrivacy";
+import { CLAUDE_CODE_AGENTROOM_TOOL_PREFIX } from "./agentTools";
 
 export interface ClaudeCodeToolUseDisplay {
   title: string;
@@ -209,7 +211,8 @@ function assistantToolActivities(
         content: {
           ...(toolUseId ? { toolUseId } : {}),
           name,
-          input
+          // AgentRoom's own tools keep their arguments private.
+          ...(isAgentRoomTool(name) ? {} : { input })
         },
         canonical: { kind: "tool_started", ...(toolUseId ? { toolId: toolUseId } : {}) },
         runner: toolUseId ? { ...claudeCode, nativeItemId: toolUseId } : claudeCode
@@ -440,6 +443,10 @@ function claudeCodeToolTitle(name: string): string {
     default:
       return "Call tool";
   }
+}
+
+function isAgentRoomTool(name: string): boolean {
+  return name.startsWith(CLAUDE_CODE_AGENTROOM_TOOL_PREFIX) && isAgentRoomToolName(name.slice(CLAUDE_CODE_AGENTROOM_TOOL_PREFIX.length));
 }
 
 function claudeCodeToolDescription(name: string, input: Record<string, unknown>): string | undefined {

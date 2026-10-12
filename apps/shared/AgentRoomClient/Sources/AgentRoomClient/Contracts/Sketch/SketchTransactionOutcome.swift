@@ -10,18 +10,25 @@ public struct SketchTransactionOutcome: Codable, Hashable {
     public var revision: Int
     public var undoDepth: Int
     public var redoDepth: Int
+    /// Absent from a backend before `sketchIndex`; `nil` inside means an empty stack.
+    public var undoHead: SketchHistoryHead?
+    public var redoHead: SketchHistoryHead?
 
     public init(
         receipt: SketchReceiptSnapshot,
         revision: Int,
         undoDepth: Int,
         redoDepth: Int,
-        fileVersion: String? = nil
+        fileVersion: String? = nil,
+        undoHead: SketchHistoryHead? = nil,
+        redoHead: SketchHistoryHead? = nil
     ) {
         self.fileVersion = fileVersion
         self.receipt = receipt
         self.revision = revision
         self.undoDepth = undoDepth
         self.redoDepth = redoDepth
+        self.undoHead = undoHead
+        self.redoHead = redoHead
     }
 }

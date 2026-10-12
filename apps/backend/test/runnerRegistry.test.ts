@@ -60,18 +60,30 @@ describe("runner registry", () => {
   });
 
   it("declares the AgentRoom tool transport for every runner", () => {
-    // Every built-in carries plan tools. Cursor and DeepSeek also carry the
-    // question tool; Codex and Claude Code keep their native question paths.
-    // Shared code reads this policy rather than a runner id.
-    expect(runnerDescriptor("cursor").agentTools).toEqual({ mode: "custom_tools", capabilities: ["questions", "plans"] });
-    expect(runnerDescriptor("deepseek").agentTools).toEqual({ mode: "cordis_pipe", capabilities: ["questions", "plans"] });
+    // Every built-in carries plan and sketch tools. Cursor and DeepSeek also
+    // carry the question tool; Codex and Claude Code keep their native
+    // question paths. Shared code reads this policy rather than a runner id.
+    expect(runnerDescriptor("cursor").agentTools).toEqual({ mode: "custom_tools", capabilities: ["questions", "plans", "sketches"] });
+    expect(runnerDescriptor("deepseek").agentTools).toEqual({ mode: "cordis_pipe", capabilities: ["questions", "plans", "sketches"] });
     const codexTools = runnerDescriptor("codex").agentTools;
-    expect(codexTools).toMatchObject({ mode: "dynamic_tools", capabilities: ["plans"] });
+    expect(codexTools).toMatchObject({ mode: "dynamic_tools", capabilities: ["plans", "sketches"] });
     // Only the app-server protocol has a tool channel.
     if (codexTools.mode === "none") throw new Error("Codex declares no tool transport");
     expect(codexTools.availableWhen?.({ codexRunnerProtocol: "jsonrpc" } as never)).toBe(true);
     expect(codexTools.availableWhen?.({ codexRunnerProtocol: "exec" } as never)).toBe(false);
-    expect(runnerDescriptor("claude_code").agentTools).toEqual({ mode: "sdk_mcp", capabilities: ["plans"] });
+    expect(runnerDescriptor("claude_code").agentTools).toEqual({ mode: "sdk_mcp", capabilities: ["plans", "sketches"] });
+  });
+
+  it("reads each runner's write posture from its own settings, and fails closed without one", () => {
+    const posture = (kind: Parameters<typeof runnerDescriptor>[0], config: object) =>
+      runnerDescriptor(kind).workspaceWritePosture?.(config as never);
+    expect(posture("codex", { codexSandboxMode: "read-only" })).toBe("read_only");
+    expect(posture("codex", { codexSandboxMode: "workspace-write" })).toBe("writable");
+    expect(posture("codex", {})).toBe("writable");
+    expect(posture("claude_code", { claudeCodePermissionMode: "default" })).toBe("writable");
+    expect(posture("cursor", { cursorSandbox: true })).toBe("writable");
+    expect(posture("deepseek", { deepseekCompositionMode: "managed" })).toBe("writable");
+    expect(posture("deepseek", { deepseekCompositionMode: "custom" })).toBe("writable");
   });
 
   it("is the single source of the runner-id schema the domain re-exports", () => {

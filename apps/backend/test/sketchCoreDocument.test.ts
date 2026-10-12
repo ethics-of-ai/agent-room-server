@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  SKETCH_COORDINATE_LIMIT,
   SKETCH_SCHEMA_VERSION,
   createSketchState,
   evaluateSketchCommit,
@@ -272,7 +273,7 @@ describe("sketch document structural rejection", () => {
         size: [1, 1, 1],
         parentId: "parent",
         transform: {
-          translation: [3, 0, 0],
+          translation: [SKETCH_COORDINATE_LIMIT / 2 + 1, 0, 0],
           rotation: [0, 0, 0, 1],
           scale: [1, 1, 1]
         }
@@ -346,6 +347,8 @@ describe("sketch state durability", () => {
     if (!deleted.ok) return;
 
     const legacy = JSON.parse(serializeSketchState(deleted.state));
+    // Version-1 states predate the revision log.
+    delete legacy.revisionLog;
     legacy.schemaVersion = 1;
     legacy.document.schemaVersion = 1;
     const stripStrokeStyle = (object: Record<string, unknown>) => {

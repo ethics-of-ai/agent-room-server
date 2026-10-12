@@ -295,6 +295,31 @@ describe("agent sessions", () => {
     await app.close();
   });
 
+  it("starts only one of two turns that arrive together", async () => {
+    // Both calls pass the first running-turn check before either finishes the
+    // awaits that follow it, so only the recheck before the turn starts can
+    // refuse the second. HTTP injects run one after another and miss this.
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
+    const registry = new LocalWorkspaceRegistry(serviceConfig);
+    const registered = await registry.register({ path: selectedDirectory });
+    const service = newAgentSessionService(registry, { codex: compactionThresholdRunner() }, new EventBus());
+    const session = await service.createSession({ workspaceId: registered.workspace.id });
+
+    const results = await Promise.allSettled([
+      service.startTurn({ sessionId: session.id, message: "first" }),
+      service.startTurn({ sessionId: session.id, message: "second" })
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
+    expect((results[1] as PromiseRejectedResult).reason).toMatchObject({
+      message: "Agent session already has a running turn",
+      statusCode: 409
+    });
+    const settled = await waitForServiceSession(service, session.id, "idle");
+    expect(settled.turnCount).toBe(1);
+  });
+
   it("stops an active turn and leaves the session idle for steering", async () => {
     const serviceConfig = await config({
       codexArgs: ["-e", "setInterval(() => {}, 1000)"]

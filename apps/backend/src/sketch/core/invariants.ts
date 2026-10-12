@@ -198,7 +198,7 @@ function checkParentStructure(index: ObjectIndex): SketchInvariantIssue | null {
   return null;
 }
 
-// Raw object-local coordinates are schema-bounded to the 10 m cube; this
+// Raw object-local coordinates are schema-bounded to the coordinate cube; this
 // check closes the composed escape — a transform (or a parent's transform)
 // must not carry geometry outside the cube either. Strokes check every
 // point, boxes all eight corners, and text, groups, and unknown-kind
@@ -206,17 +206,7 @@ function checkParentStructure(index: ObjectIndex): SketchInvariantIssue | null {
 function checkWorldBounds(index: ObjectIndex): SketchInvariantIssue | null {
   for (const object of index.objects) {
     const world = worldTransformOf(object, index);
-    const local: Vec3[] =
-      isKnownSketchObject(object) && object.kind === "stroke"
-        ? object.points
-        : isKnownSketchObject(object) && object.kind === "box"
-          ? boxCorners(object.size)
-        : isKnownSketchObject(object) && object.kind === "planarShape"
-            ? planarBoundsCorners(object, 0)
-        : isKnownSketchObject(object) && object.kind === "textBox"
-            ? planarBoundsCorners(object, object.rendering === "extruded" ? object.extrusionDepth / 2 : 0)
-          : [[0, 0, 0]];
-    for (const point of local) {
+    for (const point of sketchObjectExtentPoints(object)) {
       const worldPoint = transformPoint(world, point);
       if (!isWithinSketchCube(worldPoint)) {
         const axisIndex = Math.max(
@@ -232,6 +222,23 @@ function checkWorldBounds(index: ObjectIndex): SketchInvariantIssue | null {
     }
   }
   return null;
+}
+
+/**
+ * The object-local points whose transformed positions bound an object:
+ * every stroke point, a box's eight corners, a planar panel's corners with
+ * its outline and extrusion, and the anchor for text, groups, and unknown
+ * kinds.
+ */
+export function sketchObjectExtentPoints(object: SketchObject): Vec3[] {
+  if (!isKnownSketchObject(object)) return [[0, 0, 0]];
+  switch (object.kind) {
+    case "stroke": return object.points;
+    case "box": return boxCorners(object.size);
+    case "planarShape": return planarBoundsCorners(object, 0);
+    case "textBox": return planarBoundsCorners(object, object.rendering === "extruded" ? object.extrusionDepth / 2 : 0);
+    default: return [[0, 0, 0]];
+  }
 }
 
 // Extruded text sits centered on the panel plane, so half its depth reaches

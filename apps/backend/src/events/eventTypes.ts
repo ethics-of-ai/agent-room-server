@@ -174,10 +174,15 @@ export interface SketchDocumentChangedPayload {
   path: string;
   sketchId: string;
   revision: number;
-  /** `created`, `commit`, `undo`, or `redo`. */
-  kind: "created" | "commit" | "undo" | "redo";
+  /** `created`, `commit`, `undo`, `redo`, `renamed`, or `deleted`. */
+  kind: "created" | "commit" | "undo" | "redo" | "renamed" | "deleted";
+  /** The path a `renamed` sketch had before. */
+  previousPath?: string;
   /** `human` or `agent`; the authorship class, never a name. */
   actorKind: "human" | "agent";
+  /** The agent session and turn that made an agent change; absent for a human one. */
+  sessionId?: string;
+  turnId?: string;
 }
 
 export interface TerminalSessionClosedPayload {

@@ -10,4 +10,10 @@ extension APIClient {
             method: "POST", body: JSONEncoder().encode(["name": name])
         )
     }
+
+    /// The workspace's sketches from the backend's index. Only when
+    /// `/api/config` advertises `sketchIndex: true`.
+    public func fetchWorkspaceSketches(workspaceId: String) async throws -> SketchIndexResponse {
+        try await sketchRequest(["api", "workspaces", workspaceId, "sketches"])
+    }
 }

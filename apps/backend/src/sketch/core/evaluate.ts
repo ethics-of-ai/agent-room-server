@@ -20,7 +20,9 @@ import {
 } from "./schemas";
 import type { SketchCoreError } from "./errors";
 import { measureSketchDocumentBytes } from "./document";
-import { applyOperations } from "./operations";
+import { applyOperations, type AppliedOps } from "./operations";
+import { namedOperationIds, type SketchFootprint } from "./footprint";
+import { appendRevision, conflictError, overlappingIds, revisionsAfter } from "./revisionLog";
 import type { ZodError } from "zod";
 
 // The deterministic sketch transaction evaluator: one implementation of edit
@@ -41,6 +43,10 @@ import type { ZodError } from "zod";
 //   that entry to the redo stack; redo shuttles it back applying its
 //   forwards. A new ordinary commit clears the redo stack, which is what
 //   makes an earlier action ineligible until intervening edits are undone.
+// - **A stale base applies when nothing it touches changed.** A request built
+//   on an older revision applies if no later transaction in the revision log
+//   touched an id it reads or writes (`revisionLog.ts`). Otherwise it gets
+//   `stale_revision` naming the overlapping ids.
 // - **Authorship is caller-trusted, model-never.** The actor descriptor
 //   arrives per request; B03 derives it from authenticated callers and
 //   runner bindings. No operation payload can carry an author.
@@ -88,9 +94,9 @@ export function evaluateSketchCommit(state: SketchState, request: unknown): Sket
   if (replay !== undefined) {
     return replay;
   }
-  const stale = checkStaleRevision(state, commit.baseRevision);
-  if (stale !== undefined) {
-    return { ok: false, error: stale };
+  const later = revisionsAfter(state, commit.baseRevision);
+  if (!later.ok) {
+    return { ok: false, error: later.error };
   }
 
   const batchBytes = Buffer.byteLength(JSON.stringify(commit.operations));
@@ -106,12 +112,13 @@ export function evaluateSketchCommit(state: SketchState, request: unknown): Sket
   }
 
   const working: SketchState = structuredClone(state);
-  const applied = applyOperations(working.document, commit.operations);
+  const applied = applyAgainstBase(working, commit.baseRevision, later.entries, commit.operations);
   if (!applied.ok) {
     return { ok: false, error: applied.error };
   }
 
   return finalizeTransaction(working, {
+    footprint: applied.footprint,
     kind: "commit",
     actor: commit.actor,
     turnId: commit.turnId,
@@ -139,9 +146,9 @@ export function undoSketchTransaction(
   if (replay !== undefined) {
     return replay;
   }
-  const stale = checkStaleRevision(state, undoRequest.baseRevision);
-  if (stale !== undefined) {
-    return { ok: false, error: stale };
+  const later = revisionsAfter(state, undoRequest.baseRevision);
+  if (!later.ok) {
+    return { ok: false, error: later.error };
   }
   if (state.history.undo.length === 0) {
     return { ok: false, error: { code: "nothing_to_undo", message: "Nothing to undo" } };
@@ -152,7 +159,7 @@ export function undoSketchTransaction(
   if (head === undefined) {
     return { ok: false, error: { code: "nothing_to_undo", message: "Nothing to undo" } };
   }
-  const applied = applyOperations(working.document, head.inverseOps);
+  const applied = applyAgainstBase(working, undoRequest.baseRevision, later.entries, head.inverseOps);
   if (!applied.ok) {
     // Stored inverses apply cleanly on a head-consistent state; a failure
     // here means tampered history, surfaced as a refusal rather than a
@@ -161,6 +168,7 @@ export function undoSketchTransaction(
   }
 
   const result = finalizeTransaction(working, {
+    footprint: applied.footprint,
     kind: "undo",
     actor: undoRequest.actor,
     turnId: undoRequest.turnId,
@@ -194,9 +202,9 @@ export function redoSketchTransaction(
   if (replay !== undefined) {
     return replay;
   }
-  const stale = checkStaleRevision(state, redoRequest.baseRevision);
-  if (stale !== undefined) {
-    return { ok: false, error: stale };
+  const later = revisionsAfter(state, redoRequest.baseRevision);
+  if (!later.ok) {
+    return { ok: false, error: later.error };
   }
   if (state.history.redo.length === 0) {
     return { ok: false, error: { code: "nothing_to_redo", message: "Nothing to redo" } };
@@ -207,12 +215,13 @@ export function redoSketchTransaction(
   if (head === undefined) {
     return { ok: false, error: { code: "nothing_to_redo", message: "Nothing to redo" } };
   }
-  const applied = applyOperations(working.document, head.forwardOps);
+  const applied = applyAgainstBase(working, redoRequest.baseRevision, later.entries, head.forwardOps);
   if (!applied.ok) {
     return { ok: false, error: applied.error };
   }
 
   const result = finalizeTransaction(working, {
+    footprint: applied.footprint,
     kind: "redo",
     actor: redoRequest.actor,
     turnId: redoRequest.turnId,
@@ -231,9 +240,32 @@ export function redoSketchTransaction(
   return result;
 }
 
+// Applies operations to the working clone, then refuses the result when a
+// revision after the request's base touched any id it read or wrote. An
+// operation that fails because a later revision removed or regrouped an id it
+// names is reported the same way, so the caller refreshes instead of reading
+// an ordinary invalid-operation error.
+function applyAgainstBase(
+  working: SketchState,
+  baseRevision: number,
+  later: Parameters<typeof overlappingIds>[0],
+  operations: SketchOperation[]
+): AppliedOps {
+  const current = working.document.revision;
+  const applied = applyOperations(working.document, operations);
+  if (!applied.ok) {
+    const named = overlappingIds(later, operations.flatMap(namedOperationIds), false);
+    return named === undefined ? applied : { ok: false, error: conflictError(current, baseRevision, named) };
+  }
+  const touched = [...applied.footprint.reads, ...applied.footprint.writes];
+  const overlap = overlappingIds(later, touched, applied.footprint.all);
+  return overlap === undefined ? applied : { ok: false, error: conflictError(current, baseRevision, overlap) };
+}
+
 // --- transaction finalization --------------------------------------------------
 
 interface PendingTransaction {
+  footprint: SketchFootprint;
   kind: SketchReceipt["kind"];
   actor: SketchActor;
   turnId?: string;
@@ -276,7 +308,9 @@ function finalizeTransaction(
     };
   }
 
+  const previousRevision = working.document.revision;
   working.document.revision += 1;
+  working.revisionLog = appendRevision(working.revisionLog, previousRevision, working.document.revision, pending.footprint);
   const transactionId = `tx-${working.document.revision}`;
   const receipt: SketchReceipt = {
     requestId: pending.requestId,
@@ -437,20 +471,6 @@ function undoRedoFingerprint(
       label: request.label ?? null
     })
   );
-}
-
-function checkStaleRevision(
-  state: SketchState,
-  baseRevision: number
-): SketchCoreError | undefined {
-  if (baseRevision !== state.document.revision) {
-    return {
-      code: "stale_revision",
-      currentRevision: state.document.revision,
-      message: `Base revision ${baseRevision} does not match current revision ${state.document.revision}; refresh and retry explicitly`
-    };
-  }
-  return undefined;
 }
 
 function invalidRequestError(error: ZodError): SketchCoreError {

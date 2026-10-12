@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  SKETCH_COORDINATE_LIMIT,
   SKETCH_MAX_BATCH_BYTES,
   SKETCH_MAX_BATCH_OPERATIONS,
   SKETCH_MAX_EXPIRED_REQUEST_IDS,
@@ -91,7 +92,7 @@ function fillWithBoxes(state: SketchState, count: number, firstIndex = 0): Sketc
 }
 
 describe("sketch size limits", () => {
-  it("holds 128 objects and refuses the 129th", () => {
+  it("holds the object cap and refuses one more", () => {
     const state = createSketchState("sketch-limits-objects");
     const full = fillWithBoxes(state, SKETCH_MAX_OBJECTS);
     expect(full.document.objects).toHaveLength(SKETCH_MAX_OBJECTS);
@@ -216,9 +217,9 @@ describe("sketch size limits", () => {
 });
 
 describe("sketch transform and coordinate limits", () => {
-  it("keeps raw coordinates inside the 10-meter cube, faces inclusive", () => {
+  it("keeps raw coordinates inside the coordinate cube, faces inclusive", () => {
     const state = createSketchState("sketch-limits-cube");
-    // A 0.1 m box centered at 4.95 reaches exactly 5.0 on each face.
+    // A 0.1 m box centered 0.05 m inside the limit reaches exactly the face.
     const atFace = commit(state, "r1", [
       {
         op: "create",
@@ -226,7 +227,11 @@ describe("sketch transform and coordinate limits", () => {
         kind: "box",
         size: [0.1, 0.1, 0.1],
         transform: {
-          translation: [4.95, -4.95, 4.95],
+          translation: [
+            SKETCH_COORDINATE_LIMIT - 0.05,
+            -(SKETCH_COORDINATE_LIMIT - 0.05),
+            SKETCH_COORDINATE_LIMIT - 0.05
+          ],
           rotation: [0, 0, 0, 1],
           scale: [1, 1, 1]
         }
@@ -241,7 +246,7 @@ describe("sketch transform and coordinate limits", () => {
         kind: "box",
         size: [0.1, 0.1, 0.1],
         transform: {
-          translation: [5.001, 0, 0],
+          translation: [SKETCH_COORDINATE_LIMIT + 0.001, 0, 0],
           rotation: [0, 0, 0, 1],
           scale: [1, 1, 1]
         }
@@ -258,7 +263,7 @@ describe("sketch transform and coordinate limits", () => {
         kind: "box",
         size: [2, 2, 2],
         transform: {
-          translation: [4, 0, 0],
+          translation: [SKETCH_COORDINATE_LIMIT - 1, 0, 0],
           rotation: [0, 0, 0, 1],
           scale: [1, 1, 1]
         }
@@ -274,7 +279,7 @@ describe("sketch transform and coordinate limits", () => {
           op: "transform",
           objectId: "b1",
           transform: {
-            translation: [4.6, 0, 0],
+            translation: [SKETCH_COORDINATE_LIMIT - 0.4, 0, 0],
             rotation: [0, 0, 0, 1],
             scale: [1, 1, 1]
           }
@@ -295,7 +300,7 @@ describe("sketch transform and coordinate limits", () => {
         kind: "box",
         size: [1, 1, 1],
         transform: {
-          translation: [2, 0, 0],
+          translation: [SKETCH_COORDINATE_LIMIT / 2 - 0.5, 0, 0],
           rotation: [0, 0, 0, 1],
           scale: [1, 1, 1]
         }
@@ -306,8 +311,9 @@ describe("sketch transform and coordinate limits", () => {
     const working = seeded.ok ? seeded.state : state;
 
     // Scaling the parent carries the child's corner past the face even
-    // though the child's own coordinates never change: at 2.0 the corner
-    // lands exactly on the face, at 2.1 it escapes.
+    // though the child's own coordinates never change. The child's far
+    // corner sits at half the limit, so a 2.0 scale lands it exactly on the
+    // face and 2.1 carries it out.
     const error = expectError(
       commit(working, "r2", [
         {

@@ -23,6 +23,11 @@ public struct AgentSession: Codable, Hashable, Identifiable {
     public var turnCount: Int
     public var createdAt: String
     public var updatedAt: String
+    /// Whether this session's thread has the AgentRoom sketch tools. A native
+    /// thread keeps the tool catalog it started with, so false, or absent from
+    /// an older backend, means a new thread is needed for an agent to edit
+    /// sketches.
+    public var sketchToolsAvailable: Bool?
 
     public init(
         id: String,
@@ -41,7 +46,8 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         error: String?,
         turnCount: Int,
         createdAt: String,
-        updatedAt: String
+        updatedAt: String,
+        sketchToolsAvailable: Bool? = nil
     ) {
         self.id = id
         self.workspaceId = workspaceId
@@ -60,5 +66,6 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         self.turnCount = turnCount
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.sketchToolsAvailable = sketchToolsAvailable
     }
 }

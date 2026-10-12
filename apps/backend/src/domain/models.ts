@@ -242,14 +242,7 @@ export interface LocalWorkspaceGitOperationResult {
 }
 
 export type LocalWorkspaceGitFileStatus =
-  | "added"
-  | "modified"
-  | "deleted"
-  | "renamed"
-  | "copied"
-  | "untracked"
-  | "conflicted"
-  | "type_changed";
+  "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "conflicted" | "type_changed";
 
 export interface LocalWorkspaceGitStatusCounts {
   total: number;
@@ -584,6 +577,10 @@ export interface AgentSession {
   turnCount: number;
   createdAt: string;
   updatedAt: string;
+  /** Whether this session's thread registered the sketch tools; see `SessionTurnTools`. */
+  sketchToolsAvailable?: boolean;
+  /** The AgentRoom tool logical ids the session's thread registered when it started. */
+  threadAgentToolIds?: string[];
 }
 
 export interface AgentSessionTurn {

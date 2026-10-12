@@ -19,6 +19,9 @@ export {
   SKETCH_MAX_GROUP_DEPTH,
   SKETCH_MAX_OBJECTS,
   SKETCH_MAX_RETAINED_RECEIPTS,
+  SKETCH_MAX_REVISION_LOG_ENTRIES,
+  SKETCH_MAX_REVISION_LOG_IDS,
+  SKETCH_REVISION_LOG_BYTE_BUDGET,
   SKETCH_MAX_STATE_BYTES,
   SKETCH_MAX_STROKE_POINTS,
   SKETCH_MAX_STROKE_WIDTH,
@@ -72,6 +75,8 @@ export {
   sketchObjectIdSchema,
   sketchReceiptSchema,
   sketchRequestIdSchema,
+  sketchRevisionLogEntrySchema,
+  sketchRevisionLogSchema,
   sketchStateSchema,
   sketchStrokeObjectSchema,
   sketchTextObjectSchema,
@@ -97,6 +102,8 @@ export {
   type SketchObject,
   type SketchOperation,
   type SketchReceipt,
+  type SketchRevisionLog,
+  type SketchRevisionLogEntry,
   type SketchState,
   type SketchStrokeObject,
   type SketchTextObject,
@@ -144,6 +151,9 @@ export {
   SKETCH_IDENTITY_TRANSFORM,
   boxCorners,
   composeSketchTransform,
+  indexSketchObjects,
+  subtreeOf,
+  worldTransformOf,
   isWithinSketchCube,
   quatMultiply,
   quatNorm,
@@ -156,10 +166,18 @@ export {
 
 export {
   checkSketchObjects,
+  sketchObjectExtentPoints,
   type SketchInvariantIssue
 } from "./invariants";
 
 export { applyOperations, type AppliedOps } from "./operations";
+
+export {
+  addOperationFootprint,
+  emptySketchFootprint,
+  namedOperationIds,
+  type SketchFootprint
+} from "./footprint";
 
 export {
   createSketchState,

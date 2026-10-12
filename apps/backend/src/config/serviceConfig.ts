@@ -176,6 +176,7 @@ export function toPublicConfig(config: ServiceConfig, onDiskSettings?: ManagedSe
       config.claudeCodeLoadWorkspaceSkills ?? defaultClaudeCodeLoadWorkspaceSkills,
     sceneEngineEnabled: config.sceneEngineEnabled ?? true,
     repositorySketches: true,
+    sketchIndex: true,
     languageServicesEnabled: config.languageServicesEnabled ?? false,
     terminalEnabled: config.terminalEnabled ?? false,
     // Additive metadata: the flat fields above keep their meaning (the values

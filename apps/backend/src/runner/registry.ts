@@ -169,6 +169,8 @@ export interface RunnerDescriptor {
   readonly workspaceSkills: RunnerWorkspaceSkills;
   /** AgentRoom tool transport; see {@link RunnerAgentTools}. */
   readonly agentTools: RunnerAgentTools;
+  /** Whether turns may change files under this config, from the runner's own posture; absent fails closed. */
+  readonly workspaceWritePosture?: (config: ServiceConfig) => "writable" | "read_only";
   /** Fixed committed skill directories this runner natively loads, in precedence order. */
   readonly skillSourceDirs: readonly string[];
   /** The token a client's composer inserts to invoke a skill (`/name`, `$name`). */
@@ -281,26 +283,15 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // workspace is the trust decision (docs/safety/TRUST_AND_SAFETY.md).
     workspaceSkills: { mode: "native" },
     // Questions stay native (`request_user_input`); exec mode has no tool channel.
-    agentTools: { mode: "dynamic_tools", capabilities: ["plans"], availableWhen: (config) => (config.codexRunnerProtocol ?? "jsonrpc") === "jsonrpc" },
+    agentTools: { mode: "dynamic_tools", capabilities: ["plans", "sketches"], availableWhen: (config) => (config.codexRunnerProtocol ?? "jsonrpc") === "jsonrpc" },
+    workspaceWritePosture: (config) => config.codexSandboxMode === "read-only" ? "read_only" : "writable",
     skillSourceDirs: [".codex/skills", ".agents/skills"],
     skillInvocationPrefix: "$",
     settingsKeyPrefix: "codex",
     settings: [
       { field: "model", schema: codingAgentModelIdSchema.optional(), tier: 1, env: "CODEX_MODEL", valueKind: "string" },
-      {
-        field: "reasoningEffort",
-        schema: codingAgentReasoningEffortSchema.optional(),
-        tier: 1,
-        env: "CODEX_REASONING_EFFORT",
-        valueKind: "string"
-      },
-      {
-        field: "serviceTier",
-        schema: codingAgentServiceTierIdSchema.optional(),
-        tier: 1,
-        env: "CODEX_SERVICE_TIER",
-        valueKind: "string"
-      },
+      { field: "reasoningEffort", schema: codingAgentReasoningEffortSchema.optional(), tier: 1, env: "CODEX_REASONING_EFFORT", valueKind: "string" },
+      { field: "serviceTier", schema: codingAgentServiceTierIdSchema.optional(), tier: 1, env: "CODEX_SERVICE_TIER", valueKind: "string" },
       // Codex's trust posture, and deliberately not reconciled with Claude
       // Code's below into one permission enum: an approval policy and a
       // permission mode are different questions with different answers.
@@ -351,7 +342,8 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
       gate: (config) => loadsWorkspaceSettings(config)
     },
     // Questions stay on the native `AskUserQuestion` callback.
-    agentTools: { mode: "sdk_mcp", capabilities: ["plans"] },
+    agentTools: { mode: "sdk_mcp", capabilities: ["plans", "sketches"] },
+    workspaceWritePosture: () => "writable", // AgentRoom offers no read-only permission mode.
     skillSourceDirs: [".claude/skills"],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "claudeCode",
@@ -426,7 +418,10 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // until that is verified against a real runtime: advertising invocations a
     // session would ignore is the failure the skills read exists to avoid.
     workspaceSkills: { mode: "none" },
-    agentTools: { mode: "cordis_pipe", capabilities: ["questions", "plans"] },
+    agentTools: { mode: "cordis_pipe", capabilities: ["questions", "plans", "sketches"] },
+    // Managed graphs pin `sandbox-policy` to `workspace-write`; a custom graph
+    // is `bypassPermissions`-class and can already write sketches itself.
+    workspaceWritePosture: () => "writable",
     skillSourceDirs: [],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "deepseek",
@@ -503,7 +498,8 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // precedence.
     // The one custom-tools transport: the host relays every advertised
     // AgentRoom tool through its single `tools/invoke` request.
-    agentTools: { mode: "custom_tools", capabilities: ["questions", "plans"] },
+    agentTools: { mode: "custom_tools", capabilities: ["questions", "plans", "sketches"] },
+    workspaceWritePosture: () => "writable", // The sandbox bounds where writes land, not whether.
     skillSourceDirs: [".cursor/skills", ".agents/skills", ".claude/skills", ".codex/skills"],
     skillInvocationPrefix: "/",
     settingsKeyPrefix: "cursor",

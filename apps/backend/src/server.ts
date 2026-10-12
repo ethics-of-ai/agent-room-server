@@ -39,6 +39,8 @@ import { ARTIFACT_PROMPT_INSTRUCTION } from "./artifact/artifactPrompt";
 import { RepositorySketchService } from "./sketch/RepositorySketchService";
 import { SketchWorkspaceFiles } from "./sketch/SketchWorkspaceFiles";
 import { SketchRepositoryJournal } from "./sketch/SketchRepositoryJournal";
+import { SketchIndex } from "./sketch/index/SketchIndex";
+import { SketchIndexStore } from "./sketch/index/SketchIndexStore";
 import { registerRepositorySketchRoutes } from "./routes/repositorySketchRoutes";
 import { SpatialSceneService } from "./scene/SpatialSceneService";
 import { registerSpatialSceneRoutes } from "./routes/spatialSceneRoutes";
@@ -170,7 +172,7 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     ...(sceneEngineEnabled ? { diagramInstruction: DIAGRAM_PROMPT_INSTRUCTION } : {}),
     ...(diagramHumanEdits ? { diagramHumanEdits } : {}),
     ...(diagramRenderFeedback ? { diagramRenderFeedback } : {}),
-    planPrompt: { promptForTurn: (session) => agentSessions.planTools.promptForTurn(session) }
+    planPrompt: { promptForTurn: (session) => agentSessions.turnTools.promptForTurn(session) }
   });
   // Session records outlive the process. The store is write-through, so the
   // flush at close only drains what a mark left in flight; a crash loses at
@@ -179,6 +181,19 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
   // already attached, so a turn the previous process left running reaches
   // durable audit as the failure it is.
   const durableSessions = new DurableAgentSessionStore(input.config);
+  const sketchFiles = new SketchWorkspaceFiles(localWorkspaceRegistry);
+  const sketchIndex = new SketchIndex({
+    store: new SketchIndexStore(input.config.stateDir),
+    files: sketchFiles,
+    listPaths: (id) => workspaceExplorer.freshIndexedPaths(id)
+  });
+  const repositorySketches = new RepositorySketchService({
+    files: sketchFiles,
+    journal: new SketchRepositoryJournal(input.config.stateDir),
+    eventBus,
+    invalidate: (id) => workspaceExplorer.invalidateFileIndex(id),
+    changed: (change) => { void sketchIndex.recordChange(change).catch(() => sketchIndex.markDirty(change.workspaceId)); }
+  });
   agentSessions = new AgentSessionService({
     registry: localWorkspaceRegistry,
     runners,
@@ -188,17 +203,14 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     ...(artifactStore ? { artifacts: artifactStore } : {}),
     attachments: agentAttachments,
     durableSessions,
-    runnerConfig: input.config
+    runnerConfig: input.config,
+    sketches: { service: repositorySketches, index: sketchIndex }
   });
   await agentSessions.initialize();
-  const repositorySketches = new RepositorySketchService({
-    files: new SketchWorkspaceFiles(localWorkspaceRegistry),
-    journal: new SketchRepositoryJournal(input.config.stateDir),
-    eventBus,
-    invalidate: (id) => workspaceExplorer.invalidateFileIndex(id)
-  });
-  await registerRepositorySketchRoutes(app, { sketches: repositorySketches, config: input.config });
+  const stopSketchIndex = sketchIndex.attach(eventBus, (sessionId) => agentSessions.getSession(sessionId)?.workspaceId);
+  await registerRepositorySketchRoutes(app, { sketches: repositorySketches, config: input.config, index: sketchIndex });
   app.addHook("onClose", async () => {
+    stopSketchIndex();
     await durableSessions.flush();
   });
 

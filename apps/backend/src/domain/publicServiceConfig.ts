@@ -37,6 +37,11 @@ export interface PublicServiceConfig {
   claudeCodeLoadWorkspaceSkills: boolean;
   sceneEngineEnabled?: boolean;
   repositorySketches: true;
+  /**
+   * `GET /api/workspaces/:workspaceId/sketches`, `undoHead`/`redoHead` on
+   * sketch reads, and `sketchToolsAvailable` on sessions. Absent means unsupported.
+   */
+  sketchIndex: true;
   languageServicesEnabled?: boolean;
   terminalEnabled: boolean;
 }

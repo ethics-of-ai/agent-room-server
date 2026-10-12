@@ -23,6 +23,29 @@ export function advertisedJsonSchema(schema: z.ZodTypeAny): Record<string, unkno
       return advertisedJsonSchema((schema as z.ZodEffects<z.ZodTypeAny>).innerType());
     case z.ZodFirstPartyTypeKind.ZodOptional:
       return advertisedJsonSchema((schema as z.ZodOptional<z.ZodTypeAny>).unwrap());
+    case z.ZodFirstPartyTypeKind.ZodNullable:
+      return described({ anyOf: [advertisedJsonSchema((schema as z.ZodNullable<z.ZodTypeAny>).unwrap()), { type: "null" }] });
+    case z.ZodFirstPartyTypeKind.ZodUnion:
+      return described({ anyOf: (schema as z.ZodUnion<[z.ZodTypeAny, ...z.ZodTypeAny[]]>).options.map(advertisedJsonSchema) });
+    case z.ZodFirstPartyTypeKind.ZodLiteral: {
+      // `enum` rather than `const`: more model providers accept it.
+      const value = (schema as z.ZodLiteral<unknown>).value;
+      if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+        throw new Error("Advertised literals must be strings, numbers, or booleans");
+      }
+      return described({ type: typeof value === "number" ? "number" : typeof value, enum: [value] });
+    }
+    case z.ZodFirstPartyTypeKind.ZodTuple: {
+      // Only fixed-length tuples of one element type (vectors and
+      // quaternions), which a plain bounded array describes exactly.
+      const tuple = schema as z.ZodTuple;
+      const items = tuple.items.map((item: z.ZodTypeAny) => advertisedJsonSchema(item));
+      const first = JSON.stringify(items[0]);
+      if (tuple._def.rest || items.length === 0 || items.some((item: unknown) => JSON.stringify(item) !== first)) {
+        throw new Error("Advertised tuples must have a fixed length and one element type");
+      }
+      return described({ type: "array", items: items[0], minItems: items.length, maxItems: items.length });
+    }
     case z.ZodFirstPartyTypeKind.ZodDefault: {
       const inner = schema as z.ZodDefault<z.ZodTypeAny>;
       return { ...advertisedJsonSchema(inner.removeDefault()), default: inner._def.defaultValue() };
@@ -66,6 +89,7 @@ export function advertisedJsonSchema(schema: z.ZodTypeAny): Record<string, unkno
         if (check.kind === "int") json.type = "integer";
         else if (check.kind === "min") json[check.inclusive ? "minimum" : "exclusiveMinimum"] = check.value;
         else if (check.kind === "max") json[check.inclusive ? "maximum" : "exclusiveMaximum"] = check.value;
+        else if (check.kind === "finite") continue;
         else throw new Error(`Unsupported number check "${check.kind}" in an advertised tool schema`);
       }
       return described(json);

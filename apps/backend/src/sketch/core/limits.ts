@@ -11,7 +11,10 @@ export const SKETCH_LEGACY_SCHEMA_VERSION = 1;
 
 // Whole-document caps. The object count includes groups and preserved
 // unknown-kind objects: they all occupy ids, parent links, and render slots.
-export const SKETCH_MAX_OBJECTS = 128;
+// Raised from 128 on 2026-10-05 so the canvas can work as an open board. The
+// point, segment, text, and byte caps below still bound generated geometry;
+// the render cost of 1,024 entities awaits a headset measurement.
+export const SKETCH_MAX_OBJECTS = 1024;
 export const SKETCH_MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 
 // Geometry caps.
@@ -49,10 +52,11 @@ export const SKETCH_ELLIPSE_SEGMENTS = 64;
 export const SKETCH_DEFAULT_BRUSH = "finePen" as const;
 export const SKETCH_DEFAULT_LINE_STYLE = "solid" as const;
 
-// Coordinates live in a 10-meter cube centered on the sketch origin, faces
+// Coordinates live in a 1 km cube centered on the sketch origin, faces
 // inclusive — reachable geometry may sit exactly on a face (B01 relies on the
-// clamp landing there).
-export const SKETCH_COORDINATE_LIMIT = 5;
+// clamp landing there). Raised from 5 on 2026-10-05 so the canvas can grow
+// like an open board; float32 clients keep sub-millimetre precision at 500 m.
+export const SKETCH_COORDINATE_LIMIT = 500;
 
 // Transforms.
 export const SKETCH_MIN_SCALE = 0.001;
@@ -80,13 +84,21 @@ export const SKETCH_MAX_RETAINED_RECEIPTS = 256;
 // committed), so the evaluator keeps the id itself and answers
 // `outcome_unknown` instead of guessing through the stale-revision path.
 export const SKETCH_MAX_EXPIRED_REQUEST_IDS = 1024;
+// The revision log behind the relaxed revision rule: one entry per revision
+// naming the object ids it changed. It keeps as many revisions as receipts. A
+// transaction that changed more ids than an entry holds is logged as touching
+// every object, which only makes later requests more likely to be refused.
+export const SKETCH_MAX_REVISION_LOG_ENTRIES = SKETCH_MAX_RETAINED_RECEIPTS;
+export const SKETCH_MAX_REVISION_LOG_IDS = 64;
+// 256 entries of 64 ids of at most 64 characters, with room for JSON.
+export const SKETCH_REVISION_LOG_BYTE_BUDGET = 1536 * 1024;
 // The serialized whole-state cap the parse entry points enforce. A state wraps
 // a document plus retained history, receipts, and expired ids, so its ceiling
 // is derived from those budgets with slack for JSON structure — applying the
 // bare document cap here would reject exactly the histories the evaluator is
 // allowed to retain.
 export const SKETCH_MAX_STATE_BYTES =
-  SKETCH_MAX_DOCUMENT_BYTES + SKETCH_HISTORY_BYTE_BUDGET + 512 * 1024;
+  SKETCH_MAX_DOCUMENT_BYTES + SKETCH_HISTORY_BYTE_BUDGET + SKETCH_REVISION_LOG_BYTE_BUDGET + 512 * 1024;
 
 export const SKETCH_KNOWN_OBJECT_KINDS = ["stroke", "box", "text", "planarShape", "textBox", "group"] as const;
 export type SketchKnownObjectKind = (typeof SKETCH_KNOWN_OBJECT_KINDS)[number];

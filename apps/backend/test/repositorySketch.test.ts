@@ -120,10 +120,20 @@ describe("repository sketches", () => {
   it("serializes competing windows and detects external edits that reuse a revision", async () => {
     const f = await fixture();
     const sketch = await f.service.create("workspace-a", "My drawing");
-    const results = await Promise.allSettled(["a", "b"].map((id) => f.service.edit("workspace-a", sketch.path, "commit", {
+    // Different objects from the same base both land, one after the other.
+    const disjoint = await Promise.all(["a", "b"].map((id) => f.service.edit("workspace-a", sketch.path, "commit", {
       requestId: id, baseRevision: 0, fileVersion: sketch.fileVersion, operations: [box(id)]
     })));
+    expect(disjoint.map((result) => result.revision).sort()).toEqual([1, 2]);
+    // The same object from the same base: the second is refused and names it.
+    const results = await Promise.allSettled(["c", "d"].map((id) => f.service.edit("workspace-a", sketch.path, "commit", {
+      requestId: id, baseRevision: 2, fileVersion: disjoint.find((result) => result.revision === 2)!.fileVersion,
+      operations: [{ op: "update", objectId: "a", kind: "box", size: id === "c" ? [0.2, 0.2, 0.2] : [0.3, 0.3, 0.3] }]
+    })));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find((r) => r.status === "rejected")).toMatchObject({
+      reason: { code: "stale_revision", details: { currentRevision: 3, conflictingObjectIds: ["a"] } }
+    });
     const before = await f.service.read("workspace-a", sketch.path);
     await writeFile(join(f.workspace, sketch.path), JSON.stringify(before.document));
     const after = await f.service.read("workspace-a", sketch.path);

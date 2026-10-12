@@ -258,3 +258,10 @@ PORT=8799 pnpm --filter @agentroom/backend start
 curl -sS http://127.0.0.1:8799/health
 curl -sS http://127.0.0.1:8799/api/status
 ```
+
+### Retired sketch proposal state
+
+A backend that ran the removed sketch proposal experiment may still have
+`STATE_DIR/sketch-experiment/`. Nothing reads it now, and it is safe to delete.
+A leftover `experimentalSketchToolsEnabled` key in managed settings is kept but
+never applied, and the `EXPERIMENTAL_SKETCH_TOOLS_ENABLED` variable is ignored.

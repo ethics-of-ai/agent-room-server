@@ -10,13 +10,25 @@ import { parseSketchDocument, serializeSketchDocument, SKETCH_MAX_DOCUMENT_BYTES
 import { SketchServiceError } from "./sketchErrors";
 
 export const sketchDigest = (bytes: string | Buffer): string => createHash("sha256").update(bytes).digest("hex");
+/** The file identity a version was computed from, as the sketch index compares it. */
+export interface SketchFileStat {
+  size: number;
+  mtimeMs: number;
+  ino: number;
+}
 export interface SketchFile {
   document: SketchDocument;
   fileVersion: string;
   digest: string;
+  stat: SketchFileStat;
 }
 
 /** Only validated sketch documents can reach this writer. Generic text PUT keeps its own cap. */
+/** The file-name stem a sketch title gets: lowercase letters and digits joined by `-`, at most 80 characters. Empty when the title has neither. */
+export function sketchFileSlug(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
+}
+
 export class SketchWorkspaceFiles {
   constructor(private readonly registry: Pick<LocalWorkspaceRegistry, "findByIdWithoutGitRefresh">) {}
 
@@ -27,7 +39,7 @@ export class SketchWorkspaceFiles {
   }
 
   async preferredPath(target: WorkspaceTarget, title: string): Promise<string> {
-    const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "sketch";
+    const slug = sketchFileSlug(title) || "sketch";
     try {
       await this.leaf(target, `docs/sketches/${slug}.sketch.json`);
       return `docs/sketches/${slug}.sketch.json`;
@@ -71,7 +83,8 @@ export class SketchWorkspaceFiles {
       const parsed = parseSketchDocument(bytes.toString("utf8"));
       if (!parsed.ok) throw new SketchServiceError(parsed.error.message, 422, parsed.error.code);
       const digest = sketchDigest(bytes);
-      return { document: parsed.value, digest, fileVersion: sketchDigest(`${identity(after)}:${digest}`) };
+      return { document: parsed.value, digest, fileVersion: sketchDigest(`${identity(after)}:${digest}`),
+        stat: { size: after.size, mtimeMs: after.mtimeMs, ino: after.ino } };
     } finally { await handle.close(); }
   }
 
@@ -92,10 +105,38 @@ export class SketchWorkspaceFiles {
         try { await link(temporary, leaf); }
         catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new SketchServiceError("Sketch name was occupied during creation", 409, "file_exists"); throw error; }
       }
-      const saved = await this.read(target, path);
-      if (saved.digest !== sketchDigest(content)) throw changed();
-      return saved;
     } finally { await rm(temporary, { force: true }); }
+    // Read after the temporary name is gone: dropping a hard link changes the
+    // file's ctime, which is part of its version.
+    const saved = await this.read(target, path);
+    if (saved.digest !== sketchDigest(content)) throw changed();
+    return saved;
+  }
+
+  /**
+   * Moves a sketch to a new visible `.sketch.json` path in the same workspace.
+   * The new name is claimed with a create-only hard link, so an occupied name
+   * is refused rather than replaced, and the old name goes only after the
+   * link landed. Both paths pass the same containment and symlink checks.
+   */
+  async rename(target: WorkspaceTarget, from: string, to: string, baseVersion: string): Promise<SketchFile> {
+    const source = await this.leaf(target, from);
+    const destination = await this.leaf(target, to);
+    if ((await this.read(target, from)).fileVersion !== baseVersion) throw changed();
+    try { await link(source, destination); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new SketchServiceError("A file already has that name; choose another", 409, "name_collision");
+      throw error;
+    }
+    await rm(source);
+    return this.read(target, to);
+  }
+
+  /** Deletes a sketch whose bytes still match `baseVersion`. */
+  async remove(target: WorkspaceTarget, path: string, baseVersion: string): Promise<void> {
+    const leaf = await this.leaf(target, path);
+    if ((await this.read(target, path)).fileVersion !== baseVersion) throw changed();
+    await rm(leaf);
   }
 
   private async leaf(target: WorkspaceTarget, path: string): Promise<string> {

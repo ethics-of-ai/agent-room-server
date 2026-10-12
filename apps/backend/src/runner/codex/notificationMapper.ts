@@ -3,6 +3,7 @@ import type { JsonRpcNotification } from "../shared/JsonRpcLineClient";
 import { compactDisplayText, displayTextValue } from "../shared/displayText";
 import { arrayValue, nonnegativeIntegerValue, objectValue, positiveIntegerValue, stringValue } from "../shared/jsonValues";
 import { codexDiffSummary } from "./diffSummary";
+import { isAgentRoomToolName } from "../shared/agentToolPrivacy";
 
 const MAX_PLAN_STEPS = 50;
 
@@ -180,7 +181,7 @@ function activityFromNotification(notification: JsonRpcNotification): AgentRunne
       kind: "codex_item_started",
       title: itemDisplay.title,
       ...(itemDisplay.description ? { description: itemDisplay.description } : {}),
-      content: params ?? {},
+      content: withoutAgentRoomToolPayload(params),
       ...(isRenderableItem(params)
         ? { canonical: { kind: "tool_started", ...(runner.nativeItemId ? { toolId: runner.nativeItemId } : {}) } as const }
         : {}),
@@ -194,7 +195,7 @@ function activityFromNotification(notification: JsonRpcNotification): AgentRunne
       kind: "codex_item_completed",
       title: itemDisplay.title,
       ...(itemDisplay.description ? { description: itemDisplay.description } : {}),
-      content: params ?? {},
+      content: withoutAgentRoomToolPayload(params),
       ...(isRenderableItem(params)
         ? { canonical: { kind: "tool_completed", ...(runner.nativeItemId ? { toolId: runner.nativeItemId } : {}) } as const }
         : {}),
@@ -261,6 +262,17 @@ function activityFromNotification(notification: JsonRpcNotification): AgentRunne
 /** The `ThreadItem` variant Codex reports a context compaction as. */
 function isContextCompactionItem(params: Record<string, unknown> | undefined): boolean {
   return stringValue(objectValue(params?.item)?.type) === "contextCompaction";
+}
+
+/**
+ * A dynamic tool item naming an AgentRoom catalog tool keeps its identity and
+ * status but drops its arguments and result, which are private.
+ */
+function withoutAgentRoomToolPayload(params: Record<string, unknown> | undefined): Record<string, unknown> {
+  const item = objectValue(params?.item);
+  if (!params || !item || !isAgentRoomToolName(stringValue(item.tool))) return params ?? {};
+  const { arguments: _arguments, contentItems: _contentItems, result: _result, output: _output, ...kept } = item;
+  return { ...params, item: kept };
 }
 
 function isRenderableItem(params: Record<string, unknown> | undefined): boolean {

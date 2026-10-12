@@ -30,6 +30,9 @@ export interface SketchCoreError {
   opIndex?: number;
   // Set on stale_revision so a caller can refresh without another read.
   currentRevision?: number;
+  // Set on stale_revision when later transactions touched ids this request
+  // reads or writes. Empty when a later clear touched every object.
+  conflictingObjectIds?: string[];
   // Set on limit_exceeded; names the cap from SKETCH_LIMIT_NAMES.
   limit?: SketchLimitName;
   // Set on newer_document_version.

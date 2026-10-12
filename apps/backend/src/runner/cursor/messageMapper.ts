@@ -2,6 +2,7 @@ import type { AgentRunnerActivity, AgentRunnerEvent, CanonicalPlanStep, RunnerMe
 import { arrayValue, nonnegativeIntegerValue, objectValue, stringValue } from "../shared/jsonValues";
 import { compactDisplayText, displayTextValue } from "../shared/displayText";
 import { CURSOR_QUESTION_TOOL_NAME } from "./questions";
+import { isAgentRoomToolName } from "../shared/agentToolPrivacy";
 import { decodeCursorShellDelta } from "./delta";
 
 /**
@@ -49,6 +50,14 @@ export function isCursorQuestionToolCall(object: Record<string, unknown>): boole
     stringValue(args?.providerIdentifier) === "custom-user-tools" &&
     stringValue(args?.toolName) === CURSOR_QUESTION_TOOL_NAME
   );
+}
+
+/** The AgentRoom catalog tool a `tool_call` names, or undefined for any other tool. */
+function agentRoomCustomToolName(object: Record<string, unknown>): string | undefined {
+  if (stringValue(object.name) !== "mcp") return undefined;
+  const args = objectValue(object.args);
+  const toolName = stringValue(args?.toolName);
+  return stringValue(args?.providerIdentifier) === "custom-user-tools" && isAgentRoomToolName(toolName) ? toolName : undefined;
 }
 
 export function mapCursorMessage(
@@ -134,14 +143,18 @@ function toolCallActivities(object: Record<string, unknown>, runner: RunnerMetad
   const status = stringValue(object.status);
   const toolRunner = callId ? { ...runner, nativeItemId: callId } : runner;
 
+  // An AgentRoom custom tool shows only its name: its arguments and result
+  // are private.
+  const agentRoomTool = agentRoomCustomToolName(object);
   if (status === "running") {
-    const planSteps = planStepsFrom(name, object.args);
-    const description = compactDisplayText(displayTextValue(object.args));
+    const planSteps = agentRoomTool ? undefined : planStepsFrom(name, object.args);
+    const description = agentRoomTool ?? compactDisplayText(displayTextValue(object.args));
+    const args = agentRoomTool ? { providerIdentifier: "custom-user-tools", toolName: agentRoomTool } : objectValue(object.args);
     const started = activity({
       kind: "cursor_tool_started",
       title: labelForTool(name),
       ...(description ? { description } : {}),
-      content: { name, ...(callId ? { callId } : {}), ...(objectValue(object.args) ? { args: objectValue(object.args) } : {}) },
+      content: { name, ...(callId ? { callId } : {}), ...(args ? { args } : {}) },
       canonical: { kind: "tool_started", ...(callId ? { toolId: callId } : {}) },
       runner: toolRunner
     });
@@ -158,7 +171,7 @@ function toolCallActivities(object: Record<string, unknown>, runner: RunnerMetad
   }
 
   if (status === "completed" || status === "error") {
-    const description = compactDisplayText(displayTextValue(object.result));
+    const description = agentRoomTool ?? compactDisplayText(displayTextValue(object.result));
     const truncated = objectValue(object.truncated);
     return [activity({
       kind: "cursor_tool_completed",

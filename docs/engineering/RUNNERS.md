@@ -17,6 +17,7 @@ an event reaches `apps/backend/src/protocol/coding`.
 - `turnDiffSource`
 - `clarifyingQuestions`
 - `agentTools`
+- `workspaceWritePosture`
 - `workspaceSkills`, `skillSourceDirs`, and `skillInvocationPrefix`
 - `settingsKeyPrefix` and runner-owned managed settings
 - `restoreStrategy`
@@ -39,10 +40,10 @@ downgrade guard and update its compatibility vocabulary with any new built-in.
 
 | Runner | Prompt | Turn diff | Questions | AgentRoom tools | Workspace skills | Restore | Configured when |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `codex` | Per turn | Native runner diff | Native request | App-server dynamic tools in JSON-RPC mode: plans | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
-| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | In-process SDK MCP server: plans | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
-| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay: questions, plans | None advertised | `unsupported` | Executable and Cordis composition are both configured |
-| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay: questions, plans | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
+| `codex` | Per turn | Native runner diff | Native request | App-server dynamic tools in JSON-RPC mode: plans, sketches | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
+| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | In-process SDK MCP server: plans, sketches | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
+| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay: questions, plans, sketches | None advertised | `unsupported` | Executable and Cordis composition are both configured |
+| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay: questions, plans, sketches | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
 | `acp_*` | Descriptor-owned | Descriptor-owned | None in the current external adapter | None | Descriptor-owned | A restore path is required at admission | Its admitted executable definition is present |
 
 The registry and `apps/backend/test/runnerRegistry.test.ts` are the executable
@@ -184,6 +185,13 @@ Adapter paths:
   composition mode. Custom mode parses one valid, line-start, bounded
   `<agentroom-question>` block and continues through a second Harness prompt.
   The managed path omits both the prompt instruction and legacy parser.
+- Backend-owned tools ask through the session question channel
+  (`agent/SessionQuestionChannel.ts`), not an adapter. `AgentSessionService`
+  holds one `PendingQuestionRequests` for them, keyed by session, publishes the
+  canonical `question_requested` and `question_resolved` activities on the
+  running turn, answers a request id it holds before passing any other to the
+  runner, and releases what it holds as cancelled at turn end, cancel, and
+  session close. With `clarifyingQuestionsEnabled` off it asks nothing.
 - Cursor registers one `ask_user_question` custom tool and always disallows
   the SDK's own `askQuestion`. Since the AgentRoom tool extraction the tool is
   the catalog's `questions.ask` definition, relayed through the generic
@@ -249,8 +257,7 @@ catalog it registered, because replacing it would lose the conversation. A
 turn that requires a different catalog fails, and an optional turn continues
 with the shared registration notice. Missing optional tool readiness leaves ordinary turns usable and
 reports a separate capability check; `AgentRunnerToolSet.required` can require
-tool readiness for callers that depend on it. Sketches do not supply tools or
-turn bindings. The relay never receives bearer auth or route authority. See the
+tool readiness for callers that depend on it. The relay never receives bearer auth or route authority. See the
 [DeepSeek runner guide](DEEPSEEK_HARNESS_RUNNER.md#agentroom-cordis-tools).
 
 Codex uses `dynamic_tools`. The adapter derives `thread/start.dynamicTools`
@@ -362,6 +369,51 @@ treats the stored plan as authoritative and plan text as task data, not
 instructions. Wire behavior is in the
 [API](../api/API.md#thread-plans), and storage and trust limits are in
 [trust and safety](../safety/TRUST_AND_SAFETY.md#thread-plans).
+
+### Repository sketch tools
+
+`apps/backend/src/sketch/agent/` owns the sketch tools. Every built-in
+descriptor declares the `sketches` capability, so a supporting runner's model
+sees seven tools: list, inspect, create, edit, history, rename, and delete,
+each named `agentroom_sketch_<verb>`. The owners are:
+
+- `sketchToolContract.ts`: the strict input schemas, names, descriptions,
+  unavailable text, and the standing instruction.
+- `sketchInspect.ts`: the compact object lines, the coordinate convention, and
+  the 48 KiB result cap.
+- `sketchToolResults.ts`: listing, refusal, and validation-error text.
+- `SketchLifecycleTools.ts` and `sketchConfirmations.ts`: create, own-step
+  history, rename, delete, and the questions before deleting a file or
+  emptying a sketch.
+- `SketchTurnTools.ts`: the handlers. They resolve the sketch in the session's
+  workspace through `sketch/index/SketchIndex.ts`, apply the write posture, and call
+  `RepositorySketchService.editAsAgent`, which commits as the agent actor and
+  publishes `sketch_document_changed` with the session and turn ids. They
+  remember the file version of each revision they returned, so the service can
+  tell a later AgentRoom edit from an external write.
+
+`agent/SessionTurnTools.ts` is the one composer that joins plan and sketch
+handlers into a single `prepareAgentRunnerToolSet` binding per turn and joins
+their standing instructions. It is not a plugin seam. Cursor and DeepSeek still
+merge their own question tool on top with `combineRunnerToolSets`. A native
+thread keeps the catalog it started with, so the turn that starts a session's
+thread records the logical ids it registered as `threadAgentToolIds`, and
+`sketchToolsAvailable` says whether they hold every sketch tool
+([Coding Agent Capabilities](../api/API.md#coding-agent-capabilities)).
+Deleting a session releases its turn bindings, its open session-channel
+questions, and the sketch file versions remembered for it.
+
+A tool that changes files reads `RunnerDescriptor.workspaceWritePosture`, the
+descriptor's reading of its own posture settings. Codex reports `read_only`
+for the `read-only` sandbox. Claude Code, Cursor and DeepSeek always report
+`writable`: AgentRoom offers Claude Code no read-only permission mode, Cursor's
+sandbox bounds where writes land, not whether, and a managed DeepSeek graph
+pins `sandbox-policy` to `workspace-write`. A custom DeepSeek graph also reports
+`writable`; [Agent sketch tools](../safety/TRUST_AND_SAFETY.md#agent-sketch-tools)
+records why that gap is accepted. External ACP descriptors declare none, so
+changing tools refuse there until their posture is readable. Each transport's
+activity mapping calls `runner/shared/agentToolPrivacy.ts` to apply the
+[tool activity privacy rule](../safety/TRUST_AND_SAFETY.md#thread-plans).
 
 ## Images and turn settings
 

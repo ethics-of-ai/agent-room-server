@@ -1,9 +1,8 @@
 import { allowedAgentToolLogicalIds } from "../agentTools/catalog";
-import { prepareAgentRunnerToolSet, type PreparedAgentRunnerToolSet } from "../agentTools/runnerToolSet";
+import type { AgentToolHandler } from "../agentTools/dispatch";
 import type { AgentSession, AgentTurnContext, ServiceConfig } from "../domain/models";
 import type { EventBus } from "../events/EventBus";
 import type { AgentPlanChangedPayload } from "../events/eventTypes";
-import type { AgentRunnerToolSet } from "../runner/AgentRunner";
 import { isRegisteredRunnerKind, runnerDescriptor } from "../runner/registry";
 import { runnerAgentToolCapabilities } from "../runner/shared/agentToolSets";
 import {
@@ -22,13 +21,11 @@ import {
 
 /**
  * Plan tools inside an agent session: which tools a runner's descriptor lets
- * the session advertise, a fresh binding per turn that dies the moment the turn
- * settles, and the plan prompt each turn carries. The plan service stays the
+ * the session advertise, the handlers the session's tool composer binds per
+ * turn, and the plan prompt each turn carries. The plan service stays the
  * owner of state; this class only connects it to turns.
  */
 export class ThreadPlanTurnTools {
-  private readonly bindings = new Map<string, PreparedAgentRunnerToolSet>();
-
   constructor(
     private readonly plans: ThreadPlanService,
     private readonly runnerConfig?: ServiceConfig
@@ -54,37 +51,17 @@ export class ThreadPlanTurnTools {
     return `${name} does not support AgentRoom plan tools, which this turn requires`;
   }
 
-  /** A fresh binding for one turn, or undefined when the runner advertises no plan tools. */
-  bind(input: {
-    session: Pick<AgentSession, "id" | "runnerKind">;
-    turnId: string;
-    context: AgentTurnContext | undefined;
-    isLive(): boolean;
-  }): AgentRunnerToolSet | undefined {
-    const allowed = this.advertised(input.session.runnerKind);
-    if (allowed.length === 0) return undefined;
-    const prepared = prepareAgentRunnerToolSet({
-      runId: input.turnId,
-      sessionKey: input.session.id,
-      catalog: allowed,
-      allowed,
-      required: input.context?.planToolsRequired === true,
-      handlers: planToolHandlers(this.plans, input.session.id),
-      isLive: input.isLive
-    });
-    this.bindings.set(input.turnId, prepared);
-    return { ...prepared.tools, instructions: PLAN_TOOLS_INSTRUCTION };
+  /** The plan handlers for one turn; the session's tool composer binds them. */
+  handlers(sessionId: string): Record<string, AgentToolHandler> {
+    return planToolHandlers(this.plans, sessionId);
   }
 
-  /** End a turn's binding. Later calls, and results that settle after this, are refused. */
-  release(turnId: string): void {
-    this.bindings.get(turnId)?.dispose();
-    this.bindings.delete(turnId);
+  get instruction(): string {
+    return PLAN_TOOLS_INSTRUCTION;
   }
 
-  /** Release the turn's binding first, then queue the plan's turn-end transition. */
+  /** Queue the plan's turn-end transition. The composer has already released the turn's binding. */
   settle(sessionId: string, turnId: string, outcome: PlanTurnOutcome): Promise<void> {
-    this.release(turnId);
     return this.plans.settleTurn(sessionId, turnId, outcome);
   }
 

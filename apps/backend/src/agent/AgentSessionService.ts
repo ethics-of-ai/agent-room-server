@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   AgentTurnContextAssemblyError,
   type AgentTurnContextAssembler,
@@ -47,13 +46,17 @@ import { AgentTurnEventApplier, type OutstandingQuestionRequest } from "./AgentT
 import { AgentTurnGitDiffTracker } from "./AgentTurnGitDiffTracker";
 import { AgentTurnTelemetryStore } from "./AgentTurnTelemetryStore";
 import {
+  agentSessionId,
   AgentSessionError,
+  agentTurnId,
   BACKEND_RESTARTED_TURN_ERROR,
+  hasSettings,
   type CreateAgentSessionInput,
   type StartAgentTurnInput
 } from "./agentSessionTypes";
 import type { PlanReadResult, PlanTurnOutcome, ThreadPlanService } from "../plans/ThreadPlanService";
 import { createSessionPlans, type ThreadPlanTurnTools } from "../plans/planTurnTools";
+import { SessionTurnTools, type SessionSketches } from "./SessionTurnTools";
 import type { PlanPersistedState } from "../plans/planModel";
 
 export {
@@ -74,6 +77,8 @@ export class AgentSessionService {
   readonly plans: ThreadPlanService;
   /** Per-turn plan tool bindings and the plan prompt each turn carries. */
   readonly planTools: ThreadPlanTurnTools;
+  /** Every tool family's per-turn binding and standing instructions. */
+  readonly turnTools: SessionTurnTools;
   private readonly runnerEvents: AgentTurnEventApplier;
   private readonly turnGitDiffs: AgentTurnGitDiffTracker;
   private readonly cancelledTurnIds = new Set<string>();
@@ -99,6 +104,8 @@ export class AgentSessionService {
       attachments?: { deleteSessionAttachments(session: Pick<AgentSession, "workspaceId" | "id">): Promise<void> };
       /** Decides which descriptor tool transports exist under this configuration. */
       runnerConfig?: ServiceConfig;
+      /** Repository sketches the session's sketch tools act on; absent advertises none. */
+      sketches?: SessionSketches;
       /** Optional durable session store; absent keeps sessions process-scoped. */
       durableSessions?: Pick<DurableAgentSessionStore, "initialize" | "schedule" | "remove" | "commit" | "hasUnresolvedCommit" | "reconcile">;
     }
@@ -109,6 +116,8 @@ export class AgentSessionService {
       snapshot: (id, plan) => this.snapshot(id, plan),
       runnerConfig: deps.runnerConfig
     }));
+    this.turnTools = new SessionTurnTools(this.planTools, { sketches: deps.sketches, runnerConfig: deps.runnerConfig, sessions: this.sessions,
+      turns: this.turns, activity: (session, turn, activity) => this.runnerEvents.apply(session, turn, { type: "agent_activity", activity }) });
     this.runnerEvents = new AgentTurnEventApplier({
       eventBus: deps.eventBus,
       messages: this.messages,
@@ -147,6 +156,7 @@ export class AgentSessionService {
     // Unknown persisted runner ids stay readable; requireRunner refuses use.
     const session = document.session as AgentSession;
     if (this.sessions.has(session.id)) return;
+    this.turnTools.describe(session);
     this.sessions.set(session.id, session);
     for (const turn of document.turns) {
       this.turns.set(turn.id, turn);
@@ -274,6 +284,7 @@ export class AgentSessionService {
       createdAt: now,
       updatedAt: now
     };
+    this.turnTools.describe(session);
     this.sessions.set(session.id, session);
     this.messages.initializeSession(session.id);
     this.persist(session.id);
@@ -317,6 +328,8 @@ export class AgentSessionService {
 
     const runner = this.requireRunner(session.runnerKind);
     const runnerInput = await this.assembleRunnerInput(session, input.message, input.context);
+    // The awaits above let a second start on this session interleave.
+    if (session.activeTurnId) throw new AgentSessionError("Agent session already has a running turn", 409);
     this.validateRunnerInputParts(runner, runnerInput.inputParts);
     // A volatile prompt addition (currently human diagram edits) may only mark
     // itself delivered after all request validation has passed. A rejected turn
@@ -367,7 +380,7 @@ export class AgentSessionService {
       runnerKind: session.runnerKind
     });
     // A fresh binding: live only while this turn is the session's running turn.
-    const tools = this.planTools.bind({
+    const tools = this.turnTools.bind({
       session,
       turnId: turn.id,
       context: input.context,
@@ -439,12 +452,10 @@ export class AgentSessionService {
   }
 
   /**
-   * Answer an outstanding clarifying-question batch with selections from the
-   * sets the runner is holding for it, plus the person's own free text where a
-   * set offered it. As with permissions, the runner decides whether the batch
-   * is still outstanding and whether every named set and option was offered;
-   * this maps those answers onto status codes, and a runner with no way to ask
-   * has no outstanding batch, which is the same 404.
+   * Answer an outstanding clarifying-question batch. A batch a backend tool
+   * asked is answered in the session's own channel; any other goes to the
+   * runner, which decides whether it is outstanding and every set and option
+   * was offered. A batch nobody holds is a 404.
    */
   answerQuestionRequest(input: {
     sessionId: string;
@@ -452,7 +463,7 @@ export class AgentSessionService {
     answers: CanonicalQuestionAnswer[];
   }): AgentSession {
     const session = this.requireSession(input.sessionId);
-    const answer = this.requireRunner(session.runnerKind).answerQuestionRequest?.({
+    const answer = this.turnTools.questions.answer(session.id, input.requestId, input.answers) ?? this.requireRunner(session.runnerKind).answerQuestionRequest?.({
       sessionId: session.id,
       requestId: input.requestId,
       answers: input.answers
@@ -494,6 +505,7 @@ export class AgentSessionService {
     // late runner event can mark the record between the unlink and the
     // in-memory delete that makes the session not live.
     await this.plans.closeSession(sessionId);
+    this.turnTools.closeSession(sessionId);
     await this.deps.durableSessions?.remove(sessionId);
     this.uncontinuableSessionIds.delete(sessionId);
     this.hydratedSeeds.delete(sessionId);
@@ -612,7 +624,7 @@ export class AgentSessionService {
       // consumes the baseline synchronously at entry, so this cannot yank one
       // out from under an in-flight settle.
       this.turnGitDiffs.releaseTurn(turn.id);
-      this.planTools.release(turn.id);
+      this.turnTools.release(turn.id);
       if (session.activeTurnId === turn.id && turn.status !== "running") {
         session.activeTurnId = undefined;
       }
@@ -652,7 +664,7 @@ export class AgentSessionService {
   /** Every settlement path ends the turn's question requests and plan binding here, first. */
   private endTurnTools(session: AgentSession, turn: AgentSessionTurn, outcome: PlanTurnOutcome): void {
     this.runnerEvents.cancelOutstandingQuestionRequests(session, turn);
-    void this.planTools.settle(session.id, turn.id, outcome);
+    void this.turnTools.settle(session.id, turn.id, outcome);
   }
 
   private succeedTurn(
@@ -838,16 +850,4 @@ export class AgentSessionService {
       totalTokens: this.totalTokens
     };
   }
-}
-
-function agentSessionId(): string {
-  return `agent-session-${randomUUID()}`;
-}
-
-function agentTurnId(): string {
-  return `agent-turn-${randomUUID()}`;
-}
-
-function hasSettings(settings: CodingAgentTurnSettings | undefined): settings is CodingAgentTurnSettings {
-  return Boolean(settings?.model || settings?.reasoningEffort || settings?.serviceTier);
 }

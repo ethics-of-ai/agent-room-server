@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentRunnerKind, AgentTurnContext, CodingAgentTurnSettings } from "../domain/models";
 
 export class AgentSessionError extends Error {
@@ -30,3 +31,15 @@ export interface StartAgentTurnInput {
  * turn fails rather than being reported as cancelled or completed.
  */
 export const BACKEND_RESTARTED_TURN_ERROR = "Backend restarted during this turn";
+
+export function agentSessionId(): string {
+  return `agent-session-${randomUUID()}`;
+}
+
+export function agentTurnId(): string {
+  return `agent-turn-${randomUUID()}`;
+}
+
+export function hasSettings(settings: CodingAgentTurnSettings | undefined): settings is CodingAgentTurnSettings {
+  return Boolean(settings?.model || settings?.reasoningEffort || settings?.serviceTier);
+}

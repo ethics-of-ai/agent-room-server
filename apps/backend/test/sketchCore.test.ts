@@ -185,15 +185,16 @@ describe("sketch commit evaluation", () => {
     expect(working).toEqual(before);
   });
 
-  it("refuses stale base revisions with the current revision attached", () => {
+  it("refuses stale base revisions that overlap a later edit with the current revision attached", () => {
     const state = createSketchState("sketch-test-4");
     const first = commit(state, "r1", [strokeCreate("s1")]);
     expect(first.ok).toBe(true);
     const error = expectError(
-      commit(first.ok ? first.state : state, "r2", [strokeCreate("s2")], 0),
+      commit(first.ok ? first.state : state, "r2", [{ op: "update", objectId: "s1", kind: "stroke", width: 0.01 }], 0),
       "stale_revision"
     );
     expect(error.currentRevision).toBe(1);
+    expect(error.conflictingObjectIds).toEqual(["s1"]);
   });
 
   it("replays an identical retry from the original receipt without reapplying", () => {

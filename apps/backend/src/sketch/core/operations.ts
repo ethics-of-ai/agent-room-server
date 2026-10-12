@@ -16,6 +16,7 @@ import {
 import type { SketchCoreError } from "./errors";
 import { checkSketchObjects, type SketchInvariantKind } from "./invariants";
 import { applyPlanarCreate, applyPlanarUpdate } from "./planarObjectOperations";
+import { addOperationFootprint, emptySketchFootprint, type SketchFootprint } from "./footprint";
 
 // Operation application: mutate a working document with one operation,
 // return the exact inverse operations that retract it. The evaluator owns
@@ -36,7 +37,7 @@ import { applyPlanarCreate, applyPlanarUpdate } from "./planarObjectOperations";
 //   the working clone — a batch never applies partially.
 
 export type AppliedOps =
-  | { ok: true; ops: SketchOperation[] }
+  | { ok: true; ops: SketchOperation[]; footprint: SketchFootprint }
   | { ok: false; error: SketchCoreError };
 
 export function applyOperations(
@@ -44,7 +45,9 @@ export function applyOperations(
   operations: SketchOperation[]
 ): AppliedOps {
   const inverses: SketchOperation[] = [];
+  const footprint = emptySketchFootprint();
   for (const [opIndex, operation] of operations.entries()) {
+    addOperationFootprint(footprint, document, operation);
     const applied = applyOperation(document, operation);
     if (!applied.ok) {
       return { ok: false, error: withOpIndex(applied.error, opIndex) };
@@ -61,7 +64,7 @@ export function applyOperations(
       };
     }
   }
-  return { ok: true, ops: inverses };
+  return { ok: true, ops: inverses, footprint };
 }
 
 function withOpIndex(error: SketchCoreError, opIndex: number): SketchCoreError {

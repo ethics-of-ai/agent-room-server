@@ -425,7 +425,9 @@ export const agentSessionSchema = z.object({
   error: z.string().optional(),
   turnCount: z.number().int().nonnegative(),
   createdAt: z.string().min(1),
-  updatedAt: z.string().min(1)
+  updatedAt: z.string().min(1),
+  sketchToolsAvailable: z.boolean().optional(),
+  threadAgentToolIds: z.array(z.string().min(1)).max(64).optional()
 });
 
 export const agentSessionTurnSchema = z.object({

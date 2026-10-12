@@ -189,6 +189,14 @@ export class WorkspaceExplorer {
     return searchIndexedFiles(target, index, input);
   }
 
+  /** A fresh enumeration of the workspace's indexable paths, for the sketch index scan. */
+  async freshIndexedPaths(workspaceId: string): Promise<{ paths: string[]; truncated: boolean }> {
+    const target = await this.target(workspaceId);
+    this.fileIndex.invalidate(workspaceId);
+    const index = await this.fileIndex.get(workspaceId, target.workspaceRoot);
+    return { paths: index.paths, truncated: index.truncated };
+  }
+
   /**
    * Drops a workspace's cached path index (or every workspace's, with no
    * argument) for the callers that change what it should contain: a create,

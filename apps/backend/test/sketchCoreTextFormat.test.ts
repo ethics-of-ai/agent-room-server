@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  SKETCH_COORDINATE_LIMIT,
   SKETCH_DEFAULT_EXTRUSION_DEPTH,
   SKETCH_DEFAULT_TEXT_FONT_SIZE,
   SKETCH_MAX_EXTRUDED_TEXT_CHARACTERS,
@@ -202,7 +203,7 @@ describe("extruded text", () => {
   });
 
   it("counts half the extrusion depth on each side in world bounds", () => {
-    const nearFace = { translation: [0, 0, 4.97] as [number, number, number], rotation: [0, 0, 0, 1] as [number, number, number, number], scale: [1, 1, 1] as [number, number, number] };
+    const nearFace = { translation: [0, 0, SKETCH_COORDINATE_LIMIT - 0.03] as [number, number, number], rotation: [0, 0, 0, 1] as [number, number, number, number], scale: [1, 1, 1] as [number, number, number] };
     expect(commit(createSketchState("bounds"), "flat", [textBox("note", { transform: nearFace })]).ok).toBe(true);
     expectRefusal(
       commit(createSketchState("bounds"), "deep", [textBox("note", {
@@ -244,6 +245,8 @@ describe("version 2 text boxes", () => {
   // the version-2 shape the way an older backend stored it.
   function toVersion2(state: SketchState): Record<string, any> {
     const raw = JSON.parse(serializeSketchState(state));
+    // Version-2 states predate the revision log.
+    delete raw.revisionLog;
     raw.schemaVersion = 2;
     raw.document.schemaVersion = 2;
     const strip = (object: Record<string, unknown>) => {

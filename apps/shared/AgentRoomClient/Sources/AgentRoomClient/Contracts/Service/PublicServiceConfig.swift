@@ -16,6 +16,9 @@ public struct PublicServiceConfig: Codable, Hashable {
     /// Whether this backend serves repository `.sketch.json` editing. Optional
     /// so a backend that predates the field decodes as `nil`, read as unsupported.
     public var repositorySketches: Bool?
+    /// Whether this backend serves `GET /api/workspaces/:id/sketches`, sketch
+    /// history heads, and `sketchToolsAvailable`. Nil from an older backend.
+    public var sketchIndex: Bool?
     /// Managed-settings metadata keyed by setting name. Optional so a
     /// backend that predates the shared settings store still decodes.
     public var settings: [String: PublicManagedSetting]?
@@ -38,6 +41,7 @@ public struct PublicServiceConfig: Codable, Hashable {
         terminalEnabled: Bool?,
         sceneEngineEnabled: Bool? = nil,
         repositorySketches: Bool? = nil,
+        sketchIndex: Bool? = nil,
         settings: [String: PublicManagedSetting]? = nil,
         remoteSettingsAdmin: Bool? = nil
     ) {
@@ -47,6 +51,7 @@ public struct PublicServiceConfig: Codable, Hashable {
         self.terminalEnabled = terminalEnabled
         self.sceneEngineEnabled = sceneEngineEnabled
         self.repositorySketches = repositorySketches
+        self.sketchIndex = sketchIndex
         self.settings = settings
         self.remoteSettingsAdmin = remoteSettingsAdmin
     }

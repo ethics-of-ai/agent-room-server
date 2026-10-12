@@ -274,10 +274,11 @@ process restart, not power loss beyond the existing file-store behavior.
 The plan read is bearer-gated. `agent_plan_changed` carries only ids and a
 revision, is not written to durable audit, and dispatcher telemetry never
 records tool arguments or results. Plan text stays out of status snapshots and
-session lists. A runner's own tool activity can still carry plan tool
-arguments on the broadcast stream, as it can for any tool call; Claude Code's
-tool activity includes the call input. That exposure is the existing
-[broadcast gap](#security-model).
+session lists. On all four transports, the activity for any AgentRoom catalog
+tool (plan, sketch, or question) keeps the name and call id and drops
+arguments and results before it reaches `agent_turn_activity` and
+`/api/events`, so plan text and sketch geometry do not reach the broadcast
+stream through tool activity.
 
 ### Context compaction telemetry
 
@@ -839,8 +840,9 @@ backend contract.
 
 Repository sketches are ordinary workspace `.sketch.json` files, available
 without a runner. Every read and mutation requires bearer auth when configured.
-`repositorySketches: true` advertises the contract. No setting gates sketches,
-and no private sketch store exists in `STATE_DIR`.
+`repositorySketches: true` advertises the contract. No setting gates sketches.
+`STATE_DIR` holds no geometry: `sketch-repository` keeps history and receipts,
+and `sketch-index` keeps each workspace's list of sketches.
 
 The dedicated writer accepts only core-validated documents and bounds the final
 formatted UTF-8 bytes to 2 MiB. It enforces registered-workspace containment,
@@ -856,9 +858,20 @@ The repository document is the source of geometry. It contains no session or
 turn ids, receipts, proposals, or undo journals, and no session record points
 at it. Every request names the registered workspace and the relative path.
 Session deletion, workspace unregistration, and startup never delete repository
-geometry. Explicit workspace deletion remains the way to remove saved repository
-documents. A renamed or deleted file is refused at its old path, never located
-by guessing from its sketch id.
+geometry. Two things remove a saved repository document: explicit workspace
+deletion, and the agent delete tool under the rules in
+[Agent sketch tools](#agent-sketch-tools). An edit to a renamed or deleted
+file is refused at its old path, never redirected to a guessed path.
+
+`STATE_DIR/sketch-index/<sha256 of workspace id>.json` lists each workspace's
+sketch files: path, title, sketch id, revision, object count, last change, last
+actor kind, and the file's size, modification time, and inode. It holds no
+geometry or text. Only the list route, which needs read auth, and a session's
+own sketch tools read it, and an agent sees only its session's workspace. It
+can locate a file from its sketch id, so a copied file's shared id is
+ambiguous and the caller must name a path. Unregistering a workspace deletes
+its index file and never its sketches. The index rebuilds from a scan, so
+losing it loses nothing.
 
 Edits to one repository file run one at a time, and creation holds a
 workspace-wide lock while it probes names. Every edit requires revision plus a content
@@ -875,12 +888,14 @@ An explicit token-checked history reset discards auxiliary recovery evidence,
 never geometry. Failed persistence may follow publication; clients retry the
 same request id rather than applying another gesture.
 
-Repository content is human readable. Dedicated agent tools are absent, but
-ordinary workspace tools can read or modify repository documents just as they
-can diagrams.
+Repository content is human readable. Agents read and edit it through the
+sketch tools below, and ordinary workspace tools can still read or modify
+repository documents just as they can diagrams.
 
 REST edits derive the human actor and reject caller-supplied authorship.
-Repository requests accept no turn attribution. The core enforces geometry, batch, and history caps;
+Repository requests accept no turn attribution. Agent edits arrive only
+through a turn's tool binding, which supplies the agent actor, runner id, and
+turn id; nothing in the tool arguments can set them. The core enforces geometry, batch, and history caps;
 receipts retain 256 request ids. Retrying an evicted id returns
 `409 outcome_unknown`, requiring inspection and a new request id.
 
@@ -916,20 +931,83 @@ them are:
   unknown-kind object is present, so it cannot discard content the backend
   cannot edit. Undo restores the cleared objects.
 
-Sketches have no agent tools or turn binding. New `context.sketch` requests are
-refused before starting a turn; old transcript metadata remains readable. The generic Cordis relay remains available for native questions and
-still supplies no bearer token or HTTP route authority to the child.
+New `context.sketch` requests are refused before starting a turn; old
+transcript metadata remains readable. The generic Cordis relay supplies no
+bearer token or HTTP route authority to the child.
 
 `/api/events` carries only metadata invalidation: `sketch_document_changed`
-(ids, workspace-relative path, revision, transaction kind, actor kind, durable
-in the audit log). Strokes, labels, text, and captures
-never travel on the broadcast channel;
-clients re-read through the authenticated workspace routes. Native
-DeepSeek tool activities retain generic name/call-id lifecycle metadata but
-filter catalog-tool arguments, results, errors, and geometry before broadcast or
-logging. Retired sketch tool names remain redacted for older runtime events.
-There is no sketch WebSocket, shell route, or
-public tool callback route.
+(ids, workspace-relative path, revision, transaction kind, actor kind, and for
+an agent change its session and turn ids, durable in the audit log). Strokes,
+labels, text, and captures never travel on the broadcast channel; clients
+re-read through the authenticated workspace routes. Retired sketch tool names
+remain redacted for older runtime events. There is no sketch WebSocket, shell
+route, or public tool callback route.
+
+### Agent sketch tools
+
+Every built-in runner offers the sketch tools, with no setting to turn them
+on, because agents can already write `.sketch.json` files with their own file
+tools. The one exception is Codex on the `exec` protocol, which has no tool
+channel and so gets no AgentRoom tools
+([AgentRoom tools and dispatch](../engineering/RUNNERS.md#agentroom-tools-and-dispatch)). The tools add validation, history, and live updates, not new places to
+write. They follow these rules:
+
+- **One workspace.** A call resolves its sketch against the session's own
+  registered workspace's index entries, and reaches the file through the same
+  writer as the routes: containment, the suffix, protected names, symlink
+  refusal, and no new directories. A path, id, or title that fails any of
+  these, or names another workspace's file, is `unknown_sketch`.
+- **Read-only posture.** Every tool that changes files (create, edit,
+  history, rename, and delete) refuses when the runner's descriptor reports a
+  read-only posture (a Codex `read-only` sandbox) and when it cannot report one
+  at all, as on external ACP adapters. List and inspect stay available. DeepSeek reports `writable` in both composition modes. A managed
+  graph always runs `workspace-write`. A custom graph may be read-only, but
+  AgentRoom can't tell, and the backend writes the sketch file, so DeepSeek's
+  own sandbox never sees the edit. That gap is accepted because a custom graph
+  is already `bypassPermissions`-class.
+- **No approval step.** Like plan tools, sketch tools run as backend callbacks.
+  Under a posture that asks before the agent's own file edits (Claude Code
+  `default`, a Codex approval policy other than `never`), a sketch edit still
+  commits without asking. Every agent step is an ordinary undoable
+  transaction, and undo is the review.
+- **Live turns only.** A call from a turn that is no longer live gets the
+  tool's unavailable text and changes nothing.
+- **Confirmations.** Deleting a sketch file, and an edit that would empty a
+  sketch, wait for the person's explicit yes; anything else refuses. The
+  question is asked before any lock, so the person keeps drawing, and a sketch
+  that changed meanwhile is refused rather than applied to objects the person
+  never saw in the question. Deleting single objects asks nothing, and a
+  cleared sketch can be undone. The question's content and the refusal codes
+  are in [Sketch tools](../api/API.md#sketch-tools).
+- **Own steps only.** An agent undoes or redoes only the newest step when its
+  turn belongs to the calling session, checked under the file lock against
+  the stored turns, so it holds across a restart. The person's undo stays
+  global.
+- **Rename and delete.** Both keep the writer's containment, suffix,
+  protected-name, and symlink rules, and run under the workspace and file
+  locks. Both refuse a file whose identity changed since the sketch index last
+  read it, so a sketch changed outside AgentRoom since the agent's list is
+  refused until a list re-reads it. Rename claims
+  the new name create-only and moves the undo history with the file. Delete
+  removes the file's auxiliary history, so recovery can never recreate it.
+- **Concurrent edits.** An agent edit names the revision it read and is
+  checked against later transactions like a person's. The backend remembers,
+  in memory, the file version of each revision it showed a session, so an
+  external write is refused rather than overwritten. After a restart the agent
+  must inspect again before editing.
+- **Privacy.** Agent commits publish only `sketch_document_changed`, never
+  `workspace_file_written`, which the diagram tracker reads as a human write.
+  Sketch geometry in tool arguments and results follows the catalog tool
+  activity rule in [Thread plans](#thread-plans).
+
+Raw file writes stay possible. An agent's own file tools can still create,
+change, rename, or delete a `.sketch.json` file, which skips validation,
+history, and the revision check. Blocking that would need per-path filtering of
+every runner's file tools, which the runners do not offer consistently. The
+standing instruction tells agents to use the sketch tools. The person's next
+read reports the external change as a history reset, and the sketch index
+records it with no last actor, through a settled turn's git diff or the next
+scan.
 
 ## macOS supervision and updates
 

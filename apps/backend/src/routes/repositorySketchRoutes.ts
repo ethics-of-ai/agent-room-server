@@ -6,6 +6,7 @@ import { SketchServiceError } from "../sketch/sketchErrors";
 import { WorkspaceExplorerError } from "../workspace/WorkspaceExplorer";
 import { SKETCH_MAX_BATCH_BYTES, SKETCH_MAX_BATCH_OPERATIONS, sketchRequestIdSchema } from "../sketch/core";
 import { authorizedForRead } from "./readAuthorization";
+import { SKETCH_INDEX_SCAN_LIMIT, type SketchIndex } from "../sketch/index/SketchIndex";
 
 const edit = z.object({
   requestId: sketchRequestIdSchema,
@@ -19,7 +20,7 @@ const creation = z.object({ name: z.string().trim().min(1).max(120) }).strict();
 const workspaceParams = z.object({ workspaceId: z.string().min(1) });
 
 export async function registerRepositorySketchRoutes(app: FastifyInstance, deps: {
-  sketches: RepositorySketchService; config: ServiceConfig;
+  sketches: RepositorySketchService; config: ServiceConfig; index?: SketchIndex;
 }): Promise<void> {
   // Scoped plugin keeps validation/error handling local to these routes.
   await app.register(async (routes) => {
@@ -33,6 +34,18 @@ export async function registerRepositorySketchRoutes(app: FastifyInstance, deps:
       if ((error as { statusCode?: number }).statusCode === 413) return reply.code(413).send({ error: "Sketch request is too large" });
       return reply.code(503).send({ error: "Sketch storage is unavailable; retry the same request after recovery", code: "storage_unavailable" });
     });
+    if (deps.index) {
+      const index = deps.index;
+      // Rescans on every read, so files changed outside AgentRoom appear.
+      routes.get("/api/workspaces/:workspaceId/sketches", async (request) => {
+        const { workspaceId } = workspaceParams.parse(request.params);
+        const listed = await index.list(workspaceId);
+        return {
+          sketches: listed.entries.map(({ stat: _stat, fileVersion: _fileVersion, ...entry }) => entry),
+          total: listed.total, truncated: listed.truncated, limit: SKETCH_INDEX_SCAN_LIMIT
+        };
+      });
+    }
     const workspaceBase = "/api/workspaces/:workspaceId/sketch";
     routes.post(workspaceBase, async (request, reply) => {
       const { workspaceId } = workspaceParams.parse(request.params);
