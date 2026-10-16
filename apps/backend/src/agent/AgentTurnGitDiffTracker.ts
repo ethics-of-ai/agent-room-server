@@ -16,9 +16,21 @@ export interface AgentTurnGitDiff {
 
 interface TurnGitBaseline {
   workspaceId: string;
+  /**
+   * The commit HEAD named at turn start, so settlement can see what the turn
+   * committed. Absent on an unborn branch: the range then starts at the empty tree.
+   */
+  head?: string;
   files: Map<string, LocalWorkspaceGitChangedFile>;
   truncated: boolean;
 }
+
+interface CommittedChanges {
+  files: LocalWorkspaceGitChangedFile[];
+  truncated: boolean;
+}
+
+const noCommittedChanges: CommittedChanges = { files: [], truncated: false };
 
 /**
  * Derives a per-turn file change summary from workspace Git status for runners
@@ -27,13 +39,18 @@ interface TurnGitBaseline {
  * read-only Git status before the runner starts and diffs it against a second
  * read at settlement; the delta becomes the turn's `coding_diff_updated`.
  *
- * The comparison is working-tree state against HEAD at two moments, which sets
- * its honest limits: work the turn commits or reverts to HEAD content leaves no
- * status entry to report, and any concurrent change to the workspace (a human
- * editor write, another session's turn) is attributed to this turn — the same
- * concurrency caveat the bounded file write already documents. Both reads go
- * through the registry's fixed Git invocations; a read failure only means the
- * turn settles without a diff, never that the turn fails.
+ * The comparison is working-tree state against HEAD at two moments. Work the
+ * turn commits leaves no status entry, so the tracker also records HEAD at turn
+ * start and, when HEAD moved, adds what the commits from there (or from the
+ * empty tree, for a turn that started on an unborn branch) changed. That
+ * range also covers a branch switch: it is the tree difference between the
+ * two commits, whatever the turn did to get there. The honest limits that
+ * remain: work reverted to HEAD content has nothing to report, and any
+ * concurrent change to the workspace (a human editor write, another session's
+ * turn) is attributed to this turn — the same concurrency caveat the bounded
+ * file write already documents. Every read goes through the registry's fixed
+ * Git invocations; a read failure only means the turn settles without a diff,
+ * or with an incomplete one, never that the turn fails.
  */
 export class AgentTurnGitDiffTracker {
   private readonly baselines = new Map<string, TurnGitBaseline>();
@@ -41,6 +58,8 @@ export class AgentTurnGitDiffTracker {
   constructor(
     private readonly deps: {
       gitStatus(workspaceId: string): Promise<LocalWorkspaceGitStatus>;
+      gitHeadCommit(workspaceId: string): Promise<string | undefined>;
+      gitCommittedChanges(workspaceId: string, fromCommit: string | undefined, toCommit: string): Promise<CommittedChanges>;
     }
   ) {}
 
@@ -48,8 +67,10 @@ export class AgentTurnGitDiffTracker {
     try {
       const status = await this.deps.gitStatus(workspaceId);
       if (!status.isRepository) return;
+      const head = await this.deps.gitHeadCommit(workspaceId);
       this.baselines.set(turnId, {
         workspaceId,
+        ...(head ? { head } : {}),
         files: new Map(status.files.map((file) => [file.path, file])),
         truncated: status.truncated
       });
@@ -72,8 +93,7 @@ export class AgentTurnGitDiffTracker {
     try {
       const status = await this.deps.gitStatus(baseline.workspaceId);
       if (!status.isRepository) return undefined;
-      const truncated = baseline.truncated || status.truncated;
-      const files = status.files.flatMap((file) => {
+      const working = status.files.flatMap((file) => {
         const before = baseline.files.get(file.path) ??
           (file.oldPath ? baseline.files.get(file.oldPath) : undefined);
         // A truncated baseline may have omitted a file that was already dirty,
@@ -86,6 +106,9 @@ export class AgentTurnGitDiffTracker {
         // attribute lines the turn did not write.
         return [diffFile(file, { withCounts: false })];
       });
+      const committed = await this.committedSince(baseline);
+      const truncated = baseline.truncated || status.truncated || committed.truncated;
+      const files = withCommittedFiles(committed.files, working, baseline);
       // An empty list is conclusive only when both bounded status reads were
       // complete. Otherwise publish a truncated, file-less summary so clients
       // do not mistake the omitted portion for a clean turn.
@@ -99,6 +122,42 @@ export class AgentTurnGitDiffTracker {
   releaseTurn(turnId: string): void {
     this.baselines.delete(turnId);
   }
+
+  // A failed read cannot prove the range empty, so it marks the summary
+  // incomplete rather than dropping the turn's commits silently.
+  private async committedSince(baseline: TurnGitBaseline): Promise<CommittedChanges> {
+    try {
+      const head = await this.deps.gitHeadCommit(baseline.workspaceId);
+      if (!head || head === baseline.head) return noCommittedChanges;
+      return await this.deps.gitCommittedChanges(baseline.workspaceId, baseline.head, head);
+    } catch {
+      return { files: [], truncated: true };
+    }
+  }
+}
+
+/**
+ * Puts the committed files first, in range order, then the working-tree delta
+ * for every other path. Range counts are kept only for a file that was clean at
+ * turn start and has no further uncommitted edit; otherwise they would count
+ * lines the turn did not write, or miss lines it did.
+ */
+function withCommittedFiles(
+  committed: LocalWorkspaceGitChangedFile[],
+  working: AgentTurnGitDiffFile[],
+  baseline: TurnGitBaseline
+): AgentTurnGitDiffFile[] {
+  if (committed.length === 0) return working;
+  const workingByPath = new Map(working.map((file) => [file.path, file]));
+  const merged = committed.map((file) => {
+    const uncommitted = workingByPath.get(file.path);
+    workingByPath.delete(file.path);
+    // A file the turn committed and then deleted is gone; say so.
+    if (uncommitted?.status === "deleted") return uncommitted;
+    const withCounts = !uncommitted && !baseline.truncated && !baseline.files.has(file.path);
+    return diffFile(file, { withCounts });
+  });
+  return [...merged, ...workingByPath.values()];
 }
 
 function sameChange(before: LocalWorkspaceGitChangedFile, after: LocalWorkspaceGitChangedFile): boolean {

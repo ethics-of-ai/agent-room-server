@@ -2384,9 +2384,38 @@ clients should read `runner`. Image attachments are supported for
 described under turns below.
 
 `gitBranch` is optional. If omitted, the backend records the workspace's
-current branch when the session is created. Existing sessions keep that branch
-association, and turn execution switches the registered workspace back to the
-session branch before invoking the runner when needed.
+current branch when the session is created. Before invoking the runner, turn
+execution switches the registered workspace back to the session branch when
+needed, so threads that share a workspace each run on their own branch.
+
+The session branch follows the agent. When a turn completes, fails, or is
+stopped on a different branch than the session's, the backend records that
+branch as the session's `gitBranch` and emits `workspace_branch_changed`
+(`workspaceId`, `path`, optional `previousBranch`, `branch`). The event
+precedes the turn's terminal `coding_*` event, `coding_turn_cancelled` included,
+and the session takes no new turn until then. The next turn therefore stays on
+the branch the agent chose, even one sent the moment a stop lands, and including
+when the agent left uncommitted work there. A turn that was running when the backend stopped follows the branch at
+startup, just before the restart marks it failed. A turn that ends on a
+detached HEAD, or on a branch with no commit yet, keeps the previous session
+branch. A Git read failure leaves the session branch unchanged and never fails
+the turn.
+
+A turn follows only when nothing but its own agent could have moved the
+checkout. Every workspace registered inside one Git working tree shares its
+HEAD, a repository root and its subdirectories alike; a linked worktree has its
+own. Threads in one checkout take turns checking it out, so a turn keeps its
+session branch if another session's turn in the same checkout runs at any point
+during it, whether that turn started earlier, is still running, or has already
+settled. The same applies when AgentRoom announces a `workspace_branch_changed`
+for a workspace in the checkout before the turn settles, such as a person's
+branch switch or create through the Git routes. A turn in another repository
+never blocks a follow. The cost is that an
+agent which did switch branches during such an overlap is not followed, and its
+next turn restores the old pin.
+After a restart, a checkout with two interrupted turns follows neither. A
+`run_succeeded` or `run_failed` that a runner delivers after the turn was
+stopped never moves the session branch; the stop already followed it once.
 
 ### Turns and token usage
 
@@ -3366,13 +3395,22 @@ the complete turn change set. For Codex the event relays the app-server's own
 `turn/diff/updated` stream during the turn. Claude Code reports no diff of its
 own (the SDK stream has no such notification), so the backend derives one at
 turn settlement instead: it snapshots the workspace's fixed read-only Git
-status before the runner starts, re-reads it when the turn completes, fails, or
-is stopped, and emits the files whose status changed — just before the
-turn's terminal `coding_*` event, the order Codex diffs arrive in. Per-file
-`additions`/`deletions` are included only for files clean at turn start (a
-pre-dirty file's vs-HEAD counts would attribute lines the turn did not write),
-`truncated` also reflects either status read's 200-file cap, and the delta
-inherits Git status's limits: work the turn commits or reverts to HEAD content
+status and HEAD commit before the runner starts, re-reads them when the turn
+completes, fails, or is stopped, and emits the files whose status changed — just
+before the turn's terminal `coding_*` event, the order Codex diffs arrive in.
+When HEAD moved, the summary also names the files that differ between the
+turn-start commit and the new HEAD, so work the agent committed, including on a
+branch it switched to, is reported. A turn that starts on an unborn branch
+compares against the empty tree, so a repository's first commit lists every
+file it adds. That range is the tree difference between
+the two commits, so a switch to an unrelated existing branch reports everything
+that differs between the branches. Renames in the range appear as a deletion and
+an addition. Per-file `additions`/`deletions` are included only for files clean
+at turn start (a pre-dirty file's vs-HEAD counts would attribute lines the turn
+did not write), and a committed file that still has uncommitted edits carries no
+counts either. `truncated` also reflects the 200-file cap of either status read
+or of the committed range, and is set when the committed range could not be
+read. The delta keeps Git status's other limits: work reverted to HEAD content
 leaves no status entry to report, and a concurrent change to the workspace (a
 client editor write, another session's turn) is attributed to the settling
 turn — the same caveat documented for the bounded file write. An empty delta

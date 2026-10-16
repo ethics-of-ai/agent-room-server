@@ -1,4 +1,4 @@
-import type { LocalWorkspaceGitStatus, LocalWorkspaceGitSnapshot } from "../domain/models";
+import type { LocalWorkspaceGitChangedFile, LocalWorkspaceGitStatus, LocalWorkspaceGitSnapshot } from "../domain/models";
 import { GitHistoryReader } from "./git/historyReads";
 import {
   gitCommandEnv,
@@ -20,6 +20,7 @@ import {
   gitStatusFiles,
   isStagedEntry,
   maxGitStatusFiles,
+  parseNameStatus,
   parsePorcelainStatus,
   stripTrailingLineEnding,
   workspaceRelativeGitPath,
@@ -66,6 +67,20 @@ export interface GitStagedPath {
   withinWorkspace: boolean;
 }
 
+/** What the commits after a turn-start commit changed inside the registered subtree. */
+export interface GitCommittedChanges {
+  files: LocalWorkspaceGitChangedFile[];
+  truncated: boolean;
+}
+
+const fullCommitIdPattern = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+// Git knows the empty tree in every repository without storing it, under the
+// SHA-1 or SHA-256 id that matches the repository's object format.
+const emptyTreeIds = {
+  40: "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+  64: "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"
+} as const;
+
 export interface GitCommitResult {
   commit: string;
   subject: string;
@@ -103,6 +118,41 @@ export class LocalWorkspaceGit {
 
   async currentBranch(workspacePath: string): Promise<string | undefined> {
     return optionalGitValue(await this.tryGit(workspacePath, ["branch", "--show-current"]));
+  }
+
+  /** The full id of the commit HEAD names; undefined on an unborn branch or outside a repository. */
+  async headCommit(workspacePath: string): Promise<string | undefined> {
+    return optionalGitValue(await this.tryGit(workspacePath, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]));
+  }
+
+  /**
+   * The Git directory that holds this checkout's HEAD, which every workspace
+   * registered inside the checkout shares and a linked worktree does not.
+   * Undefined outside a repository.
+   */
+  async checkoutGitDir(workspacePath: string): Promise<string | undefined> {
+    return optionalGitValue(await this.tryGit(workspacePath, ["rev-parse", "--absolute-git-dir"]));
+  }
+
+  // Fixed read of what the commits from `fromCommit` to `toCommit` changed inside
+  // the registered subtree, capped like `status()`. Both are only ever ids
+  // `headCommit` returned, never caller text, and are checked as such anyway.
+  // With no `fromCommit` (the turn started on an unborn branch) the range starts
+  // at the empty tree, so a repository's first commit lists every file it adds.
+  // Naming the end commit keeps both reads on one range if HEAD moves between
+  // them, and the trailing `--` keeps a tracked file from being read as a
+  // revision. Renames split into a delete and an add so the two outputs pair
+  // path for path. A failed read throws: the caller cannot treat it as empty.
+  async committedChanges(workspacePath: string, fromCommit: string | undefined, toCommit: string): Promise<GitCommittedChanges> {
+    if (!fullCommitIdPattern.test(toCommit) || (fromCommit !== undefined && !fullCommitIdPattern.test(fromCommit))) {
+      throw new Error("Expected a full commit id");
+    }
+    const from = fromCommit ?? emptyTreeIds[toCommit.length as keyof typeof emptyTreeIds];
+    const range = ["--no-renames", "--no-ext-diff", "--no-textconv", "-z", "--relative", from, toCommit, "--"];
+    const nameStatus = await this.runGit(workspacePath, ["diff", "--name-status", ...range], gitCommandEnv());
+    const numstat = await this.runGit(workspacePath, ["diff", "--numstat", ...range], gitCommandEnv());
+    const files = gitStatusFiles(parseNameStatus(nameStatus.stdout), "", numstat.stdout);
+    return { files: files.slice(0, maxGitStatusFiles), truncated: files.length > maxGitStatusFiles };
   }
 
   /** One-subprocess repository check, so an operation can reject a non-repository cleanly. */

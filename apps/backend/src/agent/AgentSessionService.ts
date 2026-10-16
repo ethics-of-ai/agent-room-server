@@ -31,7 +31,7 @@ import {
 } from "../protocol/coding/events";
 import type { LocalWorkspaceRegistry } from "../workspace/LocalWorkspaceRegistry";
 import { AgentBackgroundWork } from "./AgentBackgroundWork";
-import { checkoutSessionBranch, validateRunnerInputParts } from "./sessionRunnerSupport";
+import { SessionBranchFollower, validateRunnerInputParts } from "./sessionRunnerSupport";
 import { AgentSessionMessageStore } from "./AgentSessionMessageStore";
 import { AgentTurnEventApplier, type OutstandingQuestionRequest } from "./AgentTurnEventApplier";
 import { AgentTurnGitDiffTracker } from "./AgentTurnGitDiffTracker";
@@ -75,8 +75,8 @@ export class AgentSessionService {
   private readonly runnerEvents: AgentTurnEventApplier;
   private readonly background: AgentBackgroundWork;
   private readonly turnGitDiffs: AgentTurnGitDiffTracker;
+  private readonly branches: SessionBranchFollower;
   private readonly cancelledTurnIds = new Set<string>();
-  private readonly countedCancelledTurnIds = new Set<string>();
   /** Hydrated non-restorable sessions that must refuse a fresh conversation. */
   private readonly uncontinuableSessionIds = new Set<string>();
   /** Native ids awaiting their one-time post-hydration resume check. */
@@ -130,26 +130,26 @@ export class AgentSessionService {
         return seed;
       }
     });
-    this.turnGitDiffs = new AgentTurnGitDiffTracker({
-      gitStatus: (workspaceId) => deps.registry.gitStatus(workspaceId)
-    });
+    this.turnGitDiffs = new AgentTurnGitDiffTracker(deps.registry);
+    this.branches = new SessionBranchFollower({ ...deps, sessions: this.sessions, persist: (sessionId) => this.persist(sessionId) });
     this.background = new AgentBackgroundWork({ sessions: this.sessions, eventBus: deps.eventBus,
       openTurn: (session, opening) => this.openTurn(session, opening), consume: (session, turn, events) => void this.consumeTurn(session, turn, events) });
     for (const runner of Object.values(deps.runners)) runner?.watchBackgroundWork?.(this.background.listener);
   }
 
-  /** Hydrate before routes open, fail interrupted turns, and seed verified resume ids. */
+  /** Hydrate before routes open, settle and fail interrupted turns, and seed verified resume ids. */
   async initialize(): Promise<void> {
     const store = this.deps.durableSessions;
     if (!store) return;
     const inventory = await store.initialize();
+    this.branches.noteInterruptedTurns(inventory.documents);
     for (const document of inventory.documents) {
-      this.hydrate(document);
+      await this.hydrate(document);
     }
     logger.info({ sessions: inventory.documents.length }, "Agent sessions restored from the durable store");
   }
 
-  private hydrate(document: DurableAgentSessionDocument): void {
+  private async hydrate(document: DurableAgentSessionDocument): Promise<void> {
     // Unknown persisted runner ids stay readable; requireRunner refuses use.
     const session = document.session as AgentSession;
     if (this.sessions.has(session.id)) return;
@@ -163,6 +163,7 @@ export class AgentSessionService {
 
     const interruptedTurns = document.turns.filter((turn) => turn.status === "running");
     for (const turn of interruptedTurns) {
+      await this.settleTurnWorkspace(session, turn);
       this.failTurn(session, turn, BACKEND_RESTARTED_TURN_ERROR, { countMetric: false });
     }
     if (session.activeTurnId && !this.turns.has(session.activeTurnId)) {
@@ -174,7 +175,6 @@ export class AgentSessionService {
       session.updatedAt = new Date().toISOString();
       this.persist(session.id);
     }
-    const interrupted = interruptedTurns.length > 0;
 
     const nativeSessionId = session.runner?.nativeSessionId;
     if (!nativeSessionId) return;
@@ -186,7 +186,7 @@ export class AgentSessionService {
     this.deps.runners[session.runnerKind]?.rememberResumableId?.({
       sessionId: session.id,
       nativeSessionId,
-      interrupted,
+      interrupted: interruptedTurns.length > 0,
       ...(document.nativeToolRegistration?.nativeSessionId === nativeSessionId ? { registeredToolNames: document.nativeToolRegistration.names } : {})
     });
   }
@@ -263,7 +263,7 @@ export class AgentSessionService {
       throw new AgentSessionError("Workspace is not registered", 404);
     }
     if (input.gitBranch?.trim()) {
-      const result = await checkoutSessionBranch(this.deps, workspace.id, input.gitBranch.trim());
+      const result = await this.branches.checkout(workspace.id, input.gitBranch.trim());
       workspace = result.workspace;
     }
 
@@ -318,7 +318,7 @@ export class AgentSessionService {
       throw new AgentSessionError("Workspace is not registered", 404);
     }
     if (session.gitBranch) {
-      await checkoutSessionBranch(this.deps, session.workspaceId, session.gitBranch);
+      await this.branches.checkout(session.workspaceId, session.gitBranch);
     }
 
     const runner = this.requireRunner(session.runnerKind);
@@ -371,6 +371,7 @@ export class AgentSessionService {
       id, sessionId: session.id, status: "running", startedAt: now, inputTokens: 0, outputTokens: 0, totalTokens: 0, ...(trigger ? { trigger } : {})
     };
     this.turns.set(turn.id, turn);
+    this.branches.beginTurn(session.workspaceId, turn);
     this.messages.append({ sessionId: session.id, turnId: turn.id, ...message, status: "sent", at: now });
     session.status = "running";
     session.activeTurnId = turn.id;
@@ -393,7 +394,7 @@ export class AgentSessionService {
     if (turn) {
       // A stopped turn's partial writes are still real work; report them like
       // Codex would have through its in-turn diff stream.
-      await this.publishTurnGitDiff(session, turn);
+      await this.settleTurnWorkspace(session, turn);
       this.completeCancelledTurn(session, turn, { publishEvents: true });
     } else {
       const now = new Date().toISOString();
@@ -518,7 +519,6 @@ export class AgentSessionService {
       if (turn.sessionId === sessionId) {
         this.turns.delete(turnId);
         this.cancelledTurnIds.delete(turnId);
-        this.countedCancelledTurnIds.delete(turnId);
         this.telemetry.delete(turnId);
         this.runnerEvents.releaseTurn(turnId);
         this.turnGitDiffs.releaseTurn(turnId);
@@ -565,7 +565,7 @@ export class AgentSessionService {
         if (event.type === "run_succeeded" || event.type === "run_failed") {
           // Before the terminal event applies, so the diff precedes
           // coding_turn_completed/failed — the order Codex diffs arrive in.
-          await this.publishTurnGitDiff(session, turn);
+          await this.settleTurnWorkspace(session, turn);
         }
         this.runnerEvents.apply(session, turn, event);
         // A settle frees the session in this same tick, so no person's turn can take it first.
@@ -580,9 +580,10 @@ export class AgentSessionService {
       // parser and hanging the client's streaming spinner open.
       if (this.cancelledTurnIds.has(turn.id) || turn.status === "cancelled") {
         this.runnerEvents.releaseTurn(turn.id);
+        await this.branches.follow(session, turn);
       } else {
         this.runnerEvents.finalizeTurn(session, turn);
-        await this.publishTurnGitDiff(session, turn);
+        await this.settleTurnWorkspace(session, turn);
       }
       this.failTurn(session, turn, message);
     } finally {
@@ -597,7 +598,6 @@ export class AgentSessionService {
       }
       if (turn.status !== "running") {
         this.cancelledTurnIds.delete(turn.id);
-        this.countedCancelledTurnIds.delete(turn.id);
       }
       this.background.openWaitingTurn(session);
     }
@@ -745,6 +745,8 @@ export class AgentSessionService {
     this.endTurnTools(session, turn, "cancelled");
     this.runnerEvents.releaseTurn(turn.id);
     const now = new Date().toISOString();
+    // The stop and the runner's own end may both complete the turn; count it once.
+    const firstCompletion = turn.status !== "cancelled";
     turn.status = "cancelled";
     turn.completedAt = turn.completedAt ?? now;
     turn.error = undefined;
@@ -758,9 +760,8 @@ export class AgentSessionService {
     }
     session.updatedAt = now;
     this.persist(session.id);
-    if (!this.countedCancelledTurnIds.has(turn.id)) {
+    if (firstCompletion) {
       this.cancelledTurns += 1;
-      this.countedCancelledTurnIds.add(turn.id);
       this.telemetry.logTurnTiming(session, turn, "cancelled");
     }
     if (options.publishEvents) {
@@ -773,21 +774,18 @@ export class AgentSessionService {
     }
   }
 
-  // Emits the settle-time Git delta as the turn's coding_diff_updated. No-op
-  // when the turn holds no baseline (non-claude_code turns, a non-Git
-  // workspace, an already-settled turn) or the delta is empty; a Git read
-  // failure inside the tracker never fails or delays the turn's settlement
-  // beyond the read itself.
-  private async publishTurnGitDiff(session: AgentSession, turn: AgentSessionTurn): Promise<void> {
-    const diff = await this.turnGitDiffs.settleTurn(turn.id);
+  // Before a turn's terminal event, a restart's included: re-pin the session to
+  // the branch the turn ended on, then emit the settle-time Git delta if the turn
+  // still holds a baseline. settleTurn takes it before its first await. A stop
+  // and the runner's own end both settle here before they free the session, so
+  // a turn that starts the moment the stop lands runs on the followed pin.
+  private async settleTurnWorkspace(session: AgentSession, turn: AgentSessionTurn): Promise<void> {
+    const settlingDiff = this.turnGitDiffs.settleTurn(turn.id);
+    await this.branches.follow(session, turn);
+    const diff = await settlingDiff;
     if (!diff || !this.sessions.has(session.id)) return;
-    this.publishCodingEvent(codingDiffUpdatedEvent({
-      sessionId: session.id,
-      turnId: turn.id,
-      runnerKind: session.runnerKind,
-      files: diff.files,
-      ...(diff.truncated ? { truncated: true } : {})
-    }));
+    this.publishCodingEvent(codingDiffUpdatedEvent({ sessionId: session.id, turnId: turn.id, runnerKind: session.runnerKind,
+      files: diff.files, ...(diff.truncated ? { truncated: true } : {}) }));
   }
 
   private publishCodingEvent(candidate: CodingAgentEventCandidate | undefined): void {

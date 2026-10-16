@@ -660,6 +660,22 @@ Git status is read-only, bearer-gated when configured, and capped at 200 changed
 file summaries. Branch switch accepts an existing local branch only, uses fixed
 `git switch`, and refuses a dirty workspace.
 
+Turn settlement reads the current branch, the HEAD commit, and the files changed
+between the turn-start commit and that HEAD commit through fixed read-only argv.
+When another session's turn or an announced branch change touched a different
+workspace during the turn, a fixed `git rev-parse --absolute-git-dir` read of
+each workspace involved tells whether they share the turn's checkout.
+The range read uses only the two full commit ids the backend itself read,
+checked as such. When the turn started on an unborn branch, Git's fixed
+empty-tree id for the repository's hash format stands in for the first. The
+read ends with `--` so no path is parsed as a revision, disables
+external diff and text conversion, and uses `--relative` to stay inside the
+registered subtree. These reads publish only the branch name and
+the bounded file summary already described for
+[`coding_diff_updated`](../api/API.md#broadcast-websocket). Following the agent's
+branch changes which branch the next turn restores. It never switches branches
+itself.
+
 The only mutating Git operations are stage, unstage, discard, commit, fetch,
 fast-forward-only pull, push, and branch create. They are bearer-gated fixed argv
 calls through `execFile`, never a shell. Callers cannot supply flags, remotes,

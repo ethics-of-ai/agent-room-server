@@ -17,6 +17,7 @@ import {
   LocalWorkspaceGit,
   type GitBlobExecutor,
   type GitCommandExecutor,
+  type GitCommittedChanges,
   type GitFileAtHeadResult,
   type GitListFilesResult
 } from "./LocalWorkspaceGit";
@@ -121,6 +122,29 @@ export class LocalWorkspaceRegistry {
   async gitStatus(workspaceId: string): Promise<LocalWorkspaceGitStatus> {
     const workspace = await this.requireWorkspace(workspaceId);
     return this.git.status(workspace.id, workspace.path);
+  }
+
+  // The reads below let a turn settle against the repository as the agent left
+  // it: the branch it ended on, what it committed since turn start, and which
+  // registered workspaces share its checkout.
+  async gitCurrentBranch(workspaceId: string): Promise<string | undefined> {
+    const workspace = await this.requireWorkspace(workspaceId);
+    return this.git.currentBranch(workspace.path);
+  }
+
+  async gitHeadCommit(workspaceId: string): Promise<string | undefined> {
+    const workspace = await this.requireWorkspace(workspaceId);
+    return this.git.headCommit(workspace.path);
+  }
+
+  async gitCommittedChanges(workspaceId: string, fromCommit: string | undefined, toCommit: string): Promise<GitCommittedChanges> {
+    const workspace = await this.requireWorkspace(workspaceId);
+    return this.git.committedChanges(workspace.path, fromCommit, toCommit);
+  }
+
+  async gitCheckoutDir(workspaceId: string): Promise<string | undefined> {
+    const workspace = await this.requireWorkspace(workspaceId);
+    return this.git.checkoutGitDir(workspace.path);
   }
 
   // Fixed read-only `git cat-file` lookup of a file's HEAD blob. The relative path

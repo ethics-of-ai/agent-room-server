@@ -27,16 +27,55 @@ function gitStatus(
   };
 }
 
-function trackerReturning(statuses: LocalWorkspaceGitStatus[]): AgentTurnGitDiffTracker {
+interface CommitReads {
+  /** HEAD at turn start, then at settlement; a single entry means HEAD never moved. */
+  heads?: (string | undefined)[];
+  committed?: { files: LocalWorkspaceGitChangedFile[]; truncated: boolean } | Error;
+  /** Receives each committed read's start and end commit. */
+  ranges?: Array<[string | undefined, string]>;
+}
+
+const noCommitReads = {
+  async gitHeadCommit(): Promise<string | undefined> {
+    return undefined;
+  },
+  async gitCommittedChanges(): Promise<{ files: LocalWorkspaceGitChangedFile[]; truncated: boolean }> {
+    throw new Error("HEAD never moved, so no committed read is expected");
+  }
+};
+
+function trackerReturning(statuses: LocalWorkspaceGitStatus[], commits: CommitReads = {}): AgentTurnGitDiffTracker {
   let reads = 0;
+  let headReads = 0;
   return new AgentTurnGitDiffTracker({
     async gitStatus() {
       const status = statuses[Math.min(reads, statuses.length - 1)];
       reads += 1;
       if (!status) throw new Error("no status configured");
       return status;
+    },
+    async gitHeadCommit() {
+      const heads = commits.heads ?? ["head-1"];
+      const head = heads[Math.min(headReads, heads.length - 1)];
+      headReads += 1;
+      return head;
+    },
+    async gitCommittedChanges(_workspaceId, fromCommit, toCommit) {
+      commits.ranges?.push([fromCommit, toCommit]);
+      if (commits.committed instanceof Error) throw commits.committed;
+      if (!commits.committed) throw new Error("no committed changes configured");
+      return commits.committed;
     }
   });
+}
+
+function committedFile(
+  path: string,
+  status: LocalWorkspaceGitChangedFile["status"],
+  additions: number,
+  deletions: number
+): LocalWorkspaceGitChangedFile {
+  return { path, status, staged: true, unstaged: false, additions, deletions };
 }
 
 describe("agent turn git diff tracker", () => {
@@ -116,9 +155,8 @@ describe("agent turn git diff tracker", () => {
   });
 
   it("does not report files that disappeared from status during the turn", async () => {
-    // A file reverted to HEAD content, or committed by the turn, has no status
-    // entry left to attribute; reporting it would need a status the working
-    // tree no longer supports.
+    // A file reverted to HEAD content has no status entry left to attribute;
+    // reporting it would need a status the working tree no longer supports.
     const tracker = trackerReturning([
       gitStatus([{ path: "src/app.ts", status: "modified", staged: false, unstaged: true, additions: 4, deletions: 1 }]),
       gitStatus([])
@@ -184,6 +222,7 @@ describe("agent turn git diff tracker", () => {
 
   it("swallows status read failures on both sides", async () => {
     const failing = new AgentTurnGitDiffTracker({
+      ...noCommitReads,
       async gitStatus(): Promise<LocalWorkspaceGitStatus> {
         throw new Error("git unavailable");
       }
@@ -193,6 +232,7 @@ describe("agent turn git diff tracker", () => {
 
     let reads = 0;
     const failingAtSettle = new AgentTurnGitDiffTracker({
+      ...noCommitReads,
       async gitStatus() {
         reads += 1;
         if (reads > 1) throw new Error("git unavailable");
@@ -201,5 +241,121 @@ describe("agent turn git diff tracker", () => {
     });
     await failingAtSettle.beginTurn("turn-2", workspaceId);
     expect(await failingAtSettle.settleTurn("turn-2")).toBeUndefined();
+  });
+
+  it("reports the files a turn committed when HEAD moved", async () => {
+    const ranges: Array<[string, string]> = [];
+    const tracker = trackerReturning([gitStatus([]), gitStatus([])], {
+      heads: ["head-1", "head-2"],
+      committed: { files: [committedFile("README.md", "modified", 1, 0)], truncated: false },
+      ranges
+    });
+    await tracker.beginTurn("turn-1", workspaceId);
+
+    expect(await tracker.settleTurn("turn-1")).toEqual({
+      files: [{ path: "README.md", status: "modified", additions: 1, deletions: 0 }],
+      truncated: false
+    });
+    // The range ends at the HEAD settlement read, not at whatever HEAD names by the diff.
+    expect(ranges).toEqual([["head-1", "head-2"]]);
+  });
+
+  it("merges committed and still-dirty work, without counts for a file in both", async () => {
+    const tracker = trackerReturning([
+      gitStatus([]),
+      gitStatus([{ path: "src/app.ts", status: "modified", staged: false, unstaged: true, additions: 2, deletions: 0 }])
+    ], {
+      heads: ["head-1", "head-2"],
+      committed: {
+        files: [committedFile("src/app.ts", "modified", 5, 1), committedFile("src/new.ts", "added", 3, 0)],
+        truncated: false
+      }
+    });
+    await tracker.beginTurn("turn-1", workspaceId);
+
+    expect(await tracker.settleTurn("turn-1")).toEqual({
+      files: [
+        { path: "src/app.ts", status: "modified" },
+        { path: "src/new.ts", status: "added", additions: 3, deletions: 0 }
+      ],
+      truncated: false
+    });
+  });
+
+  it("drops counts for a committed file that was already dirty at turn start", async () => {
+    // The commit swept the pre-turn edits in with the turn's own, so its
+    // range counts would attribute lines the turn did not write.
+    const tracker = trackerReturning([
+      gitStatus([{ path: "src/app.ts", status: "modified", staged: false, unstaged: true, additions: 2, deletions: 0 }]),
+      gitStatus([])
+    ], {
+      heads: ["head-1", "head-2"],
+      committed: { files: [committedFile("src/app.ts", "modified", 6, 1)], truncated: false }
+    });
+    await tracker.beginTurn("turn-1", workspaceId);
+
+    expect(await tracker.settleTurn("turn-1")).toEqual({
+      files: [{ path: "src/app.ts", status: "modified" }],
+      truncated: false
+    });
+  });
+
+  it("carries a capped committed read into the summary's truncated flag", async () => {
+    const tracker = trackerReturning([gitStatus([]), gitStatus([])], {
+      heads: ["head-1", "head-2"],
+      committed: { files: [committedFile("README.md", "modified", 1, 0)], truncated: true }
+    });
+    await tracker.beginTurn("turn-1", workspaceId);
+
+    expect(await tracker.settleTurn("turn-1")).toEqual({
+      files: [{ path: "README.md", status: "modified", additions: 1, deletions: 0 }],
+      truncated: true
+    });
+  });
+
+  it("marks the summary truncated when the committed read fails", async () => {
+    const tracker = trackerReturning([
+      gitStatus([]),
+      gitStatus([{ path: "notes.txt", status: "untracked", staged: false, unstaged: true }])
+    ], {
+      heads: ["head-1", "head-2"],
+      committed: new Error("git unavailable")
+    });
+    await tracker.beginTurn("turn-1", workspaceId);
+
+    expect(await tracker.settleTurn("turn-1")).toEqual({
+      files: [{ path: "notes.txt", status: "added" }],
+      truncated: true
+    });
+  });
+
+  it("reports a repository's first commit, read from the empty tree", async () => {
+    const ranges: Array<[string | undefined, string]> = [];
+    const tracker = trackerReturning([
+      gitStatus([{ path: "README.md", status: "untracked", staged: false, unstaged: true }]),
+      gitStatus([])
+    ], {
+      heads: [undefined, "head-1"],
+      committed: { files: [committedFile("README.md", "added", 1, 0)], truncated: false },
+      ranges
+    });
+    await tracker.beginTurn("turn-1", workspaceId);
+
+    // README.md was already untracked at turn start, so its counts are not the turn's.
+    expect(await tracker.settleTurn("turn-1")).toEqual({
+      files: [{ path: "README.md", status: "added" }],
+      truncated: false
+    });
+    expect(ranges).toEqual([[undefined, "head-1"]]);
+  });
+
+  it("reads no committed changes when HEAD did not move", async () => {
+    const tracker = trackerReturning([gitStatus([]), gitStatus([])], {
+      heads: ["head-1"],
+      committed: { files: [committedFile("README.md", "modified", 1, 0)], truncated: false }
+    });
+    await tracker.beginTurn("turn-1", workspaceId);
+
+    expect(await tracker.settleTurn("turn-1")).toBeUndefined();
   });
 });

@@ -64,6 +64,23 @@ export function parsePorcelainStatus(output: string): GitChangedEntry[] {
   return files;
 }
 
+/**
+ * `git diff --name-status -z --no-renames` output as changed entries. The
+ * commit range's letter sits in the index column, so `gitStatusFiles` reads it
+ * with the same vocabulary as a staged change.
+ */
+export function parseNameStatus(output: string): GitChangedEntry[] {
+  const tokens = output.split("\0");
+  const entries: GitChangedEntry[] = [];
+  for (let index = 0; index + 1 < tokens.length; index += 2) {
+    const letter = tokens[index];
+    const path = tokens[index + 1];
+    if (!letter || !path) continue;
+    entries.push({ path, indexStatus: letter[0], worktreeStatus: " " });
+  }
+  return entries;
+}
+
 /** The client-facing changed-file projection: porcelain entries plus line counts. */
 export function gitStatusFiles(
   entries: GitChangedEntry[],
