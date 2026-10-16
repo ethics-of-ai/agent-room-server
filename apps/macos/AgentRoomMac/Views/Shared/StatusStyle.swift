@@ -5,4 +5,7 @@ import SwiftUI
 struct StatusStyle {
     var systemImage: String
     var tint: Color
+
+    /// Something failed and the operator has to act.
+    static let failure = StatusStyle(systemImage: "xmark.octagon.fill", tint: .red)
 }

@@ -293,6 +293,53 @@ last known value. Claude Code's bounded five-second control read is asynchronous
 starts no child, and makes no model call. Occupancy updates use the existing
 token-usage path and persist with session metrics.
 
+### Background tasks
+
+A runner's background tasks are its own work, run with the same authority as
+its turns. AgentRoom only reports them and can ask the runner to stop one. It
+adds no way to start one.
+
+- **Lifetime.** A child whose runner lists a live task is not idle-reaped,
+  because reaping would kill the task. Such a child runs until its tasks end,
+  someone stops them, the session is deleted, or the backend stops. Tasks the
+  runner flags as housekeeping (Claude Code's `ambient`) are not listed and do
+  not keep a child alive.
+- **Content.** Task descriptions, progress lines and the summaries in a turn's
+  `trigger` are model-authored, pass through `util/redactSecrets`, and are
+  bounded (200 characters, 500 for a summary). A Codex task's description is
+  the shell's command line, the same text its transcript tool row shows. The
+  live list rides the session record, so the session reads and
+  the unauthenticated `WS /api/events` and status reads carry it, under the
+  broadcast exception [above](#security-model). The list is held in memory and
+  never written to the session file. An agent-started turn's `trigger` and
+  opening system message are persisted with the turn.
+- **Stopping.** The stop route is a mutation and requires the bearer token
+  when `AUTH_TOKEN` is configured. It reaches only a task the session's runner
+  currently lists, and the runner decides what stopping means.
+- **Agent-started turns.** A turn the agent starts after its background work
+  finishes spends tokens without a person's message. It binds no AgentRoom
+  tools, so plan and sketch calls in it fail closed. A Codex subagent's reply
+  turn is different: AgentRoom posts the subagent's own last message and runs
+  no model, so it spends nothing. In the managed DeepSeek graph, finished jobs
+  wake the agent at most three times in a row before a person's message
+  refills the budget (`maxConsecutiveWakes: 3`). Subagent wakes have no budget
+  upstream, and a woken turn can start another subagent, so the chain has no
+  natural end. AgentRoom caps it: from the third turn in a row the agent
+  starts on its own, its plugin refuses new subagents until a person's next
+  turn. Subagents already running still wake the agent once each when they
+  end. A custom graph without the plugin gets no cap. Stopping a DeepSeek task
+  also wakes the agent, because the runtime tells it the task was stopped.
+- **Codex delegation instruction.** Every Codex thread AgentRoom starts or
+  resumes carries the one developer instruction described in
+  [Runner architecture](../engineering/RUNNERS.md#background-tasks). It adds
+  no tool or permission; `spawn_agent` is already offered by Codex, and its
+  subagents run with the thread's own sandbox and approval policy.
+
+Claude Code's `agentProgressSummaries` is on for every session. The SDK forks
+each running subagent's conversation about every 30 s to write its progress
+line. Each fork is a model call billed like the session's own, and reuses the
+subagent's prompt cache.
+
 ## Built-in runner posture
 
 ### Codex workspace configuration and network
@@ -347,26 +394,34 @@ a trusted workspace or project settings disabled.
 
 ### DeepSeek Harness
 
-AgentRoom drives an operator-installed SDK JSON-RPC runtime, not the `dsh`
-launcher. It verifies the runtime identity during handshake. The runtime and
-Cordis composition are tier-3 environment choices and require both
-`DEEPSEEK_EXECUTABLE` and `DEEPSEEK_CORDIS_CONFIG`; argv is backend-built with
-no shell.
+AgentRoom drives an operator-installed `dsh` launcher, booting its own empty
+`agentroom` profile with the composition as a `--patch` overlay. It verifies
+the SDK runtime identity during handshake. The runtime and composition are
+tier-3 environment choices: `DEEPSEEK_EXECUTABLE` always, and
+`DEEPSEEK_CORDIS_CONFIG` in custom mode. Argv is backend-built with no shell.
 
-AgentRoom cannot inspect the composition's sandbox. Upstream examples include
-both `danger-full-access` and workspace-write profiles, so DeepSeek is treated
+AgentRoom pins `DSH_HOME` to `STATE_DIR/deepseek/home` and empties the profile
+and home-level patch layers on every launch, so an operator's `~/.dsh` profiles,
+patches, credentials, and `.env` do not reach the graph. The child's cwd is
+that home, never a workspace, because the launcher loads a `.env` from its cwd
+into the child's environment. A workspace `.env` therefore cannot add values,
+and AgentRoom's own `.env` with `AUTH_TOKEN` cannot either.
+
+AgentRoom cannot inspect the composition's sandbox. Upstream profiles include
+both `danger-full-access` and workspace-write graphs, so DeepSeek is treated
 as `bypassPermissions`-class. The tier-2 `permissionMode` is passed through to
 the composition's own vocabulary and is not claimed as a backend-enforced enum.
 There is no protocol approval callback.
 
 `DEEPSEEK_COMPOSITION_MODE=managed` is an explicit local tier-3 opt-in. The
-backend generates a fixed v1 graph with workspace-write policy, sandbox file
-and shell services, no background jobs or subagents, no workspace context or
-skill discovery, and state-rooted JSONL persistence. The selected composition
-folder resolves installed packages; custom YAML is not executed during generation
-or merged into that graph. Installed runtime code remains trusted. Generation
+backend generates a fixed v2 graph with workspace-write policy, sandbox file
+and shell services, background shell jobs and in-process subagents (see
+[Background tasks](#background-tasks)), no workspace context or skill discovery, no DeepSeek session-log upload, and state-rooted JSONL
+persistence. Its rows name packages by bare name, which the launcher resolves
+from its own installation; custom YAML is not executed during generation or
+merged into that graph. Installed runtime code remains trusted. Generation
 contains environment variable references rather than credentials, uses private
-immutable files, and refreshes absolute plugin paths after relocation. Existing
+immutable files, and refreshes the absolute plugin path after relocation. Existing
 custom graphs remain unchanged. Managed policy does not prove containment or
 change the bypass-permission classification.
 
@@ -378,10 +433,14 @@ Passive readiness performs no model prompt. API details belong to
 
 The backend pins `DSH_CWD` to the registered workspace and
 `DSH_SESSION_ROOT` under `STATE_DIR`, preventing the common relative persistence
-default from dirtying the workspace. Custom graphs may start subagents and other
-processes that inherit its environment; AgentRoom does not separately observe
-or contain them. The runtime has no provable resume path, so it stays resident
-while idle and the session becomes uncontinuable after cancellation or loss.
+default from dirtying the workspace. Managed subagents run inside the runtime
+under the same workspace-write policy and tools as the session. Custom graphs
+may start subagents and other processes that inherit its environment.
+AgentRoom lists the jobs and subagents the runtime reports on its wire, and
+can stop them only when the graph mounts the AgentRoom plugin. It does not
+contain them. The wire has `session/resume`, but AgentRoom has not proven it
+across a crash and does not call it, so the child stays resident while idle and
+the session becomes uncontinuable after cancellation or loss.
 Shutdown, EOF, `SIGTERM`, and `SIGKILL` form a bounded teardown ladder;
 cancellation skips graceful drain so stopped work cannot finish in the
 background.
@@ -1033,6 +1092,16 @@ fixed message, never the account email or organization.
 executable probe. The Codex sign-in probe only stats `~/.codex/auth.json` and
 never opens it. The backend's `codex_login` check comes from the app-server's
 `account/read` with `refreshToken: false` and drops the account email and plan.
+
+**Update in Terminal** and **Build in Terminal** repair a DeepSeek source
+checkout the operator chose. Each is a fixed script bundled in the app. Only the
+checkout path and the pinned revision are substituted, both single-quoted for
+zsh. The update script runs `git fetch origin` against whatever remote that
+checkout names, and only when the pinned commit is missing. Both scripts run
+`pnpm install --frozen-lockfile`, which executes the checkout's own lifecycle
+scripts, and `pnpm run build`. That is code from the checkout the operator
+already chose to launch as the runner, run in a Terminal window they watch. It
+is a Mac-local launch, not a backend route, so it adds no shell channel.
 
 A sidecar may be adopted only when its recorded pid, kernel start time,
 executable, port, and ownership of the listening TCP socket still match. An

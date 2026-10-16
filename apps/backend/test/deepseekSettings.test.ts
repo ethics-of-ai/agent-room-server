@@ -110,38 +110,74 @@ describe("DeepSeek Harness child environment", () => {
     expect(deepseekChildEnv(config(), "/Users/me/repos/app").DSH_PERMISSION_MODE).toBe("exported");
   });
 
-  it("hands the runtime the composition it refuses to start without", () => {
-    // `$DSH_CORDIS_CONFIG` outranks the argv positional, so pinning it here
-    // leaves DEEPSEEK_ARGS free and cannot be crowded out by a non-empty argv.
-    expect(deepseekChildEnv(config({ deepseekCordisConfig: "/etc/dsh/cordis.yml" }), "/ws").DSH_CORDIS_CONFIG)
-      .toBe("/etc/dsh/cordis.yml");
+  it("drops the retired composition variable, which the launcher no longer reads", () => {
+    // The composition travels as a `--patch` argument. An exported value is
+    // removed so nothing downstream mistakes it for the mounted graph.
+    const previous = process.env.DSH_CORDIS_CONFIG;
+    process.env.DSH_CORDIS_CONFIG = "/etc/dsh/cordis.yml";
+    try {
+      expect(deepseekChildEnv(config({ deepseekCordisConfig: "/etc/dsh/cordis.yml" }), "/ws").DSH_CORDIS_CONFIG)
+        .toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.DSH_CORDIS_CONFIG;
+      else process.env.DSH_CORDIS_CONFIG = previous;
+    }
   });
 
   it("pins the agent workspace so a composition cannot bind its tools elsewhere", () => {
-    // The child's own cwd is already the registered workspace, so this agrees
-    // with the stock `process.env.DSH_CWD ?? process.cwd()` fallback. Stating it
-    // is the point: a config layer that reads the variable cannot relocate the
-    // bash and filesystem tools, the same reflex as the Codex network pin.
+    // The child's own cwd is the backend-owned Harness home, so this value and
+    // the `initialize` cwd are how the graph learns the workspace. A config
+    // layer that reads the variable cannot relocate the bash and filesystem
+    // tools, the same reflex as the Codex network pin.
     process.env.DSH_CWD = "/somewhere/else";
     expect(deepseekChildEnv(config(), "/Users/me/repos/app").DSH_CWD).toBe("/Users/me/repos/app");
   });
 
   it("pins the session log under STATE_DIR, never the registered workspace", () => {
-    // The stock compositions resolve persistence as
-    // `process.env.DSH_SESSION_ROOT ?? './.sessions'`, and that relative default
-    // lands against the child's cwd — the operator's repository. Unpinned, the
-    // harness would dirty the working tree it is being asked to work in.
+    // An operator composition may resolve persistence relative to the
+    // workspace. Unpinned, the harness would dirty the working tree it is
+    // being asked to work in.
     process.env.DSH_SESSION_ROOT = "./.sessions";
     const env = deepseekChildEnv(config({ stateDir: "/var/agentroom" }), "/Users/me/repos/app");
 
-    expect(env.DSH_SESSION_ROOT).toBe("/var/agentroom/deepseek/sessions");
+    expect(env.DSH_SESSION_ROOT).toBe("/var/agentroom/deepseek/sessions-v2/custom");
     expect(env.DSH_SESSION_ROOT?.startsWith("/Users/me/repos/app")).toBe(false);
+  });
+
+  it("gives managed and custom setup separate roots, apart from the earlier one", () => {
+    // A custom patch may keep upstream's zstd default while managed setup
+    // writes plain JSONL, and the store refuses a root holding both. The
+    // earlier root already mixes them, so neither mode may use it.
+    const managed = deepseekChildEnv(config({ stateDir: "/var/agentroom", deepseekCompositionMode: "managed" }), "/w");
+    const custom = deepseekChildEnv(config({ stateDir: "/var/agentroom", deepseekCompositionMode: "custom" }), "/w");
+
+    expect(managed.DSH_SESSION_ROOT).toBe("/var/agentroom/deepseek/sessions-v2/managed");
+    expect(custom.DSH_SESSION_ROOT).toBe("/var/agentroom/deepseek/sessions-v2/custom");
+  });
+
+  it("gives each custom patch its own root, named by the patch contents", async () => {
+    // Two custom patches may choose different encodings, and so may one patch
+    // edited in place, so neither may share a root with the other.
+    const dir = await mkdtemp(join(tmpdir(), "agentroom-dsh-patch-"));
+    const zstd = join(dir, "zstd.patch.yml");
+    const plain = join(dir, "plain.patch.yml");
+    await writeFile(zstd, "- insert: []\n");
+    await writeFile(plain, "- insert: []\n# compression: none\n");
+    const root = (cordis: string) =>
+      deepseekChildEnv(config({ stateDir: "/var/agentroom", deepseekCordisConfig: cordis }), "/w").DSH_SESSION_ROOT;
+
+    const first = root(zstd);
+    expect(first).toMatch(/^\/var\/agentroom\/deepseek\/sessions-v2\/custom\/[0-9a-f]{16}$/);
+    expect(root(plain)).not.toBe(first);
+    expect(root(zstd)).toBe(first);
+    await writeFile(zstd, "- insert: []\n# compression: none\n");
+    expect(root(zstd)).toBe(root(plain));
   });
 
   it("resolves a relative STATE_DIR before handing it to the workspace child", () => {
     const env = deepseekChildEnv(config({ stateDir: ".agentroom/state" }), "/Users/me/repos/app");
 
-    expect(env.DSH_SESSION_ROOT).toBe(resolve(".agentroom/state/deepseek/sessions"));
+    expect(env.DSH_SESSION_ROOT).toBe(resolve(".agentroom/state/deepseek/sessions-v2/custom"));
     expect(isAbsolute(env.DSH_SESSION_ROOT as string)).toBe(true);
     expect(env.DSH_SESSION_ROOT?.startsWith("/Users/me/repos/app")).toBe(false);
   });
@@ -170,8 +206,8 @@ describe("DeepSeek Harness command audit", () => {
     // name a path that has no business in a log.
     expect(
       deepseekCommandAudit(
-        config({ deepseekExecutable: "/opt/homebrew/bin/dsh-jsonrpc-agent", deepseekArgs: ["--verbose", "2"] })
+        config({ deepseekExecutable: "/opt/homebrew/bin/dsh", deepseekArgs: ["--verbose", "2"] })
       )
-    ).toEqual({ executableName: "dsh-jsonrpc-agent", argsCount: 2 });
+    ).toEqual({ executableName: "dsh", argsCount: 2 });
   });
 });

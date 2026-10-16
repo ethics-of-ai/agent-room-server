@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,38 +26,41 @@ async function collect(iterable: AsyncIterable<AgentRunnerEvent>): Promise<Agent
 describeHarness("DeepSeek real Cordis AgentRoom tools probe", () => {
   it("loads, invokes, cancels, unbinds, and accepts a clean second turn on the pinned runtime", async () => {
     const harnessRoot = resolve(checkout as string);
-    const fixtureRoot = await mkdtemp(join(harnessRoot, "examples/jsonrpc-agent/.agentroom-tools-probe-"));
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "agentroom-tools-probe-"));
     roots.push(fixtureRoot);
-    const composition = join(fixtureRoot, "cordis.yml");
+    const composition = join(fixtureRoot, "cordis.patch.yml");
     const probeLlm = resolve("test/fixtures/deepseek/agentRoomProbeLlm.mjs");
     const agentRoomPlugin = resolve("dist/runner/deepseek/cordis/agentRoomToolsPlugin.js");
+    // A custom patch is the whole graph over AgentRoom's empty profile: the
+    // SDK server and a tool-capable agent kernel, with no shell or file tools.
+    const row = (id: string, name: string, ...config: string[]) => [
+      `    - id: ${id}`, `      name: '${name}'`, ...(config.length ? ["      config:", ...config.map((line) => `        ${line}`)] : [])
+    ];
     await writeFile(composition, [
-      "- id: sdk-jsonrpc-server",
-      "  name: '@deepseek-ai/dsh-sdk-jsonrpc-server'",
-      "- id: probe-llm",
-      `  name: '${probeLlm}'`,
-      "- id: agent-core",
-      "  name: '@deepseek-ai/dsh-agent-spine-demo'",
-      "  config:",
-      "    persona: 'Call the available probe tool exactly once, then finish.'",
-      "    workspaceContext: false",
-      "    skills:",
-      "      enabled: false",
-      "    toolBash: false",
-      "    toolJobs: false",
-      "- id: sessions",
-      "  name: '@deepseek-ai/dsh-session-persistence-jsonl'",
-      "  config:",
-      "    root: !!js process.env.DSH_SESSION_ROOT",
-      "    compression: none",
-      "- id: agentroom-tools",
-      `  name: '${agentRoomPlugin}'`,
+      "- insert:",
+      ...row("sdk-app-startup", "@deepseek-ai/dsh-sdk-app", "profile: agentroom"),
+      "    - id: sdk-jsonrpc-server",
+      "      name: '@deepseek-ai/dsh-sdk-jsonrpc-server'",
+      "      inject: [sdkAppStartup, loader]",
+      ...row("probe-llm", probeLlm),
+      ...row("timer", "@deepseek-ai/cordis-plugin-timer"),
+      ...row("llm", "@deepseek-ai/dsh-llm"),
+      ...row("session", "@deepseek-ai/dsh-session"),
+      ...row("session-projection", "@deepseek-ai/dsh-session-projection"),
+      ...row("system-prompt", "@deepseek-ai/dsh-system-prompt"),
+      ...row("tools", "@deepseek-ai/dsh-tools"),
+      ...row("agent", "@deepseek-ai/dsh-agent"),
+      ...row("agent-loop", "@deepseek-ai/dsh-agent-loop", "agents: []"),
+      ...row("fs", "@deepseek-ai/dsh-fs-local", "cwd: !!js process.env.DSH_CWD"),
+      ...row("working-directory", "@deepseek-ai/dsh-working-directory", "defaultDirectory: !!js process.env.DSH_CWD"),
+      ...row("sessions", "@deepseek-ai/dsh-session-persistence-jsonl", "root: !!js process.env.DSH_SESSION_ROOT", "compression: none"),
+      ...row("agentroom-tools", agentRoomPlugin),
       ""
     ].join("\n"));
 
     const serviceConfig = await config({
       deepseekExecutable: process.execPath,
-      deepseekArgs: [join(harnessRoot, "packages/examples/jsonrpc-demo/lib/bin.js")],
+      deepseekArgs: [join(harnessRoot, "apps/cli/lib/bin.js")],
       deepseekCordisConfig: composition,
       deepseekProvider: "agentroom-probe",
       deepseekModel: "probe"

@@ -61,11 +61,10 @@ final class RunnerBootstrapTests: XCTestCase {
         )
     }
 
-    func testDeepSeekExecutableProbeSavesTheDetectedSDKRuntime() throws {
-        // `dsh-jsonrpc-agent`, never `dsh`: the launcher boots profiles and
-        // serves no SDK protocol, so detecting it would save a path that can
-        // never complete a handshake and report a runner that is not ready.
-        let installed = temporaryURL(named: "dsh-jsonrpc-agent")
+    func testDeepSeekExecutableProbeSavesTheDetectedLauncher() throws {
+        // Every Harness app boots through `dsh`; the backend appends the
+        // profile and patch arguments to whatever this slot runs.
+        let installed = temporaryURL(named: "dsh")
         try RunnerBootstrapTestSupport.makeExecutableFile(at: installed)
         let descriptor = RunnerBootstrapTestSupport.descriptor("deepseek")
         let probe = try XCTUnwrap(descriptor.probe("executable"))
@@ -78,29 +77,42 @@ final class RunnerBootstrapTests: XCTestCase {
         XCTAssertEqual(descriptor.slot("arguments")?.environmentName, "DEEPSEEK_ARGS")
     }
 
-    func testDeepSeekExecutableProbeReplacesThePreviouslySavedLauncher() throws {
-        let runtime = temporaryURL(named: "dsh-jsonrpc-agent")
-        let launcher = runtime.deletingLastPathComponent().appendingPathComponent("dsh")
-        try RunnerBootstrapTestSupport.makeExecutableFile(at: runtime)
+    func testDeepSeekExecutableProbeReplacesTheRemovedJSONRPCAgent() throws {
+        // Harness removed `dsh-jsonrpc-agent`, but a leftover install stays
+        // executable. A path saved by an earlier build must not keep passing.
+        let launcher = temporaryURL(named: "dsh")
+        let removed = launcher.deletingLastPathComponent().appendingPathComponent("dsh-jsonrpc-agent")
         try RunnerBootstrapTestSupport.makeExecutableFile(at: launcher)
+        try RunnerBootstrapTestSupport.makeExecutableFile(at: removed)
         let descriptor = RunnerBootstrapTestSupport.descriptor("deepseek")
         let probe = try XCTUnwrap(descriptor.probe("executable"))
         let prober = RunnerBootstrapProber(
-            environment: ["PATH": runtime.deletingLastPathComponent().path],
+            environment: ["PATH": launcher.deletingLastPathComponent().path],
             keychain: KeychainPresenceProbe(lookup: { _ in errSecItemNotFound })
         )
 
-        let outcome = prober.run(probe, of: descriptor) { _ in launcher.path }
+        let outcome = prober.run(probe, of: descriptor) { _ in removed.path }
 
-        XCTAssertEqual(outcome.status, .detected(detail: runtime.path))
-        XCTAssertEqual(outcome.resolvedSlot, .init(slotID: "executable", path: runtime.path))
+        XCTAssertEqual(outcome.status, .detected(detail: launcher.path))
+        XCTAssertEqual(outcome.resolvedSlot, .init(slotID: "executable", path: launcher.path))
     }
 
-    func testDeepSeekDeclaresTheCompositionItsRuntimeRefusesToStartWithout() throws {
-        // The runtime takes its Cordis composition from $DSH_CORDIS_CONFIG or an
-        // argv positional and exits nonzero with neither, so the Mac has to be
-        // able to hold that path — a build that could not would leave this
-        // runner unconfigurable from the app it is set up in.
+    func testDeepSeekExecutableProbeKeepsASavedNodeInterpreter() throws {
+        let node = temporaryURL(named: "node")
+        try RunnerBootstrapTestSupport.makeExecutableFile(at: node)
+        let descriptor = RunnerBootstrapTestSupport.descriptor("deepseek")
+        let probe = try XCTUnwrap(descriptor.probe("executable"))
+
+        let outcome = RunnerBootstrapTestSupport.prober().run(probe, of: descriptor) { _ in node.path }
+
+        XCTAssertEqual(outcome.status, .satisfied(detail: node.path))
+        XCTAssertNil(outcome.resolvedSlot)
+    }
+
+    func testDeepSeekDeclaresTheCustomComposition() throws {
+        // Custom setup hands the backend an operator-written Cordis patch, so
+        // the Mac has to be able to hold that path. A build that could not
+        // would leave custom setup unconfigurable from the app.
         let descriptor = RunnerBootstrapTestSupport.descriptor("deepseek")
         let slot = try XCTUnwrap(descriptor.slot("cordisConfig"))
 
@@ -112,6 +124,26 @@ final class RunnerBootstrapTests: XCTestCase {
         let probe = try XCTUnwrap(descriptor.probe("cordisConfig"))
         XCTAssertEqual(probe.resolvedSlotID, slot.id)
         XCTAssertEqual(probe.requirement, .required)
+    }
+
+    func testDeepSeekCompositionBlocksOnlyCustomSetup() throws {
+        // Managed setup generates its own graph and never reads the file. An
+        // unset mode is custom to the backend, so only an explicit `managed`
+        // waives the check.
+        let descriptor = RunnerBootstrapTestSupport.descriptor("deepseek")
+        let probe = try XCTUnwrap(descriptor.probe("cordisConfig"))
+        let blocking = "Choose an existing DeepSeek Harness Cordis patch, or select AgentRoom managed setup."
+
+        for mode: String? in [nil, "", "custom"] {
+            let stored: (String) -> String? = { $0 == "compositionMode" ? mode : nil }
+            XCTAssertEqual(probe.effectiveRequirement(storedValue: stored), .required)
+            XCTAssertEqual(probe.blockingItem(for: .absent, storedValue: stored), blocking)
+        }
+
+        let managed: (String) -> String? = { $0 == "compositionMode" ? "managed" : nil }
+        XCTAssertEqual(probe.effectiveRequirement(storedValue: managed), .informational)
+        XCTAssertNil(probe.blockingItem(for: .absent, storedValue: managed))
+        XCTAssertNil(probe.blockingItem(for: nil, storedValue: managed))
     }
 
     func testDeepSeekCompositionProbeRequiresAReadableAbsoluteFile() throws {
@@ -127,7 +159,7 @@ final class RunnerBootstrapTests: XCTestCase {
         XCTAssertEqual(relative.status, .absent)
         XCTAssertEqual(
             probe.blockingItem(for: missing.status),
-            "Choose an existing DeepSeek Harness Cordis composition, then rerun the check."
+            "Choose an existing DeepSeek Harness Cordis patch, or select AgentRoom managed setup."
         )
 
         try FileManager.default.createDirectory(
@@ -308,67 +340,77 @@ final class RunnerBootstrapTests: XCTestCase {
 
     // MARK: - Source checkout
 
-    func testSourceCheckoutResolvesInterpreterEntrypointAndComposition() throws {
-        let root = try makeCheckout(entrypointBuilt: true, composition: true)
+    func testSourceCheckoutResolvesInterpreterAndEntrypoint() throws {
+        let root = try makeCheckout(entrypointBuilt: true)
         let node = try makeExecutable(named: "node")
 
         let resolution = RunnerBootstrapTestSupport.sourceCheckout(interpreterCandidates: [node])
             .resolve(root: root, environment: [:])
 
         XCTAssertEqual(resolution.problems, [])
-        XCTAssertEqual(
-            resolution.slots.map(\.slotID).sorted(),
-            ["arguments", "cordisConfig", "executable"]
-        )
+        XCTAssertEqual(resolution.slots.map(\.slotID).sorted(), ["arguments", "executable"])
         XCTAssertEqual(resolution.slots.first { $0.slotID == "executable" }?.value, node.path)
         XCTAssertEqual(
             resolution.slots.first { $0.slotID == "arguments" }?.value,
-            root.appendingPathComponent("packages/examples/jsonrpc-demo/lib/bin.js").path
+            root.appendingPathComponent("apps/cli/lib/bin.js").path
         )
-        // The composition is named rather than merely counted: it decides what
-        // bounds the agent, so the pane has to be able to show which file the
-        // walk chose on the operator's behalf.
-        XCTAssertEqual(
-            resolution.compositionPath,
-            root.appendingPathComponent("examples/jsonrpc-agent/cordis.yml").path
-        )
+    }
+
+    func testSourceCheckoutLeavesTheCompositionToTheOperator() throws {
+        // The checkout ships no graph AgentRoom should run unchanged: the SDK
+        // reference patch pins `danger-full-access`. Managed setup needs no
+        // file, so the walk fills none, even where an old example survives.
+        let root = try makeCheckout(entrypointBuilt: true)
+        for leftover in ["examples/jsonrpc-agent/cordis.yml", "packages/bundle/sdk-minimal/cordis.patch.yml"] {
+            let url = root.appendingPathComponent(leftover)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data("- insert: []".utf8).write(to: url)
+        }
+        let node = try makeExecutable(named: "node")
+
+        let resolution = RunnerBootstrapTestSupport.sourceCheckout(interpreterCandidates: [node])
+            .resolve(root: root, environment: [:])
+
+        XCTAssertFalse(resolution.slots.contains { $0.slotID == "cordisConfig" })
+        XCTAssertEqual(resolution.problems, [])
     }
 
     func testSourceCheckoutReportsAnUnbuiltCheckoutRatherThanAMissingEntry() throws {
         // The manifest declares the entrypoint; only the build output is
         // missing. That is the common failure, and it needs its own message —
         // "not found" would send an operator looking for the wrong folder.
-        let root = try makeCheckout(entrypointBuilt: false, composition: true)
+        let root = try makeCheckout(entrypointBuilt: false)
         let node = try makeExecutable(named: "node")
 
         let resolution = RunnerBootstrapTestSupport.sourceCheckout(interpreterCandidates: [node])
             .resolve(root: root, environment: [:])
 
-        XCTAssertEqual(resolution.slots.map(\.slotID).sorted(), ["cordisConfig", "executable"])
+        XCTAssertEqual(resolution.slots.map(\.slotID), ["executable"])
         XCTAssertTrue(
             resolution.problems.contains { $0.contains("build the checkout first") },
             "expected the unbuilt-checkout problem, got \(resolution.problems)"
         )
     }
 
-    func testSourceCheckoutKeepsWhatItCouldDeriveWhenTheCompositionIsAbsent() throws {
-        // Partial results are saved on purpose: two filled fields and a named
-        // gap beat three empty ones and no explanation.
-        let root = try makeCheckout(entrypointBuilt: true, composition: false)
-        let node = try makeExecutable(named: "node")
+    func testSourceCheckoutKeepsTheEntrypointWhenNoInterpreterIsFound() throws {
+        // Partial results are saved on purpose: one filled field and a named
+        // gap beat two empty ones and no explanation.
+        let root = try makeCheckout(entrypointBuilt: true)
 
-        let resolution = RunnerBootstrapTestSupport.sourceCheckout(interpreterCandidates: [node])
+        let resolution = RunnerBootstrapTestSupport.sourceCheckout(interpreterCandidates: [])
             .resolve(root: root, environment: [:])
 
-        XCTAssertEqual(resolution.slots.map(\.slotID).sorted(), ["arguments", "executable"])
-        XCTAssertNil(resolution.compositionPath)
-        XCTAssertEqual(resolution.problems.count, 1)
+        XCTAssertEqual(resolution.slots.map(\.slotID), ["arguments"])
+        XCTAssertEqual(resolution.problems, ["No node interpreter was found on this Mac."])
     }
 
     func testSourceCheckoutRefusesAnEntrypointOutsideTheChosenFolder() throws {
         // A manifest is repository content, so a `bin` climbing out of the
         // checkout must not become the argument the backend hands node.
-        let root = try makeCheckout(entrypointBuilt: true, composition: true, binPath: "../../../../escape.js")
+        let root = try makeCheckout(entrypointBuilt: true, binPath: "../../../../escape.js")
         let node = try makeExecutable(named: "node")
 
         let resolution = RunnerBootstrapTestSupport.sourceCheckout(interpreterCandidates: [node])
@@ -382,9 +424,9 @@ final class RunnerBootstrapTests: XCTestCase {
     }
 
     func testSourceCheckoutRefusesASymlinkedEntrypointOutsideTheChosenFolder() throws {
-        let root = try makeCheckout(entrypointBuilt: true, composition: true)
+        let root = try makeCheckout(entrypointBuilt: true)
         let node = try makeExecutable(named: "node")
-        let entrypoint = root.appendingPathComponent("packages/examples/jsonrpc-demo/lib/bin.js")
+        let entrypoint = root.appendingPathComponent("apps/cli/lib/bin.js")
         let outside = root.deletingLastPathComponent().appendingPathComponent("outside.js")
         try Data("// outside".utf8).write(to: outside)
         try FileManager.default.removeItem(at: entrypoint)
@@ -400,33 +442,9 @@ final class RunnerBootstrapTests: XCTestCase {
         )
     }
 
-    func testSourceCheckoutRefusesASymlinkedCompositionOutsideTheChosenFolder() throws {
-        let root = try makeCheckout(entrypointBuilt: true, composition: false)
-        let node = try makeExecutable(named: "node")
-        let composition = root.appendingPathComponent("examples/jsonrpc-agent/cordis.yml")
-        let outside = root.deletingLastPathComponent().appendingPathComponent("outside.yml")
-        try FileManager.default.createDirectory(
-            at: composition.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try Data("plugins: []".utf8).write(to: outside)
-        try FileManager.default.createSymbolicLink(at: composition, withDestinationURL: outside)
-
-        let resolution = RunnerBootstrapTestSupport.sourceCheckout(interpreterCandidates: [node])
-            .resolve(root: root, environment: [:])
-
-        XCTAssertFalse(resolution.slots.contains { $0.slotID == "cordisConfig" })
-        XCTAssertNil(resolution.compositionPath)
-        XCTAssertTrue(
-            resolution.problems.contains { $0.contains("outside the chosen folder") },
-            "expected the containment problem, got \(resolution.problems)"
-        )
-    }
-
     func testSourceCheckoutRefusesAnEntrypointPathContainingAComma() throws {
         let root = try makeCheckout(
             entrypointBuilt: true,
-            composition: true,
             checkoutName: "deepseek,harness"
         )
         let node = try makeExecutable(named: "node")
@@ -436,7 +454,7 @@ final class RunnerBootstrapTests: XCTestCase {
 
         XCTAssertFalse(resolution.slots.contains { $0.slotID == "arguments" })
         XCTAssertTrue(
-            resolution.problems.contains { $0.contains("DEEPSEEK_ARGS cannot represent") },
+            resolution.problems.contains { $0.contains("contains a comma") },
             "expected the comma-path problem, got \(resolution.problems)"
         )
     }
@@ -444,26 +462,20 @@ final class RunnerBootstrapTests: XCTestCase {
     /// A checkout with the layout the bundled DeepSeek contract walks.
     private func makeCheckout(
         entrypointBuilt: Bool,
-        composition: Bool,
         binPath: String = "lib/bin.js",
         checkoutName: String = "deepseek-harness"
     ) throws -> URL {
         let manager = FileManager.default
         let root = temporaryURL(named: checkoutName)
-        let packageDirectory = root.appendingPathComponent("packages/examples/jsonrpc-demo")
+        let packageDirectory = root.appendingPathComponent("apps/cli")
         try manager.createDirectory(at: packageDirectory, withIntermediateDirectories: true)
-        let manifest = ["name": "@deepseek-ai/dsh-sdk-jsonrpc-demo", "bin": ["dsh-jsonrpc-agent": binPath]] as [String: Any]
+        let manifest = ["name": "@deepseek-ai/dsh", "bin": ["dsh": binPath]] as [String: Any]
         try JSONSerialization.data(withJSONObject: manifest)
             .write(to: packageDirectory.appendingPathComponent("package.json"))
         if entrypointBuilt {
             let built = packageDirectory.appendingPathComponent(binPath)
             try manager.createDirectory(at: built.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data("// built".utf8).write(to: built)
-        }
-        if composition {
-            let examples = root.appendingPathComponent("examples/jsonrpc-agent")
-            try manager.createDirectory(at: examples, withIntermediateDirectories: true)
-            try Data("- id: sdk-jsonrpc-server".utf8).write(to: examples.appendingPathComponent("cordis.yml"))
         }
         return root
     }

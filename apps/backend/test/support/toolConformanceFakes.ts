@@ -160,6 +160,7 @@ const waiting = new Map();
 function send(message) { process.stdout.write(JSON.stringify(message) + "\\n"); }
 function event(sessionId, type, data) { send({ jsonrpc: "2.0", method: "session.event", params: { sessionId, event: { type, seq: seq++, time: Date.now(), data } } }); }
 function status(sessionId, value) { send({ jsonrpc: "2.0", method: "session.status", params: { sessionId, status: value } }); }
+function say(sessionId, text) { event(sessionId, "assistant/message", { step: 1, message: { role: "assistant", content: [{ type: "text", text }] } }); }
 let pipe;
 if (process.env.AGENTROOM_DEEPSEEK_TOOLS_FD) {
   pipe = new (require("node:net").Socket)({ fd: Number(process.env.AGENTROOM_DEEPSEEK_TOOLS_FD), readable: true, writable: true });
@@ -200,7 +201,7 @@ async function runTurn(sessionId, turn, text) {
   const out = { tools: names, notice: hasNotice(text), results: [] };
   if (script.late && lastRunId) out.late = await invoke(lastRunId, script.late.name, script.late.arguments);
   for (const call of script.calls || []) out.results.push(await invoke(runId, call.name, call.arguments));
-  event(sessionId, "assistant/chunk", { turn, step: 1, chunk: { type: "text-delta", index: 0, text: report(out) } });
+  say(sessionId, report(out));
   event(sessionId, "assistant/message", { turn, step: 1, message: { role: "assistant", content: [] }, usage: { inputTokens: 1, outputTokens: 1 } });
   event(sessionId, "turn/end", { turn, reason: { kind: "completed" } });
   status(sessionId, "idle");

@@ -42,7 +42,7 @@ downgrade guard and update its compatibility vocabulary with any new built-in.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `codex` | Per turn | Native runner diff | Native request | App-server dynamic tools in JSON-RPC mode: plans, sketches | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
 | `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | In-process SDK MCP server: plans, sketches | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
-| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay: questions, plans, sketches | None advertised | `unsupported` | Executable and Cordis composition are both configured |
+| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay: questions, plans, sketches | None advertised | `unsupported` | Executable is configured, plus the patch file in custom setup |
 | `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay: questions, plans, sketches | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
 | `acp_*` | Descriptor-owned | Descriptor-owned | None in the current external adapter | None | Descriptor-owned | A restore path is required at admission | Its admitted executable definition is present |
 
@@ -111,6 +111,108 @@ AgentRoom thread.
 When a restorable runner reports a different native id after backend hydration,
 the backend appends a system message telling the person that the new native
 conversation has not seen the existing transcript.
+
+## Background tasks
+
+A runner whose agent runs work beside its turns reports it through two
+optional `AgentRunner` members. A runner without them reports nothing, and
+the service reads only their absence.
+
+- `watchBackgroundWork(listener)` is called once by the service. The runner
+  calls `tasksChanged` with a session's full live list after every change, and
+  with an empty list when the child ends. It calls `turnStarted` when the
+  agent begins a turn of its own. The service accepts that turn by calling
+  `start(turnId)`, which returns the turn's events in `run()` form. A turn the
+  service never starts is refused, and the runner drops its events until its
+  terminal message. The service refuses while a person's turn runs. The call
+  names the runner's latest turn as `afterRunId`, which has already ended. If
+  the service is still settling that turn, it starts the new one at once,
+  refuses a person's turn until the new one opens, and opens it in the same
+  tick the settle frees the session.
+- `stopBackgroundTask` stops one listed task. It answers `unknown_task` for a
+  task it does not list, and `unavailable` for a listed task this session has
+  no way to stop. The service maps those to `404` and `409`.
+
+A child with live tasks counts as busy to the session host, so it is not
+idle-reaped. Wire shapes, routes and trust rules live in
+[API](../api/API.md#background-tasks) and
+[Trust and safety](../safety/TRUST_AND_SAFETY.md#background-tasks).
+
+`claude_code` reads its list from the SDK's `background_tasks_changed` level
+signal, leaving out `ambient` entries. It takes progress from `task_progress`,
+preferring the `agentProgressSummaries` summary over the step description. A
+`task_notification` counts only for a task the level signal listed or that
+started backgrounded. Foreground tool calls emit task messages too.
+
+Every prompt is sent with a fresh `uuid`, and a `result` routes to the waiting
+turn whose uuid it echoes. A result without an echo falls back to the
+oldest-waiting rule. When a merged result echoes an interrupted send and the
+follow-up that replaced it, it routes to the follow-up. A `system/init` that
+arrives with no AgentRoom turn active or waiting starts an agent turn. So does
+a result with `origin.kind: "task-notification"` that arrives with no turn
+open. The CLI folds a notification that arrives during a person's turn into
+that turn, and answers one that arrives during its own turn in a turn of its
+own. Only the result that settles a person's turn clears pending
+notifications. A subagent re-run under the same `task_id` with a new `run_id`
+is listed afresh.
+
+`codex` lists unified-exec shell commands that outlive their turn, and its
+subagents. A thread's shell list comes from `thread/backgroundTerminals/list`,
+read when each turn on that thread completes: the session's own thread and
+each subagent's. A listed shell's later `item/completed` removes it, and its
+late events reach no turn. `thread/backgroundTerminals/terminate` stops one.
+A list read that fails, as on an app-server without the method, keeps the
+current list. A subagent (multi-agent v2) is listed from the spawning
+thread's `subAgentActivity` item of kind `started`, named after the last
+segment of its `agentPath`, and stays listed while its own thread has a turn
+running. A follow-up turn on that thread lists it again. A nested subagent
+names its spawner as `parentId` while the spawner is listed, and so does a
+shell an earlier turn of a running subagent left. Stopping a subagent sends
+`turn/interrupt` for the child thread's turn, then ends the shells that
+thread has running, because an interrupted turn does not stop them. A
+subagent is listed before its first `turn/started` names the turn; a stop in
+that gap is accepted and sent when the id arrives. The spawning thread hears
+nothing of an interrupt, so the list follows the child thread's own
+`turn/completed`.
+
+Codex never starts a turn of its own when background work ends. It queues a
+finished subagent's result for its spawner without starting a turn, and a
+running turn reads that queue only when it samples the model again
+(`core/src/agent/control/completion.rs` and `core/src/session/turn.rs` at
+`rust-v0.160.0`). When a subagent the session's agent spawned completes or
+fails a turn, the runner calls `turnStarted` itself with a turn whose events
+are that subagent's last message and a success; no model runs for it. A
+failure with no message of the subagent's own posts Codex's error, prefixed
+"The subagent failed:". A subagent that finishes during a session turn is
+held until that turn settles, so its reply is posted even when the running
+turn never read it. When the running turn did read it, the agent may repeat
+it in its own words. A stopped subagent posts nothing, nor does a nested one,
+which answers its spawner, nor a shell. Subagents that finish in the same
+tick, or during the same session turn, share one turn.
+
+Codex 0.160 offers `spawn_agent` only on an explicit request and ignores the
+per-thread `multiAgentMode`. Asked for work "in a background task", it worked
+in the foreground. `thread/start` and `thread/resume` therefore carry
+`developerInstructions` telling the agent to treat a request for background
+work as a request to delegate with `spawn_agent` and not wait
+(`CODEX_BACKGROUND_DELEGATION_INSTRUCTIONS` in `codex/settings.ts`).
+
+The app-server attaches every thread it spawns to every connection, so a
+subagent's `turn/*` and `item/*` notifications reach the session under the
+child's `threadId`. Only the session's own thread drives its turns. A known
+subagent's thread feeds the background list, and no thread other than the
+session's reaches a turn, so a subagent's own commands and messages do not
+appear in the transcript. A notification naming another native turn, or a
+turn the session already finished, never reaches the running turn. The
+running turn's native id comes from `turn/start` or `turn/started` only.
+
+`deepseek` reads its list from the runtime's session events, because the
+stdio protocol has no list or stop method. A root `turn/start` that no
+AgentRoom turn owns is a turn the runtime started after background work
+ended, and the runner offers it through `turnStarted`. Stops go through
+AgentRoom's Cordis plugin; a session without a ready plugin answers
+`unavailable`. The listing, naming, stop and wake-budget rules live in
+[DeepSeek Harness runner](DEEPSEEK_HARNESS_RUNNER.md#background-work).
 
 ## Readiness and discovery
 
@@ -505,10 +607,11 @@ protocol, admission, permission, image, discovery, or restore change.
 
 ## Current open checks
 
-- DeepSeek restore remains `unsupported` until a fresh runtime process proves
-  that it reattaches to a persisted session. Its session-event coverage and
-  composed skill discovery also need deliberate real-runtime observation. See
-  [`DEEPSEEK_HARNESS_RUNNER.md`](DEEPSEEK_HARNESS_RUNNER.md).
+- DeepSeek restore remains `unsupported`. At the current pin `session/resume`
+  reattached a persisted session after a graceful shutdown, but the adapter
+  does not call it and crash recovery is untested. Session-event coverage with
+  a real provider and composed skill discovery also need deliberate
+  observation. See [`DEEPSEEK_HARNESS_RUNNER.md`](DEEPSEEK_HARNESS_RUNNER.md).
 - Cursor release checks remain in
   [`CURSOR_SDK_RUNNER.md`](CURSOR_SDK_RUNNER.md), including redistribution,
   signed nested binaries, account requirements, and live SDK drift.

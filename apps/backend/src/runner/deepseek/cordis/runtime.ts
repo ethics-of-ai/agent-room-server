@@ -28,15 +28,21 @@ export async function validateAgentRoomCordisComposition(configPath: string, plu
   const document = parseDocument(source, {
     customTags: [{ tag: "tag:yaml.org,2002:js", resolve: (value: string) => value }]
   });
-  const entries = isSeq(document.contents) ? document.contents.items.filter((entry) => {
+  // A patch layer inserts rows only through `insert` lists; a top-level row
+  // would target an existing row, and AgentRoom's profile has none.
+  const inserted = isSeq(document.contents) ? document.contents.items.flatMap((patch) => {
+    const rows: unknown = isMap(patch) ? patch.get("insert", true) : undefined;
+    return isSeq(rows) ? rows.items : [];
+  }) : [];
+  const entries = inserted.filter((entry) => {
     const id: unknown = isMap(entry) ? entry.get("id", true) : undefined;
     return isScalar(id) && id.value === "agentroom-tools";
-  }) : [];
+  });
   const entry = entries.length === 1 && isMap(entries[0]) ? entries[0] : undefined;
   const name: unknown = entry?.get("name", true);
   if (document.errors.length || !isScalar(name) || name.tag && name.tag !== "tag:yaml.org,2002:str" || name?.value !== pluginPath) {
     throw new Error(
-      `DeepSeek AgentRoom tools require an explicit Cordis entry named agentroom-tools whose name is the compiled plugin path ${pluginPath}`
+      `DeepSeek AgentRoom tools require one inserted Cordis row named agentroom-tools whose name is the compiled plugin path ${pluginPath}`
     );
   }
 }

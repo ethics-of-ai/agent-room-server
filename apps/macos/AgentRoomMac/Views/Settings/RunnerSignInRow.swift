@@ -49,7 +49,7 @@ struct RunnerSignInRow: View {
             }
         }
         if let launchError {
-            StatusMessageRow(message: launchError, style: StatusStyle(systemImage: "xmark.octagon.fill", tint: .red))
+            StatusMessageRow(message: launchError, style: .failure)
         }
         if let pending {
             Text(pending == .signIn
@@ -98,15 +98,12 @@ struct RunnerSignInRow: View {
         let arguments = command == .signIn ? signIn.arguments : signIn.signOutArguments
         let name = command == .signIn ? "sign-in" : "sign-out"
         Task {
-            do {
-                try await TerminalCommandLauncher.open(
-                    script: signIn.script(executablePath: executablePath, arguments: arguments),
-                    named: "AgentRoom-\(descriptor.runnerKind)-\(name)"
-                )
-                launchError = nil
+            launchError = await TerminalCommandLauncher.openReportingFailure(
+                script: signIn.script(executablePath: executablePath, arguments: arguments),
+                named: "AgentRoom-\(descriptor.runnerKind)-\(name)"
+            )
+            if launchError == nil {
                 pending = command
-            } catch {
-                launchError = "Could not open Terminal: \(error.localizedDescription)"
             }
         }
     }

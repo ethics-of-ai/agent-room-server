@@ -4,9 +4,8 @@ import { join, resolve } from "node:path";
 import type { ServiceConfig } from "../../domain/models";
 import { JsonRpcLineClient } from "../shared/JsonRpcLineClient";
 import { withTimeout } from "../shared/asyncUtils";
-import { prepareDeepSeekComposition } from "./cordis/composition";
 import { prepareDeepSeekBootstrap } from "./bootstrap";
-import { deepseekInitializeParams, effectiveDeepSeekSettings } from "./settings";
+import { deepseekInitializeParams, deepseekSessionRoot, effectiveDeepSeekSettings } from "./settings";
 import { initializeResultSchema, sessionEventNotificationSchema, sessionStatusNotificationSchema, DEEPSEEK_SDK_SERVER_NAME } from "./protocol";
 import { createDeepSeekTurnState, mapDeepSeekSessionEvent } from "./sessionEventMapper";
 import { settled, waitForExit } from "./runtimeLifecycle";
@@ -23,11 +22,10 @@ export async function testDeepSeekConnection(config: ServiceConfig): Promise<{ o
   let client: JsonRpcLineClient | undefined;
   try {
     const testConfig = { ...config, stateDir: scratch, deepseekMaxTokens: 32, clarifyingQuestionsEnabled: false };
-    const bootstrap = await prepareDeepSeekBootstrap(testConfig, scratch, false);
-    const composition = await prepareDeepSeekComposition(testConfig, undefined, "connection_test");
-    await mkdir(join(scratch, "deepseek", "sessions"), { recursive: true, mode: 0o700 });
-    const runtime = spawn(config.deepseekExecutable!, config.deepseekArgs, {
-      cwd: scratch, stdio: ["pipe", "pipe", "pipe"], env: { ...bootstrap.env, DSH_CORDIS_CONFIG: composition }
+    const bootstrap = await prepareDeepSeekBootstrap(testConfig, scratch, false, "connection_test");
+    await mkdir(deepseekSessionRoot(testConfig), { recursive: true, mode: 0o700 });
+    const runtime = spawn(config.deepseekExecutable!, bootstrap.args, {
+      cwd: bootstrap.cwd, stdio: ["pipe", "pipe", "pipe"], env: bootstrap.env
     });
     child = runtime;
     runtime.stderr.resume();

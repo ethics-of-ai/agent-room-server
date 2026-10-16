@@ -1,4 +1,5 @@
 import { Socket } from "node:net";
+import type { Duplex } from "node:stream";
 
 const VERSION = 1;
 const MAX_FRAME_BYTES = 512 * 1024;
@@ -27,9 +28,27 @@ interface CordisContext {
       };
       execute(argumentsValue: unknown, execution: ToolExecution): Promise<string>;
     }): () => void;
+    /** Deny a call before its body runs by returning a reason; no guard can allow what another denied. */
+    guard?(guard: (execution: { name: string }) => string | undefined): () => void;
   };
   effect(setup: () => () => void): void;
+  /** Reads a service the plugin does not declare, such as the job registry. */
+  get?(name: string): unknown;
 }
+
+interface JobRegistry {
+  kill(jobId: string, caller: string, reason: string): "requested" | "already-finished";
+}
+
+interface SubagentService {
+  interrupt(childSessionId: string, authority: { kind: "user"; parentSessionId: string }): void;
+}
+
+const STOP_REASON = "stopped from AgentRoom";
+/** The managed graph's delegation tool; a custom graph that names it otherwise is not paused. */
+const SUBAGENT_TOOL = "subagent";
+const SUBAGENT_PAUSE_REASON =
+  "AgentRoom paused new subagents because you have started several turns in a row on your own. Finish with the work already running; a person's next message lifts the pause.";
 
 export const name = "agentroom-tools";
 export const inject = ["tools"];
@@ -39,13 +58,26 @@ export function apply(ctx: CordisContext): void {
   // Only the parent can grant the inherited pipe; absence leaves no tools.
   if (!process.env.AGENTROOM_DEEPSEEK_TOOLS_FD) return;
   const fd = Number.parseInt(process.env.AGENTROOM_DEEPSEEK_TOOLS_FD ?? "3", 10);
-  const socket = new Socket({ fd, readable: true, writable: true });
+  serveAgentRoomRelay(ctx, new Socket({ fd, readable: true, writable: true }));
+}
+
+/**
+ * Serve the backend's relay on one pipe: register the tool catalog it sends,
+ * forward bound tool calls to it, and stop background work it names. A job
+ * is killed as the session that owns it and a subagent is interrupted for
+ * the session that started it, so the registry's own session fence applies.
+ * While the backend pauses subagents, a guard refuses the delegation tool.
+ */
+export function serveAgentRoomRelay(ctx: CordisContext, socket: Duplex): void {
   socket.setEncoding("utf8");
   let buffer = "";
   let catalogInstalled = false;
   let binding: { runId: string; allowedNames: Set<string> } | undefined;
   const pending = new Map<string, { runId: string; resolve(value: string): void; reject(error: Error): void }>();
   const disposers: Array<() => void> = [];
+  let subagentsPaused = false;
+  const unguard = ctx.tools.guard?.((execution) => subagentsPaused && execution.name === SUBAGENT_TOOL ? SUBAGENT_PAUSE_REASON : undefined);
+  if (unguard) disposers.push(unguard);
 
   const send = (message: unknown): void => {
     if (!socket.destroyed) socket.write(`${JSON.stringify(message)}\n`);
@@ -103,6 +135,23 @@ export function apply(ctx: CordisContext): void {
     }
     send({ version: VERSION, type: "ready", names: catalog.map((tool) => tool.name) });
   };
+  const stop = (target: any): "stopped" | "unknown_task" => {
+    try {
+      if (target?.kind === "job") {
+        const jobs = ctx.get?.("jobs") as JobRegistry | undefined;
+        return jobs?.kill(String(target.jobId), String(target.owner), STOP_REASON) === "requested" ? "stopped" : "unknown_task";
+      }
+      if (target?.kind === "subagent") {
+        const subagents = ctx.get?.("subagents") as SubagentService | undefined;
+        if (!subagents) return "unknown_task";
+        subagents.interrupt(String(target.childSessionId), { kind: "user", parentSessionId: String(target.parentSessionId) });
+        return "stopped";
+      }
+    } catch {
+      // An id the runtime no longer knows is a task that already ended.
+    }
+    return "unknown_task";
+  };
   const handle = (message: any): void => {
     if (!message || message.version !== VERSION || typeof message.type !== "string") {
       throw new Error("Invalid AgentRoom tools envelope");
@@ -122,6 +171,14 @@ export function apply(ctx: CordisContext): void {
       if (!active || active.runId !== message.runId) return;
       failPending("AgentRoom tool turn ended", active.runId);
       binding = undefined;
+      return;
+    }
+    if (message.type === "subagents") {
+      subagentsPaused = message.paused === true;
+      return;
+    }
+    if (message.type === "stop") {
+      send({ version: VERSION, type: "stopped", requestId: Number(message.requestId), result: stop(message.target) });
       return;
     }
     if (message.type === "result") {

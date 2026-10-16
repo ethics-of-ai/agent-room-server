@@ -2,6 +2,8 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AgentRunnerEvent, AgentRunnerToolSet } from "../AgentRunner";
 import type { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import type { JsonRpcLineClient } from "../shared/JsonRpcLineClient";
+import type { CodexBackgroundWork } from "./backgroundWork";
+import type { EndedTurns } from "./threadRouting";
 
 /**
  * The app-server adapter's session and turn records, split out of
@@ -30,6 +32,9 @@ export interface CodexRunnerSession {
   child: ChildProcessWithoutNullStreams;
   threadId: string;
   activeTurn?: CodexActiveTurn;
+  /** Native ids of turns this child finished. See `threadRouting.ts`. */
+  endedTurns: EndedTurns;
+  background: CodexBackgroundWork;
   /**
    * The dynamic tool names this process declared at `thread/start`. Undefined
    * after `thread/resume`, which carries no tool list: the thread keeps the

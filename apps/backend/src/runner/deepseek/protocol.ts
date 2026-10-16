@@ -17,9 +17,11 @@ import { z } from "zod";
  * there is no prompt-cancel method (so cancelling kills the child and that
  * non-restorable AgentRoom session cannot safely continue) and no
  * server-to-client requests (so there is no interactive permission channel to
- * expose). Clarifying questions use an assistant-text prompt contract in the
- * adapter; they do not add a wire method. The runtime's own README documents
- * both protocol absences.
+ * expose). Clarifying questions use an assistant-text prompt contract or the
+ * AgentRoom Cordis relay; they do not add a wire method. The runtime's own
+ * README documents both protocol absences. The wire also offers
+ * `session/resume`, `session/wait`, and `session/working-directory/get|set`,
+ * which AgentRoom does not call.
  *
  * Everything here is deliberately permissive about *unknown* fields and strict
  * about the ones AgentRoom reads: this is a developer preview whose protocol
@@ -61,6 +63,8 @@ export const sessionEventNotificationSchema = z.object({
   sessionId: z.string().min(1),
   event: sessionEventSchema
 });
+
+export type DeepSeekSessionEventNotification = z.infer<typeof sessionEventNotificationSchema>;
 
 export const sessionStatusNotificationSchema = z.object({
   sessionId: z.string().min(1),
@@ -104,33 +108,27 @@ export const turnEndDataSchema = z.object({
 });
 
 /**
- * One streamed chunk of a model response.
- *
- * Deliberately one open shape rather than a discriminated union: block
- * boundaries, tool-call argument deltas, and the finish marker carry no
- * canonical reading of their own — the assembled `tool/call` and `turn/end`
- * events are what AgentRoom maps — so an unrecognized `type` must pass through
- * and be ignored rather than fail the envelope it arrived in.
+ * One block of an assembled model message. Text and reasoning are the blocks
+ * AgentRoom renders; tool calls arrive separately as `tool/call`, and an
+ * unrecognized `type` passes through and is ignored.
  */
-export const streamChunkSchema = z
+const contentBlockSchema = z
   .object({
     type: z.string(),
-    /** Present on `text-delta` and `reasoning-delta`. */
-    text: z.string().optional(),
-    /** Present on `usage`. */
-    usage: tokenUsageSchema.optional()
+    /** Present on `text` and `reasoning`. */
+    text: z.string().optional()
   })
   .passthrough();
 
-export const assistantChunkDataSchema = z.object({
-  turn: z.number().optional(),
-  step: z.number().optional(),
-  chunk: streamChunkSchema
-});
-
+/**
+ * The runtime streams no deltas over this wire: each assembled message carries
+ * its text and reasoning once, with the timed stream that built it in a
+ * `stream` field AgentRoom does not read.
+ */
 export const assistantMessageDataSchema = z.object({
   turn: z.number().optional(),
   step: z.number().optional(),
+  message: z.object({ content: z.array(contentBlockSchema).optional() }).passthrough().optional(),
   usage: tokenUsageSchema.optional()
 });
 
@@ -194,4 +192,35 @@ export const requestContextDataSchema = z.object({
  */
 export const requestHeaderDataSchema = z.object({
   reason: z.enum(["initial", "resume", "change"]).optional()
+});
+
+/**
+ * `job/registered` and `job/settled`, appended to the owning session's log by
+ * the job registry. Foreground shell calls register jobs too, so a job is
+ * background work only when its call asked for `run_in_background` or
+ * returned while the job still ran.
+ */
+export const jobRegisteredDataSchema = z.object({
+  jobId: z.string().min(1),
+  owner: z.string().min(1),
+  kind: z.string(),
+  label: z.string(),
+  startedAt: z.number(),
+  toolCall: z.object({ callId: z.string().min(1) }).partial().optional()
+});
+
+export const jobSettledDataSchema = jobRegisteredDataSchema.extend({
+  status: z.string(),
+  detail: z.string().optional()
+});
+
+/**
+ * A local subagent's run ended. It can arrive after the parent's turn that
+ * reports it has started, so the child's own `turn/end` is read first.
+ */
+export const subagentFinishedNotificationSchema = z.object({
+  parentSessionId: z.string().min(1),
+  childSessionId: z.string().min(1),
+  status: z.string(),
+  stopReason: z.string().optional()
 });

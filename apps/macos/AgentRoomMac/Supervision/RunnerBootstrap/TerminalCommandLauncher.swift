@@ -18,4 +18,15 @@ enum TerminalCommandLauncher {
         configuration.activates = true
         _ = try await NSWorkspace.shared.open([url], withApplicationAt: terminalURL, configuration: configuration)
     }
+
+    /// `open`, reporting a failure in the operator's terms instead of throwing.
+    /// Returns `nil` once Terminal has the script.
+    static func openReportingFailure(script: String, named name: String) async -> String? {
+        do {
+            try await open(script: script, named: name)
+            return nil
+        } catch {
+            return "Could not open Terminal: \(error.localizedDescription)"
+        }
+    }
 }

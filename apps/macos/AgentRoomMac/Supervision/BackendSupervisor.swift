@@ -537,6 +537,7 @@ final class BackendSupervisor {
             for probe in descriptor.probes {
                 checkRunnerBootstrap(probe, of: descriptor)
             }
+            recheckSourceCheckout(of: descriptor)
         }
     }
 
@@ -569,7 +570,10 @@ final class BackendSupervisor {
             }
         }
         bootstrapStatuses[Self.bootstrapKey(runnerKind: descriptor.runnerKind, probeID: probe.id)] = status
-        appendDiagnostic(Self.diagnosticLevel(for: status, requirement: probe.requirement), probe.message(for: status))
+        let requirement = probe.effectiveRequirement { slotID in
+            secrets.slotValue(runnerKind: descriptor.runnerKind, slotID: slotID)
+        }
+        appendDiagnostic(Self.diagnosticLevel(for: status, requirement: requirement), probe.message(for: status))
         return status
     }
 
@@ -577,7 +581,7 @@ final class BackendSupervisor {
     ///
     /// The walk is pure and happens first: nothing is written unless something
     /// was derived, and a partial result is still saved, because an operator who
-    /// gets two of three fields filled is better off than one who gets none and
+    /// gets one of two fields filled is better off than one who gets none and
     /// no reason why. What could not be derived is reported rather than left as
     /// a silently empty field.
     @discardableResult
@@ -586,42 +590,63 @@ final class BackendSupervisor {
             return .failed(message: "\(descriptor.runnerKind) has no source-checkout layout in this build.")
         }
         let resolution = contract.resolve(root: root)
-        var status: RunnerBootstrapCheckStatus
-        var message: String
-
-        if resolution.slots.isEmpty {
-            status = .failed(message: "")
-            message = "Nothing could be derived from \(root.path). " + resolution.problems.joined(separator: " ")
-        } else {
+        // A folder that yields no field is the wrong folder, so it changes no setup either.
+        let choice = resolution.slots.isEmpty ? nil : contract.setupChoiceToApply { slotID in
+            secrets.slotValue(runnerKind: descriptor.runnerKind, slotID: slotID)
+        }
+        var values = resolution.slots.map { ($0.slotID, $0.value) }
+        if let choice { values.append((choice.slotID, choice.choiceID)) }
+        var outcome = contract.outcome(
+            for: resolution,
+            filledTitles: resolution.slots.compactMap { descriptor.slot($0.slotID)?.title },
+            setupTitle: choice.flatMap(descriptor.title(of:))
+        )
+        if !values.isEmpty {
             do {
                 var updated = secrets
-                for slot in resolution.slots {
-                    updated.setSlotValue(slot.value, runnerKind: descriptor.runnerKind, slotID: slot.slotID)
+                for (slotID, value) in values {
+                    updated.setSlotValue(value, runnerKind: descriptor.runnerKind, slotID: slotID)
                 }
                 try secretStore.saveSecrets(updated)
                 secrets = try secretStore.loadSecrets()
                 secretLoadError = nil
-                status = .detected(detail: root.path)
-                // Naming the composition is not a flourish: it decides what
-                // bounds the agent, so "filled 3 fields" would hide the one
-                // choice the operator most needs to see was made for them.
-                let filled = "Filled \(resolution.slots.count) field(s) from \(root.lastPathComponent)."
-                let composition = resolution.compositionPath.map { " Composition: \($0). Read it before running a turn." } ?? ""
-                let problems = resolution.problems.isEmpty ? "" : " " + resolution.problems.joined(separator: " ")
-                message = filled + composition + problems + " Restart the backend to apply."
             } catch {
                 secretLoadError = error
-                status = .failed(message: "")
-                message = "Could not save the derived paths: \(error.localizedDescription)"
+                outcome.status = .failed(message: "")
+                outcome.message = "Could not save the derived paths: \(error.localizedDescription)"
             }
         }
+        sourceCheckoutOutcomes[descriptor.runnerKind] = outcome
+        appendDiagnostic(outcome.status.isSatisfied ? "info" : "warning", outcome.message)
+        // The saved fields changed under the probes that read them.
+        for probe in descriptor.probes {
+            checkRunnerBootstrap(probe, of: descriptor)
+        }
+        return outcome.status
+    }
 
-        sourceCheckoutOutcomes[descriptor.runnerKind] = RunnerBootstrapSourceCheckoutOutcome(
-            status: status,
-            message: message
+    /// Recheck the checkout behind a saved entrypoint, writing nothing, so an
+    /// outdated or unbuilt checkout shows its fix at launch.
+    ///
+    /// A saved entrypoint outside any checkout clears the earlier outcome,
+    /// which described a checkout the backend no longer launches from. With no
+    /// entrypoint saved, an outcome stays: it says why the last chosen folder
+    /// filled nothing.
+    private func recheckSourceCheckout(of descriptor: RunnerBootstrapDescriptor) {
+        guard let contract = descriptor.sourceCheckout,
+              let entrypoint = RunnerBootstrapArgumentList.first(
+                in: secrets.slotValue(runnerKind: descriptor.runnerKind, slotID: contract.entrypointSlotID)
+              )
+        else { return }
+        guard let root = contract.checkoutRoot(containing: entrypoint) else {
+            sourceCheckoutOutcomes[descriptor.runnerKind] = nil
+            return
+        }
+        sourceCheckoutOutcomes[descriptor.runnerKind] = contract.outcome(
+            for: contract.resolve(root: root),
+            filledTitles: [],
+            setupTitle: nil
         )
-        appendDiagnostic(status.isSatisfied ? "info" : "warning", message)
-        return status
     }
 
     /// Ask the backend to establish its own runtime readiness for one runner.

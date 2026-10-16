@@ -42,6 +42,12 @@ struct RunnerBootstrapDescriptor: Equatable, Identifiable {
     func probe(_ probeID: String) -> RunnerBootstrapProbe? {
         probes.first { $0.id == probeID }
     }
+
+    /// The display title of a stored choice, or `nil` when this descriptor
+    /// declares no such slot or choice.
+    func title(of selection: RunnerBootstrapChoiceSelection) -> String? {
+        slot(selection.slotID)?.choices.first { $0.id == selection.choiceID }?.title
+    }
 }
 
 /// One standing caption under a runner's bootstrap controls.

@@ -60,19 +60,19 @@ final class BackendSecretValuesTests: XCTestCase {
     func testEnvironmentCarriesOnlyNamesTheBundledDescriptorsDeclare() {
         var secrets = BackendSecretValues(authToken: "token")
         secrets.setSlotValue("/opt/homebrew/bin/codex", runnerKind: "codex", slotID: "executable")
-        secrets.setSlotValue("/opt/homebrew/bin/dsh-jsonrpc-agent", runnerKind: "deepseek", slotID: "executable")
-        secrets.setSlotValue("/Users/me/.dsh/agentroom/cordis.yml", runnerKind: "deepseek", slotID: "cordisConfig")
+        secrets.setSlotValue("/opt/homebrew/bin/dsh", runnerKind: "deepseek", slotID: "executable")
+        secrets.setSlotValue("/Users/me/agentroom/deepseek.cordis.patch.yml", runnerKind: "deepseek", slotID: "cordisConfig")
         secrets.setSlotValue("/opt/tools/acp", runnerKind: "acp_demo", slotID: "executable")
 
         let environment = secrets.environment()
 
         XCTAssertEqual(environment["AUTH_TOKEN"], "token")
         XCTAssertEqual(environment["CODEX_EXECUTABLE"], "/opt/homebrew/bin/codex")
-        XCTAssertEqual(environment["DEEPSEEK_EXECUTABLE"], "/opt/homebrew/bin/dsh-jsonrpc-agent")
+        XCTAssertEqual(environment["DEEPSEEK_EXECUTABLE"], "/opt/homebrew/bin/dsh")
         // The `filePath` slot injects like every other one: the descriptor names
         // the variable, so a data file the backend hands a child needs no
         // separate mechanism to reach it.
-        XCTAssertEqual(environment["DEEPSEEK_CORDIS_CONFIG"], "/Users/me/.dsh/agentroom/cordis.yml")
+        XCTAssertEqual(environment["DEEPSEEK_CORDIS_CONFIG"], "/Users/me/agentroom/deepseek.cordis.patch.yml")
         // A value for a runner this build has no descriptor for is preserved in
         // the blob and reaches no child process: the descriptors are the
         // allowlist, so an unknown slot cannot name an environment variable.

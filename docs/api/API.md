@@ -2653,6 +2653,86 @@ protocol has no cancel or verified restore method, so stopping it makes that
 AgentRoom session uncontinuable and a follow-up fails until the client creates a
 new session.
 
+### Background tasks
+
+A runner can run work beside its turns: Claude Code's background subagents and
+shell commands, Codex's subagents and long-running shell commands, or DeepSeek
+Harness's background shell jobs and subagents. That work can outlive the turn
+that started it. Runners that report none leave both fields below absent.
+`claude_code`, `codex` and `deepseek` all report subagents and shells. When a
+`codex` subagent finishes, the session gets an agent-started turn whose one
+message is the subagent's own last message. See
+[Runner architecture](../engineering/RUNNERS.md#background-tasks).
+
+The session's live list is `backgroundTasks`. The field is absent when nothing
+runs, and the session stays `idle` while tasks run, so a person can keep
+sending turns:
+
+```json
+{
+  "backgroundTasks": [
+    {
+      "id": "a007835781cfb0be2",
+      "kind": "agent",
+      "description": "Review backend standards",
+      "progress": "Reading the backend standards",
+      "startedAt": "2026-10-13T17:00:00.000Z"
+    }
+  ]
+}
+```
+
+`kind` is `agent`, `shell` or `other`. `progress` is the runner's latest
+one-line status, when it reports one. `parentId` names the listed task that
+launched this one. The list holds at most 32 tasks. It is held in memory and
+never persisted, because the tasks end with the runner's process. After a
+backend restart it is absent.
+
+`agent_background_tasks_changed` carries `{sessionId, workspaceId, tasks}`
+with the full list after every change: replace, never merge. It is broadcast
+live but kept out of the reconnect replay, so a client that reconnects reads
+the session instead.
+
+When background work finishes while no turn runs, the agent may start a turn
+of its own. AgentRoom records it as a turn with no user message. A
+`role: "system"` message opens it (`Background task finished: Review backend
+standards`), and the turn carries a `trigger`:
+
+```json
+{
+  "trigger": {
+    "kind": "background_task",
+    "tasks": [
+      {
+        "id": "a007835781cfb0be2",
+        "status": "completed",
+        "description": "Review backend standards",
+        "summary": "Found two standards breaches"
+      }
+    ]
+  }
+}
+```
+
+`agent_turn_started` carries the same `trigger`. The turn then streams,
+settles and cancels like any other: `coding_turn_started`, assistant deltas,
+and `agent_turn_succeeded` / `coding_turn_completed`. While it runs, the
+session is `running` and `POST …/turns` returns `409`, so a client queues its
+message as it would behind any running turn. The same `409` covers the moment
+between one agent-started turn settling and the next opening. A notification
+that arrives during a person's turn is folded into that turn, and no separate
+turn follows. Which tools an agent-started turn can call is in
+[Trust and safety](../safety/TRUST_AND_SAFETY.md#background-tasks).
+
+`POST /api/agent-sessions/:sessionId/background-tasks/:taskId/stop` asks the
+runner to stop one listed task. It returns `{session}` once the runner has
+accepted the stop. The task's end arrives as a list change, and the agent may
+start a turn to report it. It returns `404` for an unknown session, or for a task
+the session's runner does not list as live. It returns `409` when the runner
+lists the task but this session cannot stop it: a `deepseek` session whose
+graph has no ready AgentRoom plugin. Like every mutation, it requires
+the bearer token when `AUTH_TOKEN` is configured.
+
 ### Thread plans
 
 Each session owns zero or one plan. Only the session runner's model changes
@@ -3164,6 +3244,7 @@ authenticated, workspace-scoped protocols. The server sends an initial
 - `agent_permission_resolved`
 - `agent_question_resolved`
 - `agent_plan_changed` (metadata only; see [Thread plans](#thread-plans))
+- `agent_background_tasks_changed` (live only; see [Background tasks](#background-tasks))
 - `runner_audit`
 - `coding_session_started`
 - `coding_turn_started`

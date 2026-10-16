@@ -26,7 +26,7 @@ enum RunnerBootstrapTestSupport {
                 RunnerBootstrapProber.overrideKey(runnerKind: "claude_code", probeID: "executable"):
                     search(binaryName: "claude", candidates: claudeCandidates),
                 RunnerBootstrapProber.overrideKey(runnerKind: "deepseek", probeID: "executable"):
-                    search(binaryName: "dsh-jsonrpc-agent", candidates: deepseekCandidates)
+                    search(binaryName: "dsh", candidates: deepseekCandidates)
             ]
         )
     }
@@ -64,6 +64,38 @@ enum RunnerBootstrapTestSupport {
             preconditionFailure("the bundled catalog is expected to describe \(runnerKind)")
         }
         return descriptor
+    }
+
+    /// A file whose last-modified date is `age` seconds ago.
+    static func write(_ text: String, to url: URL, age: TimeInterval = 0) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(text.utf8).write(to: url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date.now.addingTimeInterval(-age)],
+            ofItemAtPath: url.path
+        )
+    }
+
+    /// A package directory with a manifest and, when `built`, its `lib/bin.js`.
+    /// `builtBeforeManifest` dates the build output before the manifest, the
+    /// state a pull that moves the version without a rebuild leaves.
+    static func makePackage(
+        at directory: URL,
+        name: String = "@deepseek-ai/dsh",
+        version: String?,
+        built: Bool = true,
+        builtBeforeManifest: Bool = false
+    ) throws {
+        var manifest: [String: Any] = ["name": name, "bin": ["dsh": "lib/bin.js"]]
+        manifest["version"] = version
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: manifest), as: UTF8.self)
+        try write(json, to: directory.appendingPathComponent("package.json"), age: 60)
+        if built {
+            try write("// built", to: directory.appendingPathComponent("lib/bin.js"), age: builtBeforeManifest ? 120 : 0)
+        }
     }
 
     static func makeExecutableFile(at url: URL) throws {

@@ -52,7 +52,9 @@ struct SetupReadiness: Equatable {
     private var bootstrapBlockingItems: [String] {
         guard let bootstrapDescriptor else { return [] }
         return bootstrapDescriptor.probes.compactMap { probe in
-            probe.blockingItem(for: resolvedStatus(for: probe, of: bootstrapDescriptor))
+            probe.blockingItem(for: resolvedStatus(for: probe, of: bootstrapDescriptor)) { slotID in
+                secrets.slotValue(runnerKind: bootstrapDescriptor.runnerKind, slotID: slotID)
+            }
         }
     }
 

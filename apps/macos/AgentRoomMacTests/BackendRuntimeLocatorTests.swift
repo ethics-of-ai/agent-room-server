@@ -17,8 +17,8 @@ final class BackendRuntimeLocatorTests: XCTestCase {
         var secrets = BackendSecretValues(authToken: "auth-token", legacyCodexReasoningEffort: "high")
         secrets.setSlotValue("/opt/homebrew/bin/codex", runnerKind: "codex", slotID: "executable")
         secrets.setSlotValue("app-server,--listen,stdio://", runnerKind: "codex", slotID: "arguments")
-        secrets.setSlotValue("/opt/homebrew/bin/dsh-jsonrpc-agent", runnerKind: "deepseek", slotID: "executable")
-        secrets.setSlotValue("/Users/me/.dsh/agentroom/cordis.yml", runnerKind: "deepseek", slotID: "cordisConfig")
+        secrets.setSlotValue("/opt/homebrew/bin/dsh", runnerKind: "deepseek", slotID: "executable")
+        secrets.setSlotValue("/Users/me/agentroom/deepseek.cordis.patch.yml", runnerKind: "deepseek", slotID: "cordisConfig")
         // A stored value for a runner no bundled descriptor covers: preserved in
         // Keychain, never injected, because the descriptors are the allowlist.
         secrets.setSlotValue("/opt/tools/acp", runnerKind: "acp_demo", slotID: "executable")
@@ -44,10 +44,10 @@ final class BackendRuntimeLocatorTests: XCTestCase {
         XCTAssertEqual(configuration.environment["CODEX_EXECUTABLE"], "/opt/homebrew/bin/codex")
         XCTAssertNil(configuration.environment["CODEX_REASONING_EFFORT"])
         XCTAssertEqual(configuration.environment["CODEX_ARGS"], "app-server,--listen,stdio://")
-        // The SDK runtime, not the `dsh` launcher, and the composition it
-        // refuses to start without.
-        XCTAssertEqual(configuration.environment["DEEPSEEK_EXECUTABLE"], "/opt/homebrew/bin/dsh-jsonrpc-agent")
-        XCTAssertEqual(configuration.environment["DEEPSEEK_CORDIS_CONFIG"], "/Users/me/.dsh/agentroom/cordis.yml")
+        // The `dsh` launcher and the custom composition the backend patches
+        // onto its profile.
+        XCTAssertEqual(configuration.environment["DEEPSEEK_EXECUTABLE"], "/opt/homebrew/bin/dsh")
+        XCTAssertEqual(configuration.environment["DEEPSEEK_CORDIS_CONFIG"], "/Users/me/agentroom/deepseek.cordis.patch.yml")
         // The Codex adapter owns its own protocol bootstrap now: generic launch
         // assembly no longer derives `CODEX_RUNNER_PROTOCOL` from a managed
         // setting, which also stops it overriding an operator who pinned `exec`.

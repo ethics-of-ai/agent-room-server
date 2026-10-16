@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { CodingAgentTurnSettings, ServiceConfig } from "../../domain/models";
@@ -23,13 +25,11 @@ export const DEFAULT_DEEPSEEK_MODEL = "deepseek-flash";
 /**
  * The runtime that serves this protocol, named for diagnostics only.
  *
- * Deliberately **not** `dsh`. The `dsh` launcher boots profiles — `--profile
- * <name>`, `--profile headless "task"`, `web`, `plugin` — and none of those
- * entry modes serves the SDK JSON-RPC wire; pointing this runner at it yields a
- * web server or a usage error. The serving bin is `dsh-jsonrpc-agent`, or the
- * packaged single-file `dsh-jsonrpc-agent-pkg-<platform>-<arch>` runtime.
+ * The `dsh` launcher serves the SDK wire when it boots a profile whose graph
+ * mounts the SDK server. AgentRoom appends `--profile agentroom --patch <file>`
+ * itself, so the executable is `dsh`, or Node running its built CLI entrypoint.
  */
-export const DEEPSEEK_RUNTIME_BINARY = "dsh-jsonrpc-agent";
+export const DEEPSEEK_RUNTIME_BINARY = "dsh";
 
 export interface DeepSeekEffectiveSettings {
   model: string;
@@ -105,19 +105,54 @@ export async function deepseekContentBlocks(
  * Where the runtime's JSONL session log is written.
  *
  * Under `STATE_DIR`, never the registered workspace — the same rule attachments
- * and artifacts follow. The stock compositions resolve their persistence root
- * as `process.env.DSH_SESSION_ROOT ?? './.sessions'`, and that relative default
- * is taken against the child's cwd, which *is* the registered workspace. Left
- * unpinned the harness would write its session log into the operator's
- * repository: a dirty working tree, entries in the settle-time Git diff this
- * runner already derives, and material a later commit could sweep up.
+ * and artifacts follow. The stock profiles put sessions under the Harness
+ * home, and an operator composition may choose any root, including one
+ * relative to the workspace. Left unpinned the harness could write its session
+ * log into the operator's repository: a dirty working tree, entries in the
+ * settle-time Git diff this runner already derives, and material a later
+ * commit could sweep up.
+ *
+ * Each setup mode has its own root under `sessions-v2`. The Harness store
+ * scans its whole root on first use and refuses it when any log there uses
+ * the other encoding (`.jsonl` or `.jsonl.zstd`). The 0.1.0 runtime wrote
+ * zstd logs to the earlier root, `deepseek/sessions`, and the first managed
+ * graph wrote uncompressed ones beside them, so at Harness 86a40220 that root
+ * failed every new session. Restore is unsupported, so the earlier root holds
+ * nothing a session can continue, and it is left for the operator to delete.
+ * Managed setup writes `compression: none`. A custom patch chooses its own
+ * encoding, with zstd as the upstream default, so the two modes never share a
+ * root that switching between them could poison. For the same reason each
+ * custom patch gets its own root under `custom`, named by a hash of the
+ * patch's contents: two patches, or one patch edited to another encoding,
+ * never share a root either.
  */
 export function deepseekSessionRoot(config: ServiceConfig): string {
   // STATE_DIR may be operator-supplied as a relative path. Resolve it in the
-  // backend process before handing it to a child whose cwd is the registered
-  // workspace, otherwise the same string names two different directories and
-  // the runtime can put its persistence inside the repository.
-  return resolve(config.stateDir, "deepseek", "sessions");
+  // backend process before handing it to a child with a different cwd,
+  // otherwise the same string names two different directories.
+  if (config.deepseekCompositionMode === "managed") {
+    return resolve(config.stateDir, "deepseek", "sessions-v2", "managed");
+  }
+  const patch = customPatchKey(config.deepseekCordisConfig);
+  return resolve(config.stateDir, "deepseek", "sessions-v2", "custom", ...(patch ? [patch] : []));
+}
+
+/**
+ * Names a custom patch's session root. An edit that changes nothing but the
+ * encoding still changes the hash, which is the point; a new root costs
+ * nothing, since restore is unsupported.
+ */
+function customPatchKey(patchPath: string | undefined): string | undefined {
+  if (!patchPath) return undefined;
+  const path = resolve(patchPath);
+  let source: string | Buffer = path;
+  try {
+    source = readFileSync(path);
+  } catch {
+    // The launch reports an unreadable patch itself. Its path still names a
+    // root, so the session root stays a pure function of the configuration.
+  }
+  return createHash("sha256").update(source).digest("hex").slice(0, 16);
 }
 
 /**
@@ -128,33 +163,32 @@ export function deepseekSessionRoot(config: ServiceConfig): string {
  * propagate into every process the turn spawns — including the sub-agents the
  * harness can start. Mirrors `codexChildEnv` and `claudeCodeChildEnv`.
  *
- * Four values are then **pinned** rather than left to the composition's own
+ * Three values are then **pinned** rather than left to the composition's own
  * fallbacks, for the reason the Codex adapter pins `network_access`: a
  * composition is an operator-authored file this backend cannot inspect, so a
  * value AgentRoom depends on has to be stated in both directions rather than
- * assumed from a default that a config layer may quietly have changed.
+ * assumed from a default that a config layer may quietly have changed. The
+ * launch adds `DSH_HOME`; see `deepseekHome`.
  *
- * - `DSH_CORDIS_CONFIG` — the composition itself. The runtime exits nonzero
- *   without one, and the env channel outranks the argv positional, so pinning
- *   it here keeps `DEEPSEEK_ARGS` free for everything else.
  * - `DSH_CWD` — the agent workspace the composition's bash and filesystem tools
- *   bind to. The child's own cwd is already the registered workspace, so this
- *   agrees with the fallback rather than moving anything; what it buys is that
- *   a composition reading the variable cannot land the tools somewhere else.
+ *   bind to. The child's own cwd is the backend-owned Harness home, because the
+ *   launcher loads a `.env` file from its cwd, so the workspace reaches the
+ *   graph only through this value and the `initialize` cwd.
  * - `DSH_SESSION_ROOT` — see {@link deepseekSessionRoot}.
  * - `DSH_PERMISSION_MODE` — the harness's own approval posture, which the SDK
  *   wire carries no parameter for. An operator-exported value is deliberately
  *   overridden by the managed setting, so the posture a client reads on
  *   `/api/config` is the posture the child actually gets.
+ *
+ * `DSH_CORDIS_CONFIG` is removed: the launcher no longer reads it, and the
+ * composition travels as a `--patch` argument.
  */
 export function deepseekChildEnv(config: ServiceConfig, agentCwd: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.AUTH_TOKEN;
   delete env.AGENTROOM_DEEPSEEK_CORDIS_PLUGIN;
   delete env.AGENTROOM_DEEPSEEK_TOOLS_FD;
-  if (config.deepseekCordisConfig) {
-    env.DSH_CORDIS_CONFIG = config.deepseekCordisConfig;
-  }
+  delete env.DSH_CORDIS_CONFIG;
   env.DSH_CWD = agentCwd;
   env.DSH_SESSION_ROOT = deepseekSessionRoot(config);
   if (config.deepseekPermissionMode) {

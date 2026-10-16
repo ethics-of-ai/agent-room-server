@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentRunnerKind, AgentTurnContext, CodingAgentTurnSettings } from "../domain/models";
+import type { AgentRunnerKind, AgentSessionMessage, AgentSessionTurn, AgentTurnContext, CodingAgentTurnSettings } from "../domain/models";
 
 export class AgentSessionError extends Error {
   constructor(
@@ -30,6 +30,13 @@ export interface StartAgentTurnInput {
  * with. A restart is an interruption, not a decision: nobody chose, so the
  * turn fails rather than being reported as cancelled or completed.
  */
+/**
+ * What a new turn opens with: the message at the head of its transcript, and
+ * for a turn the agent started, why. `id` is preset when the runner needed the
+ * turn id before the turn could open.
+ */
+export type AgentTurnOpening = Pick<AgentSessionMessage, "role" | "content" | "context"> & Pick<AgentSessionTurn, "trigger"> & { id?: string };
+
 export const BACKEND_RESTARTED_TURN_ERROR = "Backend restarted during this turn";
 
 export function agentSessionId(): string {

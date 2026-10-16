@@ -4,8 +4,9 @@ import { logger } from "../../logging/logger";
 import {
   AgentRunnerInputError,
   type AgentRunner,
+  type AgentRunnerBackgroundListener,
+  type BackgroundTaskStopResult,
   type CapabilitiesRequest,
-  type AgentRunnerActivity,
   type AgentRunnerEvent,
   type AgentRunnerInput,
   type AgentRunnerInputPart,
@@ -13,20 +14,19 @@ import {
 } from "../AgentRunner";
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { delay, withTimeout } from "../shared/asyncUtils";
+import { arrayValue, objectValue, stringValue } from "../shared/jsonValues";
 import { compactionThresholdFromContextUsage } from "./contextUsage";
 import { discoverClaudeCodeCapabilities } from "./discovery";
 import {
   runnerMetadataFromMessage,
   completionFromClaudeCodeMessage,
-  mapClaudeCodeMessage,
-  type ClaudeCodeToolUseDisplay
+  mapClaudeCodeMessage
 } from "./messageMapper";
 import {
   loadClaudeCodeMcpServerFactory,
   loadClaudeCodeQuery,
   type ClaudeCodeCanUseTool,
   type ClaudeCodeMcpServerLoader,
-  type ClaudeCodeQuery,
   type ClaudeCodeQueryLoader
 } from "./sdk";
 import { ClaudeSessionTools } from "./agentTools";
@@ -44,43 +44,11 @@ import {
   runnerStreamTimingAudit
 } from "../shared/streamTiming";
 import { PersistentRunnerSessionHost } from "../shared/PersistentRunnerSessionHost";
-import {
-  PendingQuestionRequests,
-  type QuestionAnswerResult,
-  type QuestionWaitOutcome
-} from "../shared/PendingQuestionRequests";
+import { PendingQuestionRequests, type QuestionAnswerResult } from "../shared/PendingQuestionRequests";
 import { runnerDescriptor } from "../registry";
-import {
-  ASK_USER_QUESTION_TOOL,
-  HEADLESS_PERMISSION_DENY_MESSAGE,
-  askUserQuestionBatch,
-  askUserQuestionUpdatedInput
-} from "./askUserQuestion";
-
-interface ClaudeCodeActiveTurn {
-  runId: string;
-  queue: AsyncEventQueue<AgentRunnerEvent>;
-  finalEvent?: AgentRunnerEvent;
-  completedByProtocol: boolean;
-}
-
-interface ClaudeCodeRunnerSession {
-  key: string;
-  query: ClaudeCodeQuery;
-  input: AsyncEventQueue<unknown>;
-  sdkSessionId?: string;
-  model?: string;
-  effort?: string;
-  toolUses: Map<string, ClaudeCodeToolUseDisplay>;
-  /** AgentRoom tools attached at spawn; absent when the child was spawned without any. */
-  tools?: ClaudeSessionTools;
-  activeTurn?: ClaudeCodeActiveTurn;
-  // One SDK `result` message arrives per pushed user message, in order. Turns
-  // queue here when their prompt is pushed so completions route to the turn
-  // that owns them — an interrupted turn's trailing result must not close the
-  // steering follow-up that replaced it as the active turn.
-  turnsAwaitingResult: ClaudeCodeActiveTurn[];
-}
+import { ClaudeCodeBackgroundTasks } from "./backgroundTasks";
+import type { ClaudeCodeActiveTurn, ClaudeCodeRunnerSession } from "./runnerSession";
+import { decideClaudeCodeToolUse } from "./toolDecision";
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000;
 
@@ -109,6 +77,7 @@ export class ClaudeCodeRunner implements AgentRunner {
   // settles it. Released with the turn, the child, and the session.
   private readonly questions: PendingQuestionRequests;
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
+  private backgroundListener?: AgentRunnerBackgroundListener;
 
   constructor(
     private readonly config: ServiceConfig,
@@ -127,10 +96,12 @@ export class ClaudeCodeRunner implements AgentRunner {
       idleSessionTimeoutMs: deps.idleSessionTimeoutMs ?? IDLE_SESSION_TIMEOUT_MS,
       teardown: (session) => {
         this.questions.releaseSession(session.key);
+        session.background.reset();
         session.input.close();
         void Promise.resolve(session.query.return?.(undefined)).catch(() => undefined);
       },
-      isBusy: (session) => session.activeTurn !== undefined,
+      // Live background tasks die with the child, so they keep it from being reaped.
+      isBusy: (session) => session.activeTurn !== undefined || session.background.hasLiveTasks,
       describe: (session) => (session.sdkSessionId ? { sdkSessionId: session.sdkSessionId } : {})
     });
   }
@@ -170,39 +141,25 @@ export class ClaudeCodeRunner implements AgentRunner {
   }
 
   async *run(input: AgentRunnerInput): AsyncIterable<AgentRunnerEvent> {
-    const startedAtMs = Date.now();
-    const timing = createRunnerStreamTiming();
-    const command = claudeCodeCommandAudit(this.config);
-    const activeTurn: ClaudeCodeActiveTurn = {
-      runId: input.runId,
-      queue: new AsyncEventQueue<AgentRunnerEvent>(),
-      completedByProtocol: false
-    };
-    let session: ClaudeCodeRunnerSession | undefined;
-
     logger.info({
       runId: input.runId,
       sessionId: input.sessionId,
       protocol: "agent-sdk",
       promptBytes: Buffer.byteLength(input.prompt, "utf8")
     }, "Claude Code runner turn started");
-    yield {
-      type: "runner_audit",
-      audit: {
-        phase: "started",
-        runnerKind: "claude_code",
-        runId: input.runId,
-        command
-      }
-    };
-
-    try {
+    const activeTurn = newActiveTurn(input.runId);
+    yield* this.streamTurn(activeTurn, input.sessionId, async (bound) => {
       // Turn effort ids are intentionally open at the shared API boundary. The
       // Claude-specific mapper validates its own advertised vocabulary here,
       // before a child is acquired or a prompt is sent.
       const settings = effectiveClaudeCodeSettings(this.config, input.settings);
-      session = await this.getOrCreateSession(input, settings);
+      const session = await this.getOrCreateSession(input, settings);
+      // The service refuses a turn while an agent-started one runs; this is the
+      // adapter's own guard against the CLI folding a send into it.
+      if (session.activeTurn?.agentStarted) throw new Error("Claude Code is still answering finished background work");
+      bound.session = session;
       session.activeTurn = activeTurn;
+      session.latestRunId = input.runId;
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
 
       await this.applyTurnSettings(session, settings);
@@ -212,23 +169,32 @@ export class ClaudeCodeRunner implements AgentRunner {
       const prompt = promptWithRegisteredTools(input, registered, "claude_code");
       if (input.tools) session.tools?.bindTurn(input.runId, input.tools.binding);
       this.readCompactionThreshold(session, activeTurn);
-      activeTurn.queue.push({
-        type: "agent_activity",
-        activity: {
-          kind: "claude_code_turn_started",
-          title: "Turn started",
-          content: {
-            ...(session.sdkSessionId ? { session_id: session.sdkSessionId } : {})
-          },
-          canonical: { kind: "turn_started" },
-          runner: {
-            ...(session.sdkSessionId ? { nativeSessionId: session.sdkSessionId } : {})
-          }
-        }
-      });
+      pushTurnStarted(session, activeTurn);
+      activeTurn.sendUuid = randomUUID();
       session.turnsAwaitingResult.push(activeTurn);
-      session.input.push(await claudeCodeUserMessage(prompt, input.inputParts, session.sdkSessionId));
+      session.input.push(await claudeCodeUserMessage(prompt, input.inputParts, session.sdkSessionId, activeTurn.sendUuid));
+    });
+  }
 
+  /**
+   * One turn's event stream: the audit bookends around everything the session
+   * routes to `activeTurn`, then its terminal event. `start` binds the session
+   * and, for a person's turn, sends the prompt.
+   */
+  private async *streamTurn(
+    activeTurn: ClaudeCodeActiveTurn,
+    sessionId: string | undefined,
+    start: (bound: { session?: ClaudeCodeRunnerSession }) => Promise<void>
+  ): AsyncGenerator<AgentRunnerEvent> {
+    const startedAtMs = Date.now();
+    const timing = createRunnerStreamTiming();
+    const command = claudeCodeCommandAudit(this.config);
+    const runId = activeTurn.runId;
+    const bound: { session?: ClaudeCodeRunnerSession } = {};
+    yield { type: "runner_audit", audit: { phase: "started", runnerKind: "claude_code", runId, command } };
+
+    try {
+      await start(bound);
       for await (const event of activeTurn.queue) {
         observeRunnerStreamEvent(timing, event);
         yield event;
@@ -239,9 +205,10 @@ export class ClaudeCodeRunner implements AgentRunner {
         error: error instanceof Error ? error.message : String(error)
       };
     } finally {
-      this.activeTurns.delete(input.runId);
+      this.activeTurns.delete(runId);
+      const session = bound.session;
       if (session) {
-        session.tools?.releaseTurn(input.runId);
+        session.tools?.releaseTurn(runId);
         this.sessions.touch(session);
         if (session.activeTurn === activeTurn) {
           session.activeTurn = undefined;
@@ -259,10 +226,11 @@ export class ClaudeCodeRunner implements AgentRunner {
     const durationMs = Date.now() - startedAtMs;
     const streamTiming = runnerStreamTimingAudit(timing, startedAtMs);
     logger.info({
-      runId: input.runId,
-      sessionId: input.sessionId,
+      runId,
+      sessionId,
       protocol: "agent-sdk",
       status: failed ? "failed" : "succeeded",
+      ...(activeTurn.agentStarted ? { agentStarted: true } : {}),
       durationMs,
       ...streamTiming
     }, "Claude Code runner turn completed");
@@ -271,7 +239,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       audit: {
         phase: "completed",
         runnerKind: "claude_code",
-        runId: input.runId,
+        runId,
         command,
         status: failed ? "failed" : "succeeded",
         durationMs,
@@ -321,6 +289,17 @@ export class ClaudeCodeRunner implements AgentRunner {
     this.sessions.close(sessionId);
   }
 
+  watchBackgroundWork(listener: AgentRunnerBackgroundListener): void {
+    this.backgroundListener = listener;
+  }
+
+  async stopBackgroundTask(input: { sessionId: string; taskId: string }): Promise<BackgroundTaskStopResult> {
+    const session = this.sessions.acquire(input.sessionId);
+    if (!session?.query.stopTask || !session.background.isLive(input.taskId)) return "unknown_task";
+    await session.query.stopTask(input.taskId);
+    return "stopped";
+  }
+
   // An SDK session id hydrated from the durable session store: the next turn's
   // acquire miss passes it as `resume` exactly as after a reap.
   rememberResumableId(input: { sessionId: string; nativeSessionId: string }): void {
@@ -356,7 +335,7 @@ export class ClaudeCodeRunner implements AgentRunner {
     // as it did before the channel existed.
     let session: ClaudeCodeRunnerSession | undefined;
     const canUseTool: ClaudeCodeCanUseTool | undefined = this.config.clarifyingQuestionsEnabled !== false
-      ? (toolName, toolInput, options) => this.decideToolUse(key, () => session, toolName, toolInput, options)
+      ? (toolName, toolInput, options) => decideClaudeCodeToolUse(this.questions, key, () => session, toolName, toolInput, options)
       : undefined;
     const tools = input.tools?.catalog.length ? new ClaudeSessionTools(await this.loadMcpServer(), input.tools.catalog) : undefined;
     const query = queryFunction({
@@ -375,100 +354,12 @@ export class ClaudeCodeRunner implements AgentRunner {
       effort: settings.effort,
       toolUses: new Map(),
       ...(tools ? { tools } : {}),
-      turnsAwaitingResult: []
+      turnsAwaitingResult: [],
+      background: new ClaudeCodeBackgroundTasks((tasks) => this.backgroundListener?.tasksChanged({ sessionId: key, tasks }))
     };
     this.sessions.register(session);
     void this.consumeSession(session);
     return session;
-  }
-
-  /**
-   * The SDK `canUseTool` callback for one AgentRoom session.
-   *
-   * `AskUserQuestion` is the one tool it holds open: the questions become a
-   * canonical batch announced on the turn's event stream, the wait sits in the
-   * shared store until the answer route settles it (or the clock, or the
-   * turn's own interrupt through `signal`), and the answers go back as the
-   * tool's `updatedInput`. Every other tool is refused with the CLI's own
-   * headless wording — under `bypassPermissions` none reaches here, and under a
-   * stricter mode they were refused headless before this callback existed —
-   * so supplying it changes nothing about what an agent may do.
-   */
-  private async decideToolUse(
-    sessionKey: string,
-    getSession: () => ClaudeCodeRunnerSession | undefined,
-    toolName: string,
-    toolInput: Record<string, unknown>,
-    options: { signal?: AbortSignal; toolUseID?: string }
-  ): ReturnType<ClaudeCodeCanUseTool> {
-    // AgentRoom's own tools, by exact name; `allowedTools` normally approves
-    // them before this callback is consulted.
-    if (getSession()?.tools?.allows(toolName)) return { behavior: "allow", updatedInput: toolInput };
-    if (toolName !== ASK_USER_QUESTION_TOOL) {
-      return { behavior: "deny", message: HEADLESS_PERMISSION_DENY_MESSAGE };
-    }
-    const batch = askUserQuestionBatch(toolInput);
-    if ("error" in batch) return { behavior: "deny", message: batch.error };
-
-    const session = getSession();
-    const turn = session?.activeTurn;
-    const requestId = `question-${randomUUID()}`;
-    const wait = turn && !turn.finalEvent
-      ? this.questions.wait({ sessionKey, requestId, sets: batch.sets })
-      : undefined;
-    const runner = {
-      ...(session?.sdkSessionId ? { nativeSessionId: session.sdkSessionId } : {}),
-      ...(options.toolUseID ? { nativeItemId: options.toolUseID } : {})
-    };
-    const pushActivity = (activity: AgentRunnerActivity): void => {
-      const target = getSession()?.activeTurn;
-      if (target && !target.finalEvent) target.queue.push({ type: "agent_activity", activity });
-    };
-    pushActivity({
-      kind: "claude_code_question_requested",
-      title: "Questions for you",
-      content: { questionCount: batch.sets.length, ...(options.toolUseID ? { toolUseId: options.toolUseID } : {}) },
-      canonical: { kind: "question_requested", ...(wait ? { requestId } : {}), questionSets: batch.sets },
-      runner
-    });
-    if (!wait) {
-      pushActivity({
-        kind: "claude_code_question_resolved",
-        title: "Questions not presented",
-        content: { status: "cancelled" },
-        canonical: { kind: "question_resolved", status: "cancelled" },
-        runner
-      });
-      return { behavior: "allow", updatedInput: askUserQuestionUpdatedInput(toolInput, batch, { status: "unavailable" }) };
-    }
-
-    const abort = (): void => {
-      this.questions.cancel(sessionKey, requestId);
-    };
-    options.signal?.addEventListener("abort", abort, { once: true });
-    let outcome: QuestionWaitOutcome;
-    try {
-      outcome = await wait;
-    } finally {
-      options.signal?.removeEventListener("abort", abort);
-    }
-    pushActivity({
-      kind: "claude_code_question_resolved",
-      title: outcome.status === "answered" ? "Questions answered" : outcome.status === "timeout" ? "Questions timed out" : "Questions cancelled",
-      content: { status: outcome.status, ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}) },
-      canonical: {
-        kind: "question_resolved",
-        requestId,
-        status: outcome.status,
-        ...("decidedBy" in outcome ? { decidedBy: outcome.decidedBy } : {}),
-        ...(outcome.status === "answered" ? { questionAnswers: outcome.answers } : {})
-      },
-      runner
-    });
-    if (outcome.status === "cancelled") {
-      return { behavior: "deny", message: "Turn cancelled" };
-    }
-    return { behavior: "allow", updatedInput: askUserQuestionUpdatedInput(toolInput, batch, outcome) };
   }
 
   private async consumeSession(session: ClaudeCodeRunnerSession): Promise<void> {
@@ -484,23 +375,41 @@ export class ClaudeCodeRunner implements AgentRunner {
 
   private handleSessionMessage(session: ClaudeCodeRunnerSession, message: unknown): void {
     this.sessions.touch(session);
-    if (message && typeof message === "object") {
-      session.sdkSessionId ??= runnerMetadataFromMessage(message as Record<string, unknown>).nativeSessionId;
+    const object = objectValue(message);
+    if (object) {
+      session.sdkSessionId ??= runnerMetadataFromMessage(object).nativeSessionId;
       // Record eagerly rather than at death: the child can die on any path,
       // and the id is what lets the next turn resume the conversation.
       if (session.sdkSessionId) {
         this.sessions.rememberResumableId(session.key, session.sdkSessionId);
       }
     }
+    session.background.observe(message);
+    const completion = completionFromClaudeCodeMessage(message);
+    // The CLI starts a turn of its own when background work finishes. Its
+    // `system/init` (or, failing that, its task-notification result) arriving
+    // with no turn of ours open is that turn's start.
+    const startsOwnTurn = object && (isSystemInit(object) || (completion && isTaskNotificationResult(object)));
+    // A turn with its terminal event is closed even while its stream drains.
+    const turnOpen = (session.activeTurn && !session.activeTurn.finalEvent) || session.turnsAwaitingResult.some((turn) => !turn.finalEvent);
+    if (startsOwnTurn && !turnOpen && !session.refusedAgentTurn) {
+      this.openAgentTurn(session);
+    }
     // A tool call's owner is the oldest turn still owed a result, never the
     // active turn. With none, the call fails closed: a turn is awaited before
     // its prompt is sent, so none of its own calls can arrive earlier.
     const owner = session.turnsAwaitingResult.find((turn) => !turn.finalEvent);
     if (owner) session.tools?.observe(message, owner.runId);
-    const completion = completionFromClaudeCodeMessage(message);
     const target = completion
-      ? this.resolveCompletionOwner(session, completion)
+      ? this.resolveCompletionOwner(session, completion, object)
       : session.activeTurn;
+    if (completion) {
+      // A notification that arrives during a person's turn is folded into it.
+      // One that arrives during the agent's own turn gets a turn of its own,
+      // and an interrupted turn's trailing result answers nothing.
+      if (target && !target.agentStarted && !target.finalEvent) session.background.turnEnded();
+      session.refusedAgentTurn = false;
+    }
 
     if (target && !target.finalEvent) {
       for (const event of mapClaudeCodeMessage(message, session.toolUses)) {
@@ -515,15 +424,58 @@ export class ClaudeCodeRunner implements AgentRunner {
     }
   }
 
-  // Results route to the oldest turn still owed one. A finalized owner means
-  // the trailing result of an interrupted turn — absorb it silently. A
+  /**
+   * The agent began a turn of its own. The service decides whether it becomes
+   * an AgentRoom turn; a refusal leaves its events unrouted, as before this
+   * existed, until its result.
+   */
+  private openAgentTurn(session: ClaudeCodeRunnerSession): void {
+    let started = false;
+    this.backgroundListener?.turnStarted({
+      sessionId: session.key,
+      // No turn of this child is open, so its latest turn has ended.
+      ...(session.latestRunId ? { afterRunId: session.latestRunId } : {}),
+      finished: session.background.takeFinished(),
+      start: (runId) => {
+        const turn: ClaudeCodeActiveTurn = { ...newActiveTurn(runId), agentStarted: true };
+        started = true;
+        session.activeTurn = turn;
+        session.latestRunId = runId;
+        session.turnsAwaitingResult.push(turn);
+        this.activeTurns.set(runId, { session, turn });
+        pushTurnStarted(session, turn);
+        return this.streamTurn(turn, session.key, async (bound) => {
+          bound.session = session;
+        });
+      }
+    });
+    if (!started) session.refusedAgentTurn = true;
+  }
+
+  // A result that echoes a send's uuid belongs to that send's turn. Without an
+  // echo, results route to the oldest turn still owed one. A finalized owner
+  // means the trailing result of an interrupted turn — absorb it silently. A
   // success result can never belong to an interrupted turn, so skip finalized
   // entries for it in case the SDK swallowed an interrupt's result entirely.
   private resolveCompletionOwner(
     session: ClaudeCodeRunnerSession,
-    completion: AgentRunnerEvent
+    completion: AgentRunnerEvent,
+    message: Record<string, unknown> | undefined
   ): ClaudeCodeActiveTurn | undefined {
     const awaiting = session.turnsAwaitingResult;
+    const echoed = echoedSendUuids(message);
+    const echoes = (turn: ClaudeCodeActiveTurn) => turn.sendUuid !== undefined && echoed.has(turn.sendUuid);
+    // A merged result can echo an interrupted send as well as the follow-up
+    // that replaced it; the turn still open is the one it answers.
+    const openIndex = awaiting.findIndex((turn) => echoes(turn) && !turn.finalEvent);
+    const echoedIndex = openIndex >= 0 ? openIndex : awaiting.findIndex(echoes);
+    if (echoedIndex >= 0) {
+      const [owner] = awaiting.splice(echoedIndex, 1);
+      // The CLI answers sends in order, so a finalized turn queued ahead of
+      // this one will never see a result of its own.
+      session.turnsAwaitingResult = awaiting.filter((turn, index) => index >= echoedIndex || !turn.finalEvent);
+      return owner;
+    }
     if (completion.type === "run_succeeded") {
       while (awaiting.length > 0) {
         const turn = awaiting.shift()!;
@@ -540,6 +492,8 @@ export class ClaudeCodeRunner implements AgentRunner {
     // that need clearing — there is nothing left to tear down.
     this.questions.releaseSession(session.key);
     this.sessions.release(session);
+    session.background.reset();
+    session.refusedAgentTurn = false;
     const openTurns = new Set(session.turnsAwaitingResult);
     if (session.activeTurn) openTurns.add(session.activeTurn);
     session.activeTurn = undefined;
@@ -597,4 +551,37 @@ export class ClaudeCodeRunner implements AgentRunner {
       session.effort = settings.effort;
     }
   }
+}
+
+function newActiveTurn(runId: string): ClaudeCodeActiveTurn {
+  return { runId, queue: new AsyncEventQueue<AgentRunnerEvent>(), completedByProtocol: false };
+}
+
+function pushTurnStarted(session: ClaudeCodeRunnerSession, turn: ClaudeCodeActiveTurn): void {
+  const nativeSessionId = session.sdkSessionId;
+  turn.queue.push({
+    type: "agent_activity",
+    activity: {
+      kind: "claude_code_turn_started",
+      title: "Turn started",
+      content: nativeSessionId ? { session_id: nativeSessionId } : {},
+      canonical: { kind: "turn_started" },
+      runner: nativeSessionId ? { nativeSessionId } : {}
+    }
+  });
+}
+
+function isSystemInit(object: Record<string, unknown>): boolean {
+  return stringValue(object.type) === "system" && stringValue(object.subtype) === "init";
+}
+
+function isTaskNotificationResult(object: Record<string, unknown>): boolean {
+  return stringValue(objectValue(object.origin)?.kind) === "task-notification";
+}
+
+/** The send uuids a result says it answered: every member of a merged batch, then the last. */
+function echoedSendUuids(message: Record<string, unknown> | undefined): Set<string> {
+  const uuids = arrayValue(message?.user_message_uuids).flatMap((value) => stringValue(value) ?? []);
+  const last = stringValue(message?.user_message_uuid);
+  return new Set(last ? [...uuids, last] : uuids);
 }

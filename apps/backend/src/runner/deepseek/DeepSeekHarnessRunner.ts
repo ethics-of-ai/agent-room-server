@@ -9,9 +9,11 @@ import type {
   AgentRunner,
   CapabilitiesRequest,
   AgentRunnerActivity,
+  AgentRunnerBackgroundListener,
   AgentRunnerEvent,
   AgentRunnerInput,
   AgentRunnerInputPart,
+  BackgroundTaskStopResult,
   CanonicalQuestionAnswer,
   RunnerMetadata
 } from "../AgentRunner";
@@ -30,19 +32,22 @@ import {
   runnerStreamTimingAudit
 } from "../shared/streamTiming";
 import { runnerDescriptor } from "../registry";
-import { DeepSeekToolRelay } from "./cordis/DeepSeekToolRelay";
+import { DeepSeekBackgroundWork } from "./backgroundWork";
+import { DeepSeekToolRelay, TOOLS_READY_TIMEOUT_MS } from "./cordis/DeepSeekToolRelay";
 import { AGENTROOM_DEEPSEEK_TOOLS_FD } from "./cordis/runtime";
 import { prepareDeepSeekNativeTools } from "./nativeTools";
 import { promptWithRegisteredTools } from "../shared/agentToolSets";
 import { testDeepSeekConnection } from "./connectionTest";
 import { prepareDeepSeekBootstrap } from "./bootstrap";
 import { deepseekCapabilities } from "./capabilities";
+import { probeDeepSeekCapabilities } from "./capabilityProbe";
 import {
   DEEPSEEK_SDK_SERVER_NAME,
   initializeResultSchema,
   sessionEventNotificationSchema,
   sessionPromptResultSchema,
-  sessionStatusNotificationSchema
+  sessionStatusNotificationSchema,
+  type DeepSeekSessionEventNotification
 } from "./protocol";
 import {
   createDeepSeekTurnState,
@@ -66,8 +71,9 @@ import {
 import {
   appendStderrTail,
   collectStderrTail,
-  settled,
-  waitForExit,
+  DEEPSEEK_CLIENT_LABEL,
+  terminateDeepSeekRuntime,
+  type TerminableRuntime,
   wrongServerMessage
 } from "./runtimeLifecycle";
 
@@ -102,6 +108,9 @@ interface DeepSeekRunnerSession {
   child: ChildProcessWithoutNullStreams;
   toolRelay?: DeepSeekToolRelay;
   toolCatalogSignature?: string;
+  background: DeepSeekBackgroundWork;
+  /** The latest AgentRoom turn on this child, a person's or the agent's. */
+  latestRunId?: string;
   stderrTail: () => string | undefined;
   /** The session id this child was handed — AgentRoom's own, see below. */
   sdkSessionId: string;
@@ -124,36 +133,11 @@ interface DeepSeekRunnerSession {
   terminateImmediately: boolean;
 }
 
-/**
- * What the teardown ladder needs to end a runtime, which is deliberately less
- * than a session: the capability probe's throwaway child gets the same rungs,
- * because a runtime that ignores SIGTERM leaks just as thoroughly when nobody
- * was talking to it.
- */
-interface TerminableRuntime {
-  key: string;
-  client: JsonRpcLineClient;
-  child: ChildProcessWithoutNullStreams;
-  terminateImmediately: boolean;
-}
-
-const CLIENT_LABEL = "DeepSeek Harness runtime";
-
 // Startup requests are hang watchdogs rather than SLAs: a runtime that never
 // answers `initialize` would otherwise leave the turn running forever with no
 // events. Composing a plugin graph is real work, so the bound is generous.
 const INITIALIZE_TIMEOUT_MS = 30_000;
 const PROMPT_TIMEOUT_MS = 30_000;
-const TOOLS_READY_TIMEOUT_MS = 10_000;
-
-// The teardown ladder, in the order the protocol documents and the vendor's own
-// client walks it: ask for `shutdown` and let the plugin flush and dispose to
-// quiescence, then close stdin (EOF is a documented exit path, but one that
-// "may cut off an in-flight turn"), then signal, then insist. Each rung has its
-// own bound because each can be the one that hangs, and the last rung cannot.
-const SHUTDOWN_TIMEOUT_MS = 2_000;
-const STDIN_EOF_GRACE_MS = 6_000;
-const SIGTERM_GRACE_MS = 3_000;
 
 // The shared host ignores this deadline for an `unsupported` restore strategy.
 // It remains explicit so enabling a verified restore path later does not invent
@@ -161,6 +145,7 @@ const SIGTERM_GRACE_MS = 3_000;
 const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000;
+const NO_OUTCOME: AgentRunnerEvent = { type: "run_failed", error: "The DeepSeek Harness runtime ended the turn without recording an outcome" };
 
 /**
  * DeepSeek Harness, driven through its first-party SDK runtime protocol
@@ -194,6 +179,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   private disposing = false;
   private readonly terminations = new Set<Promise<void>>();
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
+  private backgroundListener?: AgentRunnerBackgroundListener;
 
   constructor(
     private readonly config: ServiceConfig,
@@ -256,10 +242,10 @@ export class DeepSeekHarnessRunner implements AgentRunner {
 
   private missingBootstrap(): string | undefined {
     if (!this.config.deepseekExecutable) {
-      return `DeepSeek Harness runner requires DEEPSEEK_EXECUTABLE (the ${DEEPSEEK_RUNTIME_BINARY} runtime, not the dsh launcher)`;
+      return `DeepSeek Harness runner requires DEEPSEEK_EXECUTABLE (the ${DEEPSEEK_RUNTIME_BINARY} launcher, or Node running its CLI entrypoint)`;
     }
-    if (!this.config.deepseekCordisConfig) {
-      return "DeepSeek Harness runner requires DEEPSEEK_CORDIS_CONFIG: the runtime demands an explicit Cordis composition and exits without one";
+    if (this.config.deepseekCompositionMode !== "managed" && !this.config.deepseekCordisConfig) {
+      return "DeepSeek Harness runner requires DEEPSEEK_CORDIS_CONFIG in custom setup: the patch file is the runtime's whole graph";
     }
     return undefined;
   }
@@ -284,76 +270,12 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   private async probeCapabilities(): Promise<CodingAgentCapabilities> {
     const missingBootstrap = this.missingBootstrap();
     if (missingBootstrap) return deepseekCapabilities(this.config, missingBootstrap);
-    const settings = effectiveDeepSeekSettings(this.config, undefined);
     this.ensureSessionRoot();
-    let child: ChildProcessWithoutNullStreams | undefined;
-    let client: JsonRpcLineClient | undefined;
-    let stderrTail: () => string | undefined = () => undefined;
-    let toolRelay: DeepSeekToolRelay | undefined;
-    try {
-      // The probe runs in the backend's own cwd, never a registered workspace:
-      // it exists to prove the runtime starts and answers, and it must not load
-      // or execute a workspace's configuration merely to do that.
-      const bootstrap = await prepareDeepSeekBootstrap(this.config, process.cwd(), this.nativeQuestionsEnabled());
-      const { pluginPath } = bootstrap;
-      child = spawn(this.config.deepseekExecutable as string, this.config.deepseekArgs, {
-        cwd: process.cwd(),
-        stdio: pluginPath ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
-        env: bootstrap.env
-      });
-      if (pluginPath) {
-        toolRelay = new DeepSeekToolRelay(child.stdio[AGENTROOM_DEEPSEEK_TOOLS_FD] as Duplex, []);
-      }
-      stderrTail = collectStderrTail(child);
-      client = new JsonRpcLineClient(child, CLIENT_LABEL);
-      const response = await withTimeout(
-        client.request("initialize", deepseekInitializeParams(process.cwd(), settings)),
-        this.initializeTimeoutMs,
-        "Timed out initializing the DeepSeek Harness runtime"
-      );
-      const parsed = initializeResultSchema.safeParse(response);
-      if (!parsed.success) {
-        return deepseekCapabilities(
-          this.config,
-          appendStderrTail("The DeepSeek Harness runtime returned an unrecognized initialize result", stderrTail())
-        );
-      }
-      if (parsed.data.serverInfo.name !== DEEPSEEK_SDK_SERVER_NAME) {
-        // A different program answered. Saying so beats a turn that fails later
-        // with a shape error, and naming the likely cause beats both: the usual
-        // one is DEEPSEEK_EXECUTABLE pointing at the `dsh` launcher, which
-        // serves profiles and never this protocol.
-        return deepseekCapabilities(this.config, wrongServerMessage(parsed.data.serverInfo.name));
-      }
-      let toolsError = bootstrap.toolsError;
-      try { await toolRelay?.waitUntilReady(TOOLS_READY_TIMEOUT_MS); } catch {
-        toolsError = "AgentRoom tools did not become ready. Repair the composition and create a new session to use tools.";
-      }
-      return {
-        ...deepseekCapabilities(this.config),
-        connectionTestAvailable: this.config.deepseekCompositionMode === "managed",
-        checks: [
-          { id: "runtime", status: "ready", message: "The runtime completed its handshake." },
-          { id: "provider", status: "not_checked", message: "Provider access is checked when you send a turn; this check sends no model prompt." },
-          { id: "agent_tools", status: toolsError ? "unavailable" : pluginPath ? "ready" : "not_checked",
-            message: toolsError ?? (pluginPath ? "AgentRoom tools are ready." : "AgentRoom tools are disabled.") }
-        ]
-      };
-    } catch (error) {
-      return deepseekCapabilities(
-        this.config,
-        appendStderrTail(error instanceof Error ? error.message : String(error), stderrTail())
-      );
-    } finally {
-      // The probe proved what it came to prove; it never prompted, so there is
-      // nothing to flush and the ladder starts at EOF.
-      if (client && child) {
-        toolRelay?.close();
-        this.trackTermination({ key: "capability-probe", client, child, terminateImmediately: true });
-      } else {
-        client?.dispose();
-      }
-    }
+    return probeDeepSeekCapabilities(this.config, {
+      initializeTimeoutMs: this.initializeTimeoutMs,
+      withTools: this.nativeQuestionsEnabled(),
+      trackTermination: (runtime) => this.trackTermination(runtime)
+    });
   }
 
   /**
@@ -412,6 +334,8 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     try {
       const settings = effectiveDeepSeekSettings(this.config, input.settings);
       session = await this.getOrCreateSession(input, activeTurn, settings);
+      session.latestRunId = input.runId;
+      session.background.personTurnStarted();
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
       if (input.tools) session.toolRelay?.bind(input.tools.binding);
       const prompt = promptWithRegisteredTools(input, session.toolRelay?.registeredNames() ?? new Set(), "deepseek");
@@ -479,7 +403,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
         ...streamTiming
       }
     };
-    yield finalEvent ?? { type: "run_failed", error: "The DeepSeek Harness runtime ended the turn without recording an outcome" };
+    yield finalEvent ?? NO_OUTCOME;
   }
 
   /**
@@ -513,6 +437,17 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     return this.questions.answer(input.sessionId, input.requestId, input.answers);
   }
 
+  watchBackgroundWork(listener: AgentRunnerBackgroundListener): void {
+    this.backgroundListener = listener;
+  }
+
+  async stopBackgroundTask(input: { sessionId: string; taskId: string }): Promise<BackgroundTaskStopResult> {
+    const session = this.sessions.acquire(input.sessionId);
+    const target = session?.background.stopTarget(input.taskId);
+    if (!session || !target) return "unknown_task";
+    return session.toolRelay ? session.toolRelay.stop(target) : "unavailable";
+  }
+
   // Deleting the AgentRoom session releases its runtime child and forgets the
   // terminal marker, so an explicitly deleted thread leaves no runner state.
   async closeSession(sessionId: string): Promise<void> {
@@ -532,7 +467,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   }
 
   private trackTermination(session: TerminableRuntime): void {
-    const termination = this.terminateRuntime(session);
+    const termination = terminateDeepSeekRuntime(session);
     this.terminations.add(termination);
     void termination.finally(() => this.terminations.delete(termination)).catch(() => undefined);
   }
@@ -585,15 +520,15 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     const bootstrap = await prepareDeepSeekBootstrap(this.config, input.workspacePath, Boolean(input.tools));
     const { pluginPath } = bootstrap;
     if ((input.tools?.required ?? Boolean(input.tools?.binding.allowedNames.length)) && !pluginPath) throw new Error(bootstrap.toolsError);
-    const child = spawn(this.config.deepseekExecutable as string, this.config.deepseekArgs, {
-      cwd: input.workspacePath,
+    const child = spawn(this.config.deepseekExecutable as string, bootstrap.args, {
+      cwd: bootstrap.cwd,
       stdio: pluginPath ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
       env: bootstrap.env
     });
     const stderrTail = collectStderrTail(child);
-    const client = new JsonRpcLineClient(child, CLIENT_LABEL);
-    const toolRelay = pluginPath && input.tools
-      ? new DeepSeekToolRelay(child.stdio[AGENTROOM_DEEPSEEK_TOOLS_FD] as Duplex, input.tools.catalog)
+    const client = new JsonRpcLineClient(child, DEEPSEEK_CLIENT_LABEL);
+    const toolRelay = pluginPath
+      ? new DeepSeekToolRelay(child.stdio[AGENTROOM_DEEPSEEK_TOOLS_FD] as Duplex, input.tools?.catalog ?? [])
       : undefined;
     const session: DeepSeekRunnerSession = {
       key,
@@ -601,6 +536,9 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       child,
       toolRelay,
       toolCatalogSignature: input.tools ? JSON.stringify(input.tools.catalog) : undefined,
+      background: new DeepSeekBackgroundWork({
+        sessionId: key, listener: () => this.backgroundListener, pauseSubagents: (paused) => session.toolRelay?.pauseSubagents(paused)
+      }),
       stderrTail,
       // AgentRoom's own session id is the runtime's in-process session id. An
       // unknown id lazily creates the pair; that does not prove a new process
@@ -617,6 +555,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     client.onNotification((notification) => this.handleNotification(session, notification));
     child.on("close", (code, signal) => {
       session.toolRelay?.close();
+      session.background.reset();
       this.markSessionUncontinuable(session);
       this.sessions.release(session);
       const active = session.activeTurn;
@@ -637,6 +576,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     });
     child.on("error", (error) => {
       session.toolRelay?.close();
+      session.background.reset();
       this.markSessionUncontinuable(session);
       this.sessions.release(session);
       const active = session.activeTurn;
@@ -665,12 +605,14 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       if (parsed.data.serverInfo.name !== DEEPSEEK_SDK_SERVER_NAME) {
         throw new Error(wrongServerMessage(parsed.data.serverInfo.name));
       }
-      try { await session.toolRelay?.waitUntilReady(TOOLS_READY_TIMEOUT_MS); } catch {
+      const toolsReady = session.toolRelay?.waitUntilReady(TOOLS_READY_TIMEOUT_MS).then(() => true, () => {
         session.toolRelay?.close();
         session.toolRelay = undefined;
-        if (input.tools?.required ?? Boolean(input.tools?.binding.allowedNames.length)) {
-          throw new Error("AgentRoom tools did not become ready. Repair the composition before sending a turn that requires tools.");
-        }
+        return false;
+      });
+      // A session without tools carries the plugin only to stop background work, so its turn does not wait for it.
+      if (input.tools && (await toolsReady) === false && (input.tools.required ?? input.tools.binding.allowedNames.length > 0)) {
+        throw new Error("AgentRoom tools did not become ready. Repair the composition before sending a turn that requires tools.");
       }
     } catch (error) {
       // Registration precedes the handshake so close/error notifications can be
@@ -698,7 +640,10 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     session: DeepSeekRunnerSession,
     notification: JsonRpcNotification
   ): void {
-    const active = session.activeTurn;
+    const parsed = notification.method === "session.event" ? sessionEventNotificationSchema.safeParse(notification.params) : undefined;
+    const sessionEvent = parsed?.success ? parsed.data : undefined;
+    session.background.observe(notification, sessionEvent);
+    const active = session.activeTurn ?? this.openAgentTurn(session, sessionEvent);
     if (!active) return;
 
     if (notification.method === "session.status") {
@@ -723,14 +668,11 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       return;
     }
 
-    if (notification.method !== "session.event") return;
-    const parsed = sessionEventNotificationSchema.safeParse(notification.params);
-    if (!parsed.success) return;
     // The runtime notifies for *every* session in its context, including the
     // sub-agents `dsh` can start. Only this session's own log is this turn's.
-    if (parsed.data.sessionId !== session.sdkSessionId) return;
+    if (sessionEvent?.sessionId !== session.sdkSessionId) return;
 
-    const result = mapDeepSeekSessionEvent(parsed.data.event, {
+    const result = mapDeepSeekSessionEvent(sessionEvent.event, {
       state: active.state,
       runner: this.runnerMetadata(session)
     });
@@ -744,6 +686,45 @@ export class DeepSeekHarnessRunner implements AgentRunner {
         result.completion.turnNumber
       );
     }
+  }
+
+  /**
+   * A root `turn/start` no AgentRoom turn owns is one the runtime started to
+   * tell the agent that background work ended. The service decides whether it
+   * becomes an AgentRoom turn; a refused turn's events reach no turn.
+   */
+  private openAgentTurn(session: DeepSeekRunnerSession, sessionEvent: DeepSeekSessionEventNotification | undefined): DeepSeekActiveTurn | undefined {
+    if (sessionEvent?.sessionId !== session.sdkSessionId || sessionEvent.event.type !== "turn/start") return undefined;
+    session.background.agentTurnStarted();
+    let opened: DeepSeekActiveTurn | undefined;
+    this.backgroundListener?.turnStarted({
+      sessionId: session.key,
+      ...(session.latestRunId ? { afterRunId: session.latestRunId } : {}),
+      finished: session.background.takeFinished(),
+      start: (runId) => {
+        const turn: DeepSeekActiveTurn = {
+          runId, queue: new AsyncEventQueue<AgentRunnerEvent>(), completedByProtocol: false,
+          state: createDeepSeekTurnState(), sawRunning: true
+        };
+        opened = turn;
+        session.activeTurn = turn;
+        session.latestRunId = runId;
+        this.activeTurns.set(runId, { session, turn });
+        return this.streamAgentTurn(session, turn);
+      }
+    });
+    return opened;
+  }
+
+  private async *streamAgentTurn(session: DeepSeekRunnerSession, turn: DeepSeekActiveTurn): AsyncIterable<AgentRunnerEvent> {
+    try {
+      for await (const event of turn.queue) yield event;
+    } finally {
+      this.activeTurns.delete(turn.runId);
+      this.sessions.touch(session);
+      if (session.activeTurn === turn) session.activeTurn = undefined;
+    }
+    yield turn.finalEvent ?? NO_OUTCOME;
   }
 
   /**
@@ -983,37 +964,6 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     });
   }
 
-  private async terminateRuntime(session: TerminableRuntime): Promise<void> {
-    const exited = waitForExit(session.child);
-    try {
-      if (!session.terminateImmediately && session.child.exitCode === null && !session.child.killed) {
-        await withTimeout(
-          session.client.request("shutdown", {}),
-          SHUTDOWN_TIMEOUT_MS,
-          "Timed out shutting down the DeepSeek Harness runtime"
-        );
-      }
-    } catch {
-      // A runtime that will not answer `shutdown` is exactly what the rest of
-      // the ladder is for, so this is never worth failing a caller over.
-    }
-    session.client.dispose();
-    if (await settled(exited, 0)) return;
-
-    session.child.stdin.end();
-    if (await settled(exited, STDIN_EOF_GRACE_MS)) return;
-
-    session.child.kill("SIGTERM");
-    if (await settled(exited, SIGTERM_GRACE_MS)) return;
-
-    logger.warn(
-      { sessionKey: session.key, pid: session.child.pid },
-      "DeepSeek Harness runtime ignored SIGTERM; sending SIGKILL"
-    );
-    session.child.kill("SIGKILL");
-    await exited;
-  }
-
   private markSessionUncontinuable(session: DeepSeekRunnerSession): void {
     if (this.disposing || session.explicitlyClosed || !session.promptAttempted) return;
     this.uncontinuableSessionIds.add(session.key);
@@ -1024,6 +974,8 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     turn.finalEvent = event;
     turn.queue.close();
     if (session.activeTurn === turn) session.activeTurn = undefined;
+    // The runtime folded any ending that arrived during the turn into it.
+    session.background.takeFinished();
   }
 
   private runnerMetadata(session: DeepSeekRunnerSession): RunnerMetadata {

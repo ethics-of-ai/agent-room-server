@@ -10,4 +10,8 @@ import Foundation
 struct RunnerBootstrapSourceCheckoutOutcome: Equatable {
     var status: RunnerBootstrapCheckStatus
     var message: String
+    /// The checkout walked, so the pane can repair and recheck it without
+    /// asking for the folder again.
+    var root: URL
+    var repair: RunnerBootstrapCheckoutRepair?
 }

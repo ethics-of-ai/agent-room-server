@@ -27,8 +27,12 @@ struct RunnerBootstrapSection: View {
                 // Before the fields it fills, because it is the shorter way to
                 // the same place: an operator who has a checkout should not be
                 // asked to type three absolute paths out of it first.
-                if descriptor.sourceCheckout != nil {
-                    sourceCheckoutControls(for: descriptor)
+                if let contract = descriptor.sourceCheckout {
+                    RunnerSourceCheckoutControls(
+                        runnerName: runner.displayName,
+                        descriptor: descriptor,
+                        contract: contract
+                    )
                 }
                 // Then slot order, not probe order. A value and the probe that
                 // resolves it are one row, and a slot completing another —
@@ -53,35 +57,7 @@ struct RunnerBootstrapSection: View {
     }
 
     private func slotlessProbes(in descriptor: RunnerBootstrapDescriptor) -> [RunnerBootstrapProbe] {
-        descriptor.probes.filter { $0.resolvedSlotID == nil }
-    }
-
-    @ViewBuilder
-    private func sourceCheckoutControls(for descriptor: RunnerBootstrapDescriptor) -> some View {
-        Button("Use a source checkout…", systemImage: "folder.badge.gearshape") {
-            guard let root = chooseCheckoutFolder(runnerName: runner.displayName) else { return }
-            supervisor.adoptSourceCheckout(root, of: descriptor)
-        }
-        .buttonStyle(.bordered)
-        if let outcome = supervisor.sourceCheckoutOutcomes[descriptor.runnerKind] {
-            // Required styling: a walk the operator explicitly asked for that
-            // came back empty is a failure to report, not a neutral state.
-            StatusMessageRow(message: outcome.message, style: outcome.status.style(for: .required))
-        }
-    }
-
-    /// Matches the folder pickers the workspace and catalog panes already use,
-    /// rather than `fileImporter`: this is a modal operator action on macOS, and
-    /// one picker idiom in the app beats two.
-    private func chooseCheckoutFolder(runnerName: String) -> URL? {
-        let panel = NSOpenPanel()
-        panel.message = "Select the \(runnerName) source checkout. Its built entrypoint and example composition are read from it."
-        panel.prompt = "Use Checkout"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = false
-        return panel.runModal() == .OK ? panel.url : nil
+        descriptor.probes.filter { $0.displaySlotID == nil }
     }
 
     @ViewBuilder
@@ -89,18 +65,26 @@ struct RunnerBootstrapSection: View {
         for slot: RunnerBootstrapSlot,
         descriptor: RunnerBootstrapDescriptor
     ) -> some View {
-        let probe = descriptor.probes.first { $0.resolvedSlotID == slot.id }
-        if let probe {
-            HStack(alignment: .firstTextBaseline) {
-                slotField(for: slot, descriptor: descriptor)
-                probeButton(for: probe, descriptor: descriptor)
-            }
-            probeStatus(for: probe, descriptor: descriptor)
-        } else {
-            slotField(for: slot, descriptor: descriptor)
+        let probe = descriptor.probes.first { $0.displaySlotID == slot.id }
+        let storedValue = { (slotID: String) in
+            supervisor.secrets.slotValue(runnerKind: descriptor.runnerKind, slotID: slotID)
         }
-        if let note = slot.note {
-            SettingsCaption(text: note.text, systemImage: note.systemImage)
+        // A value the stored setup never reads is hidden rather than shown as
+        // optional: DeepSeek's composition under managed setup is the case,
+        // and an unused path field is one more thing to wonder about.
+        if probe?.isWaived(storedValue: storedValue) != true {
+            if let probe {
+                HStack(alignment: .firstTextBaseline) {
+                    slotField(for: slot, descriptor: descriptor)
+                    probeButton(for: probe, descriptor: descriptor)
+                }
+                probeStatus(for: probe, descriptor: descriptor)
+            } else {
+                slotField(for: slot, descriptor: descriptor)
+            }
+            if let note = slot.note {
+                SettingsCaption(text: note.text, systemImage: note.systemImage)
+            }
         }
     }
 
@@ -119,9 +103,32 @@ struct RunnerBootstrapSection: View {
         for probe: RunnerBootstrapProbe,
         descriptor: RunnerBootstrapDescriptor
     ) -> some View {
-        if let status = supervisor.bootstrapStatus(runnerKind: descriptor.runnerKind, probeID: probe.id) {
-            StatusMessageRow(message: probe.message(for: status), style: status.style(for: probe.requirement))
+        if let status = supervisor.bootstrapStatus(runnerKind: descriptor.runnerKind, probeID: probe.id),
+           !isReportedByCheckout(status, of: probe, descriptor: descriptor) {
+            let requirement = probe.effectiveRequirement { slotID in
+                supervisor.secrets.slotValue(runnerKind: descriptor.runnerKind, slotID: slotID)
+            }
+            StatusMessageRow(message: probe.message(for: status), style: status.style(for: requirement))
         }
+    }
+
+    /// A failed check on a checkout's entrypoint that the checkout row above
+    /// already reports, with its Update or Build button. Saying it twice adds
+    /// a second red line and no second thing to do.
+    private func isReportedByCheckout(
+        _ status: RunnerBootstrapCheckStatus,
+        of probe: RunnerBootstrapProbe,
+        descriptor: RunnerBootstrapDescriptor
+    ) -> Bool {
+        guard !status.isSatisfied,
+              let contract = descriptor.sourceCheckout,
+              let slotID = probe.displaySlotID,
+              slotID == contract.entrypointSlotID
+        else { return false }
+        return contract.offersRepair(
+            supervisor.sourceCheckoutOutcomes[descriptor.runnerKind],
+            forEntrypointIn: supervisor.secrets.slotValue(runnerKind: descriptor.runnerKind, slotID: slotID)
+        )
     }
 
     private func slotField(

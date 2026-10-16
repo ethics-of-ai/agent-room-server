@@ -24,10 +24,10 @@ struct RunnerBootstrapSlot: Equatable, Identifiable {
         /// A comma-separated argument list for that binary.
         case arguments
         /// An absolute path to a **data** file the backend hands a runner, never
-        /// one it executes. DeepSeek Harness needs it: its SDK runtime takes the
-        /// Cordis composition to boot as a path and exits without one, so a
-        /// build that could not hold this value could not set that runner up at
-        /// all.
+        /// one it executes. DeepSeek Harness custom setup needs it: the backend
+        /// passes the operator's Cordis patch to the launcher as `--patch`, so a
+        /// build that could not hold this value could not set up a custom graph
+        /// at all.
         ///
         /// It is a distinct kind rather than a reused `executablePath` because
         /// the two carry different authority — this one is not spawned — and

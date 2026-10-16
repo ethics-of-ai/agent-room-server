@@ -90,17 +90,23 @@ struct RunnerBootstrapProber {
                 resolvedSlot: Outcome.ResolvedSlot(slotID: slotID, path: normalized)
             )
 
-        case .nodeEntrypoint(let executableSlotID, let argumentsSlotID):
+        case .nodeEntrypoint(let executableSlotID, let argumentsSlotID, let package):
             let executable = storedValue(executableSlotID) ?? ""
             guard !executable.isEmpty else { return Outcome(status: .absent, resolvedSlot: nil) }
             guard URL(fileURLWithPath: executable).lastPathComponent == "node" else {
                 return Outcome(status: .satisfied(detail: "Standalone SDK runtime"), resolvedSlot: nil)
             }
-            let entrypoint = (storedValue(argumentsSlotID) ?? "")
-                .split(separator: ",", omittingEmptySubsequences: false).first.map(String.init) ?? ""
+            let entrypoint = RunnerBootstrapArgumentList.first(in: storedValue(argumentsSlotID)) ?? ""
             guard NSString(string: entrypoint).isAbsolutePath,
                   let normalized = normalizedReadableFilePath(entrypoint) else {
                 return Outcome(status: .absent, resolvedSlot: nil)
+            }
+            if let package,
+               let problem = package.verdict(for: package.assess(entrypoint: URL(fileURLWithPath: normalized), fileManager: fileManager)).problem {
+                return Outcome(
+                    status: .failed(message: problem + " Choose the checkout with Use a source checkout to fix it."),
+                    resolvedSlot: nil
+                )
             }
             return Outcome(status: .satisfied(detail: normalized), resolvedSlot: nil)
 

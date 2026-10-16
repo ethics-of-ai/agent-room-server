@@ -98,8 +98,8 @@ const fixtures: Fixture[] = [
         deepseekArgs: [await writeDeepSeekToolRuntime()],
         deepseekModel: "deepseek-v4-pro"
       });
-      const composition = join(config.workspaceRoot, "cordis.yml");
-      await writeFile(composition, `- id: agentroom-tools\n  name: ${JSON.stringify(FAKE_PLUGIN_PATH)}\n`);
+      const composition = join(config.workspaceRoot, "cordis.patch.yml");
+      await writeFile(composition, `- insert:\n    - id: agentroom-tools\n      name: ${JSON.stringify(FAKE_PLUGIN_PATH)}\n`);
       return { runner: new DeepSeekHarnessRunner({ ...config, deepseekCordisConfig: composition }), workspacePath: config.workspaceRoot };
     }
   }

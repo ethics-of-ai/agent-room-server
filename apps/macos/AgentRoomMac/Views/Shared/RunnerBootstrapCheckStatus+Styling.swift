@@ -14,7 +14,7 @@ extension RunnerBootstrapCheckStatus {
                 ? StatusStyle(systemImage: "exclamationmark.triangle.fill", tint: .orange)
                 : StatusStyle(systemImage: "info.circle.fill", tint: .secondary)
         case .failed:
-            StatusStyle(systemImage: "xmark.octagon.fill", tint: .red)
+            .failure
         }
     }
 }

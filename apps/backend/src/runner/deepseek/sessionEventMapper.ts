@@ -4,7 +4,6 @@ import "../../agentTools/questionAsk";
 import { compactDisplayText, displayTextValue } from "../shared/displayText";
 import { labelFromIdentifier } from "../shared/jsonValues";
 import {
-  assistantChunkDataSchema,
   assistantMessageDataSchema,
   requestContextDataSchema,
   requestHeaderDataSchema,
@@ -21,7 +20,7 @@ import {
  * The DeepSeek session log, mapped into the canonical activity union.
  *
  * The runtime streams every durable fact of a session as a `session.event`
- * envelope (`turn/start`, `assistant/chunk`, `tool/call`, `todo/write`, …), and
+ * envelope (`turn/start`, `assistant/message`, `tool/call`, `todo/write`, …), and
  * this module is the only place that knows what those names mean. Above the
  * `AgentRunner` boundary the mapper in `protocol/coding` dispatches on
  * `canonical.kind` alone, so an event this module gives no canonical reading —
@@ -102,18 +101,8 @@ export function mapDeepSeekSessionEvent(
     case "turn/end":
       return mapTurnEnd(event, context, runner);
 
-    case "assistant/chunk":
-      return mapAssistantChunk(event, context, runner);
-
-    case "assistant/message": {
-      // The assembled message is the one durable accounting source. The runtime
-      // also records the raw usage StreamChunk that built it, so counting both
-      // would double every request's tokens. The text itself already streamed as
-      // chunks and is likewise not republished here.
-      const data = assistantMessageDataSchema.safeParse(event.data);
-      if (!data.success || !data.data.usage) return { events: [] };
-      return { events: [usageEvent(data.data.usage, context, runner)] };
-    }
+    case "assistant/message":
+      return mapAssistantMessage(event, context, runner);
 
     case "tool/call": {
       const data = toolCallDataSchema.safeParse(event.data);
@@ -221,37 +210,38 @@ export function mapDeepSeekSessionEvent(
   }
 }
 
-function mapAssistantChunk(
+function mapAssistantMessage(
   event: DeepSeekSessionEvent,
   context: DeepSeekMapContext,
   runner: RunnerMetadata
 ): DeepSeekMapResult {
-  const data = assistantChunkDataSchema.safeParse(event.data);
+  const data = assistantMessageDataSchema.safeParse(event.data);
   if (!data.success) return { events: [] };
-  const chunk = data.data.chunk;
-
-  if (chunk.type === "text-delta" && chunk.text) {
-    // Assistant prose. `agent_update` is what the turn applier runs the artifact
-    // parser over, so the in-band `<artifact>` channel works for this runner
-    // without the adapter knowing the channel exists.
-    return { events: [{ type: "agent_update", message: chunk.text, runner }] };
+  const events: AgentRunnerEvent[] = [];
+  // The wire carries each model message once, assembled. Its blocks are the
+  // whole text, so one message yields one update per block rather than a
+  // stream of deltas. An interrupted message holds the delivered prefix.
+  for (const block of data.data.message?.content ?? []) {
+    if (!block.text) continue;
+    if (block.type === "reasoning") {
+      events.push(activityEvent({
+        kind: "deepseek_reasoning",
+        title: "Thinking",
+        content: {},
+        canonical: { kind: "reasoning", delta: block.text },
+        runner
+      }));
+    } else if (block.type === "text") {
+      // Assistant prose. `agent_update` is what the turn applier runs the
+      // artifact parser over, so the in-band `<artifact>` channel works for
+      // this runner without the adapter knowing the channel exists.
+      events.push({ type: "agent_update", message: block.text, runner });
+    }
   }
-
-  if (chunk.type === "reasoning-delta" && chunk.text) {
-    return {
-      events: [
-        activityEvent({
-          kind: "deepseek_reasoning",
-          title: "Thinking",
-          content: {},
-          canonical: { kind: "reasoning", delta: chunk.text },
-          runner
-        })
-      ]
-    };
-  }
-
-  return { events: [] };
+  // The assembled message is the one durable accounting source; its embedded
+  // stream also holds the raw usage chunk, which is not counted again.
+  if (data.data.usage) events.push(usageEvent(data.data.usage, context, runner));
+  return { events };
 }
 
 function mapTurnEnd(

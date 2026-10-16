@@ -117,6 +117,9 @@ export function claudeCodeQueryOptions(
     env: claudeCodeChildEnv(config),
     ...(options.resume ? { resume: options.resume } : {}),
     includePartialMessages: true,
+    // A one-line, model-written status for each running subagent, about every
+    // 30 s, on `task_progress`. AgentRoom shows it in the background task list.
+    agentProgressSummaries: true,
     // When workspace settings load, discover the `project` source and enable
     // every discovered skill; otherwise pass `[]` for full SDK isolation so no
     // on-disk settings/skills/CLAUDE.md/hooks/MCP servers are read.
@@ -152,7 +155,10 @@ export function claudeCodeCommandAudit(config: ServiceConfig): { executableName:
 export async function claudeCodeUserMessage(
   prompt: string,
   inputParts: AgentRunnerInputPart[] | undefined,
-  sdkSessionId: string | undefined
+  sdkSessionId: string | undefined,
+  // The CLI echoes it on the turn's result, which is how the result finds its
+  // turn when the agent also starts turns of its own.
+  uuid?: string
 ): Promise<Record<string, unknown>> {
   // The Claude Agent SDK has no local-file image source, so each attachment is
   // read off STATE_DIR and inlined as a base64 image block alongside the text.
@@ -175,6 +181,7 @@ export async function claudeCodeUserMessage(
       content: [{ type: "text", text: prompt }, ...imageBlocks]
     },
     parent_tool_use_id: null,
+    ...(uuid ? { uuid } : {}),
     ...(sdkSessionId ? { session_id: sdkSessionId } : {})
   };
 }

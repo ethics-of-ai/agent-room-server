@@ -75,7 +75,7 @@ final class BackendSupervisorRunnerBootstrapTests: XCTestCase {
     }
 
     func testMissingDeepSeekCompositionBlocksSetupAfterTheRuntimeIsFound() throws {
-        let runtime = try makeExecutable(named: "dsh-jsonrpc-agent")
+        let runtime = try makeExecutable(named: "dsh")
         let supervisor = makeSupervisor(
             runnerKind: "deepseek",
             prober: RunnerBootstrapTestSupport.prober(deepseekCandidates: [runtime])
@@ -88,13 +88,86 @@ final class BackendSupervisorRunnerBootstrapTests: XCTestCase {
         XCTAssertEqual(supervisor.bootstrapStatus(runnerKind: "deepseek", probeID: "cordisConfig"), .absent)
         XCTAssertTrue(
             supervisor.setupReadiness.blockingItems.contains(
-                "Choose an existing DeepSeek Harness Cordis composition, then rerun the check."
+                "Choose an existing DeepSeek Harness Cordis patch, or select AgentRoom managed setup."
+            )
+        )
+    }
+
+    func testAdoptingAnOutdatedCheckoutSavesItsPathsSelectsManagedSetupAndOffersTheUpdate() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("deepseek-harness")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        try RunnerBootstrapTestSupport.makePackage(at: root.appendingPathComponent("apps/cli"), version: "0.1.0-rc.7")
+        // The walk searches this Mac for node. Whether or not it finds one, the
+        // executable slot ends up naming a node, which the entrypoint check needs.
+        var initialSecrets = BackendSecretValues.empty
+        initialSecrets.setSlotValue("/usr/bin/node", runnerKind: "deepseek", slotID: "executable")
+        let secretStore = InMemoryBackendSecretStore(values: initialSecrets)
+        let supervisor = makeSupervisor(runnerKind: "deepseek", secretStore: secretStore, prober: RunnerBootstrapTestSupport.prober())
+        let descriptor = RunnerBootstrapTestSupport.descriptor("deepseek")
+
+        supervisor.adoptSourceCheckout(root, of: descriptor)
+
+        let entrypoint = root.resolvingSymlinksInPath().appendingPathComponent("apps/cli/lib/bin.js").path
+        XCTAssertEqual(secretStore.values.slotValue(runnerKind: "deepseek", slotID: "arguments"), entrypoint)
+        XCTAssertEqual(secretStore.values.slotValue(runnerKind: "deepseek", slotID: "compositionMode"), "managed")
+        let outcome = try XCTUnwrap(supervisor.sourceCheckoutOutcomes["deepseek"])
+        XCTAssertEqual(outcome.repair, .update(revision: "86a402200d95fecef4529d969836f1fe13c6cb0d"))
+        // The probes reran against the new values, so the old launcher fails
+        // its check instead of keeping an earlier answer.
+        guard case .failed = supervisor.bootstrapStatus(runnerKind: "deepseek", probeID: "entrypoint") else {
+            return XCTFail("expected the outdated launcher to fail the entrypoint check")
+        }
+
+        // A relaunch finds the same checkout from the saved entrypoint alone.
+        let relaunched = makeSupervisor(
+            runnerKind: "deepseek",
+            secretStore: InMemoryBackendSecretStore(values: secretStore.values),
+            prober: RunnerBootstrapTestSupport.prober()
+        )
+        XCTAssertEqual(relaunched.sourceCheckoutOutcomes["deepseek"]?.repair, outcome.repair)
+
+        // An entrypoint from outside any checkout leaves nothing for that
+        // checkout's message to describe, so the next check drops it.
+        relaunched.updateRunnerBootstrapSlot("/opt/dsh/lib/bin.js", runnerKind: "deepseek", slotID: "arguments")
+        relaunched.checkRunnerBootstrap()
+        XCTAssertNil(relaunched.sourceCheckoutOutcomes["deepseek"])
+    }
+
+    func testManagedDeepSeekSetupDoesNotWaitForAComposition() throws {
+        let runtime = try makeExecutable(named: "dsh")
+        var initialSecrets = BackendSecretValues.empty
+        initialSecrets.setSlotValue("managed", runnerKind: "deepseek", slotID: "compositionMode")
+        let supervisor = makeSupervisor(
+            runnerKind: "deepseek",
+            secretStore: InMemoryBackendSecretStore(values: initialSecrets),
+            prober: RunnerBootstrapTestSupport.prober(deepseekCandidates: [runtime])
+        )
+
+        XCTAssertEqual(supervisor.bootstrapStatus(runnerKind: "deepseek", probeID: "cordisConfig"), .absent)
+        XCTAssertFalse(supervisor.setupReadiness.blockingItems.contains { $0.contains("composition") })
+        let compositionAbsent = try XCTUnwrap(
+            RunnerBootstrapTestSupport.descriptor("deepseek").probe("cordisConfig")?.messages.absent
+        )
+        XCTAssertEqual(
+            supervisor.diagnostics.first { $0.message == compositionAbsent }?.level,
+            "info"
+        )
+
+        // Switching back to custom puts the composition back on the checklist
+        // without a re-probe: the stored absence now blocks again.
+        supervisor.updateRunnerBootstrapSlot("custom", runnerKind: "deepseek", slotID: "compositionMode")
+
+        XCTAssertTrue(
+            supervisor.setupReadiness.blockingItems.contains(
+                "Choose an existing DeepSeek Harness Cordis patch, or select AgentRoom managed setup."
             )
         )
     }
 
     func testEditingAValidatedCompositionInvalidatesItsReadiness() throws {
-        let runtime = try makeExecutable(named: "dsh-jsonrpc-agent")
+        let runtime = try makeExecutable(named: "dsh")
         let composition = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
             .appendingPathComponent("cordis.yml")
@@ -126,7 +199,7 @@ final class BackendSupervisorRunnerBootstrapTests: XCTestCase {
         XCTAssertNil(supervisor.bootstrapStatus(runnerKind: "deepseek", probeID: "cordisConfig"))
         XCTAssertTrue(
             supervisor.setupReadiness.blockingItems.contains(
-                "Set or check the DeepSeek Harness Cordis composition path."
+                "Set or check the DeepSeek Harness composition, or select AgentRoom managed setup."
             )
         )
     }

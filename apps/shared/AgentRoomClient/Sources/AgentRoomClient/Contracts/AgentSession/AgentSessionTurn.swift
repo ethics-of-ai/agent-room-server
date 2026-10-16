@@ -14,6 +14,8 @@ public struct AgentSessionTurn: Codable, Hashable, Identifiable {
     public var modelContextWindowTokens: Int?
     /// The threshold this turn read, on the same terms as the session's copy.
     public var contextCompactionThresholdTokens: Int?
+    /// Set when the agent started this turn itself, after background work finished.
+    public var trigger: AgentTurnTrigger?
 
     public init(
         id: String,
@@ -27,7 +29,8 @@ public struct AgentSessionTurn: Codable, Hashable, Identifiable {
         outputTokens: Int,
         totalTokens: Int,
         modelContextWindowTokens: Int? = nil,
-        contextCompactionThresholdTokens: Int? = nil
+        contextCompactionThresholdTokens: Int? = nil,
+        trigger: AgentTurnTrigger? = nil
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -41,5 +44,6 @@ public struct AgentSessionTurn: Codable, Hashable, Identifiable {
         self.totalTokens = totalTokens
         self.modelContextWindowTokens = modelContextWindowTokens
         self.contextCompactionThresholdTokens = contextCompactionThresholdTokens
+        self.trigger = trigger
     }
 }

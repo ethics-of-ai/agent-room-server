@@ -12,6 +12,7 @@ import {
 } from "../runner/shared/PendingQuestionRequests";
 import { AgentAttachmentError, AgentAttachmentStore, maxAgentAttachmentBytes } from "../agent/AgentAttachmentStore";
 import { AgentSessionError, AgentSessionService } from "../agent/AgentSessionService";
+import { BACKGROUND_TASK_LIMITS } from "../domain/backgroundWork";
 import { agentRunnerKindSchema, agentTurnContextSchema, codingAgentTurnSettingsSchema } from "../domain/schemas";
 import type { ServiceConfig } from "../domain/models";
 import { PLAN_SNAPSHOT_SCHEMA_VERSION } from "../plans/planTools";
@@ -45,6 +46,11 @@ const answerPermissionPayloadSchema = z.object({
 const questionParamsSchema = z.object({
   sessionId: z.string().trim().min(1),
   requestId: z.string().trim().min(1).max(MAX_QUESTION_ID_LENGTH)
+});
+
+const backgroundTaskParamsSchema = z.object({
+  sessionId: z.string().trim().min(1),
+  taskId: z.string().trim().min(1).max(BACKGROUND_TASK_LIMITS.text)
 });
 
 // Every id here is AgentRoom-minted and checked by the runner against the sets
@@ -295,6 +301,20 @@ export async function registerAgentSessionRoutes(
     const questions = agentSessions.listOutstandingQuestions(sessionId);
     if (!questions) return reply.code(404).send({ error: "Agent session was not found" });
     return { questions };
+  });
+
+  // Stop one live background task the session's runner reports. Mutating, so
+  // the global preHandler requires the bearer token when AUTH_TOKEN is set.
+  app.post("/api/agent-sessions/:sessionId/background-tasks/:taskId/stop", async (request, reply) => {
+    const { sessionId, taskId } = backgroundTaskParamsSchema.parse(request.params);
+    try {
+      return { session: await agentSessions.stopBackgroundTask(sessionId, taskId) };
+    } catch (error) {
+      if (error instanceof AgentSessionError) {
+        return reply.code(error.statusCode).send({ error: error.message });
+      }
+      throw error;
+    }
   });
 
   app.post("/api/agent-sessions/:sessionId/cancel", async (request, reply) => {

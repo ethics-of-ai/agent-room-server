@@ -28,6 +28,10 @@ public struct AgentSession: Codable, Hashable, Identifiable {
     /// an older backend, means a new thread is needed for an agent to edit
     /// sketches.
     public var sketchToolsAvailable: Bool?
+    /// Work the agent runs beside its turns, live while the backend's runner
+    /// reports it. Absent when nothing runs and from older backends. The
+    /// session stays `idle` while tasks run.
+    public var backgroundTasks: [AgentBackgroundTask]?
 
     public init(
         id: String,
@@ -47,7 +51,8 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         turnCount: Int,
         createdAt: String,
         updatedAt: String,
-        sketchToolsAvailable: Bool? = nil
+        sketchToolsAvailable: Bool? = nil,
+        backgroundTasks: [AgentBackgroundTask]? = nil
     ) {
         self.id = id
         self.workspaceId = workspaceId
@@ -67,5 +72,6 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.sketchToolsAvailable = sketchToolsAvailable
+        self.backgroundTasks = backgroundTasks
     }
 }

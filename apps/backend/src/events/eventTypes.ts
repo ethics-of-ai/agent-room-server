@@ -17,6 +17,7 @@ export type AgentRoomEventType =
   | "agent_permission_resolved"
   | "agent_question_resolved"
   | "agent_plan_changed"
+  | "agent_background_tasks_changed"
   | "workspace_registered"
   | "workspace_removed"
   | "workspace_branch_changed"

@@ -20,8 +20,17 @@ export const childToolMessageSchema = z.discriminatedUnion("type", [
     name: toolName,
     arguments: z.unknown()
   }).strict(),
-  z.object({ ...base, type: z.literal("cancel"), runId, callId }).strict()
+  z.object({ ...base, type: z.literal("cancel"), runId, callId }).strict(),
+  z.object({ ...base, type: z.literal("stopped"), requestId: z.number().int().nonnegative(), result: z.enum(["stopped", "unknown_task"]) }).strict()
 ]);
+
+/**
+ * Background work the plugin can stop inside the runtime: a job, as the
+ * session that owns it, or a subagent, for the session that started it.
+ */
+export type BackgroundStopTarget =
+  | { kind: "job"; jobId: string; owner: string }
+  | { kind: "subagent"; childSessionId: string; parentSessionId: string };
 
 export type ChildToolMessage = z.infer<typeof childToolMessageSchema>;
 
@@ -29,7 +38,9 @@ export type ParentToolMessage =
   | { version: 1; type: "catalog"; catalog: readonly AgentToolAdvertisement[] }
   | { version: 1; type: "bind"; runId: string; allowedNames: readonly string[] }
   | { version: 1; type: "result"; runId: string; callId: string; result: string }
-  | { version: 1; type: "unbind"; runId: string };
+  | { version: 1; type: "unbind"; runId: string }
+  | { version: 1; type: "stop"; requestId: number; target: BackgroundStopTarget }
+  | { version: 1; type: "subagents"; paused: boolean };
 
 export function encodeToolMessage(message: ParentToolMessage | ChildToolMessage): string {
   return `${JSON.stringify(message)}\n`;

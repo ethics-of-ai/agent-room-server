@@ -1,5 +1,6 @@
 import type { AgentRunnerKind, CodingAgentCapabilities, CodingAgentTurnSettings } from "../domain/models";
 import type { AgentToolAdvertisement } from "../agentTools/dispatch";
+import type { AgentBackgroundTask, AgentFinishedBackgroundTask } from "../domain/backgroundWork";
 import type {
   PermissionAnswerResult,
   PermissionDecisionAuthority,
@@ -304,6 +305,39 @@ export type AgentRunnerEvent =
     };
 
 /**
+ * A stop request's answer: `unknown_task` when the runner lists no such live
+ * task, and `unavailable` when it lists the task but this session has no way
+ * to stop it, such as a DeepSeek graph without the AgentRoom plugin.
+ */
+export type BackgroundTaskStopResult = "stopped" | "unknown_task" | "unavailable";
+
+/**
+ * What the runner reports about background work between and during turns.
+ * Every call names the AgentRoom session; none blocks the runner.
+ */
+export interface AgentRunnerBackgroundListener {
+  /** The session's full live task list after a change. Replace, never merge. */
+  tasksChanged(input: { sessionId: string; tasks: AgentBackgroundTask[] }): void;
+  /**
+   * The agent began a turn of its own, after background work finished. The
+   * service accepts it by calling `start` with the AgentRoom turn id, which
+   * returns the turn's events: shaped like `run()` output, ending with a
+   * terminal event. A turn the service never starts is refused, and the
+   * runner drops its events.
+   *
+   * `afterRunId` names the runner's latest turn, whose terminal event it has
+   * already delivered. The service may still be settling that turn; it then
+   * starts this one at once and opens it when the settle ends.
+   */
+  turnStarted(input: {
+    sessionId: string;
+    afterRunId?: string;
+    finished: AgentFinishedBackgroundTask[];
+    start(runId: string): AsyncIterable<AgentRunnerEvent>;
+  }): void;
+}
+
+/**
  * `refresh` skips an adapter's cached discovery and stores the fresh answer.
  * A client sends it when the operator has changed something the cache would
  * hide, such as signing a CLI out. Adapters without a cache ignore it.
@@ -387,6 +421,14 @@ export interface AgentRunner {
    * runner does not know.
    */
   nativeToolRegistration?(sessionId: string): { nativeSessionId: string; names: string[] } | undefined;
+  /**
+   * Start reporting background work to `listener`. The service calls it once,
+   * at construction. Optional: a runner that never runs work beside its turns
+   * has nothing to report, and its absence is all the service reads.
+   */
+  watchBackgroundWork?(listener: AgentRunnerBackgroundListener): void;
+  /** Ask a live background task to stop. Its end arrives as a task list change. */
+  stopBackgroundTask?(input: { sessionId: string; taskId: string }): Promise<BackgroundTaskStopResult>;
   // Release per-session runner resources (persistent child processes, queues)
   // when the AgentRoom session is deleted.
   closeSession?(sessionId: string): Promise<void>;

@@ -16,6 +16,8 @@ export interface ClaudeCodeQuery extends AsyncIterable<unknown> {
   getContextUsage?(): Promise<unknown>;
   /** The signed-in account, read from the child without a model call. */
   accountInfo?(): Promise<unknown>;
+  /** Stop one task by its `task_id`; its end arrives as task messages. */
+  stopTask?(taskId: string): Promise<void>;
   /** Connection status of each configured MCP server; a control round trip, not a model call. */
   mcpServerStatus?(): Promise<unknown[]>;
   return?(value?: unknown): Promise<IteratorResult<unknown>>;

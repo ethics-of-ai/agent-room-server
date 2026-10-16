@@ -70,16 +70,15 @@ environment-only and never enter that file. The macOS-only sidecar controls
 - `AUTH_TOKEN`: optional bearer token for mutating routes.
 - `CODEX_EXECUTABLE`: Codex executable path.
 - `CODEX_ARGS`: comma-separated Codex arguments.
-- `DEEPSEEK_EXECUTABLE`: path to the DeepSeek Harness **SDK runtime**
-  (`dsh-jsonrpc-agent`, or the packaged single-file build) — not the `dsh`
-  launcher, which boots profiles and serves no SDK protocol.
+- `DEEPSEEK_EXECUTABLE`: the DeepSeek Harness `dsh` launcher, or an absolute
+  Node executable that runs its CLI entrypoint from `DEEPSEEK_ARGS`. AgentRoom
+  appends `--profile agentroom --patch <composition>`.
 - `DEEPSEEK_COMPOSITION_MODE`: local `custom` default or explicit `managed`
-  opt-in. Managed mode generates the standard graph and resolves installed
-  packages from the selected composition directory. See the
+  opt-in. Managed mode generates the standard graph. See the
   [DeepSeek setup guide](../engineering/DEEPSEEK_HARNESS_RUNNER.md#managed-setup-and-readiness).
-- `DEEPSEEK_CORDIS_CONFIG`: custom composition or managed package-resolution source.
-  Required alongside the executable: the runtime exits nonzero without one, so
-  `GET /api/runners` reports `configured: false` until both are set.
+- `DEEPSEEK_CORDIS_CONFIG`: the custom-mode patch file, which is the runtime's
+  whole graph. Custom mode needs it, so `GET /api/runners` reports
+  `configured: false` until it is set. Managed mode does not read it.
 - `CODEX_MODEL`: optional default Codex model.
 - `CODEX_REASONING_EFFORT`: optional `none`, `minimal`, `low`, `medium`,
   `high`, or `xhigh`.

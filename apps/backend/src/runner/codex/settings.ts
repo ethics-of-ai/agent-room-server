@@ -65,12 +65,18 @@ export function jsonRpcThreadSettings(settings: CodingAgentTurnSettings): Record
   };
 }
 
+// Codex 0.160 delegates to a subagent only on an explicit request; see
+// "Background tasks" in docs/engineering/RUNNERS.md.
+export const CODEX_BACKGROUND_DELEGATION_INSTRUCTIONS =
+  "When the user asks for work to run in the background or as a background task, treat that as an explicit request to delegate: start a subagent with spawn_agent for that work, do not wait for it, and tell the user it is running.";
+
 export function jsonRpcRuntimeSettings(config: ServiceConfig): Record<string, unknown> {
   const sandbox = config.codexSandboxMode ?? "workspace-write";
   const runtimeConfig = jsonRpcRuntimeConfig(config);
   return {
     approvalPolicy: config.codexApprovalPolicy ?? "never",
     sandbox,
+    developerInstructions: CODEX_BACKGROUND_DELEGATION_INSTRUCTIONS,
     ...(runtimeConfig ? { config: runtimeConfig } : {})
   };
 }

@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { CodingAgentCapabilities, CodingAgentTurnSettings, ServiceConfig } from "../../domain/models";
 import { logger } from "../../logging/logger";
-import { redactSecrets } from "../../util/redactSecrets";
 import {
   AgentRunnerInputError,
   type AgentRunner,
+  type AgentRunnerBackgroundListener,
+  type BackgroundTaskStopResult,
   type AgentRunnerEvent,
   type AgentRunnerInput,
   type AgentRunnerInputPart,
@@ -16,12 +16,11 @@ import { TimeoutError, delay, withTimeout } from "../shared/asyncUtils";
 import { commandAudit } from "../shared/commandAudit";
 import { objectValue, stringValue } from "../shared/jsonValues";
 import { fallbackCapabilities, readCodexCapabilities } from "./capabilities";
+import { appendStderrTail, codexChildEnv, collectStderrTail } from "./childProcess";
+import { CodexBackgroundWork } from "./backgroundWork";
+import { belongsToTurn, EndedTurns, isSessionThread } from "./threadRouting";
 import { assistantTextFromCodexExecJsonLine, codexExecJsonOutput, codexTextOutputFilter } from "./execOutput";
-import {
-  runnerMetadataFromNotification,
-  completionFromNotification,
-  mapCodexNotification
-} from "./notificationMapper";
+import { runnerMetadataFromNotification, completionFromNotification, mapCodexNotification } from "./notificationMapper";
 import {
   effectiveSettings,
   jsonRpcArgs,
@@ -70,8 +69,6 @@ const JSON_RPC_INTERRUPT_TIMEOUT_MS = 1_000;
 // resume the conversation. Matches the terminal service's idle window.
 const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
-const STDERR_TAIL_LIMIT_CHARS = 2_048;
-
 // Names this runner's child in the shared line client's two errors, so a
 // rejected request says which process went away rather than "the client".
 const CODEX_CLIENT_LABEL = "Codex app-server";
@@ -93,6 +90,7 @@ export class CodexAppServerRunner implements AgentRunner {
   // waits here; the answer route settles it. Released with the turn, the
   // child, and the session.
   private readonly questions: PendingQuestionRequests;
+  private backgroundListener?: AgentRunnerBackgroundListener;
 
   constructor(
     private readonly config: ServiceConfig,
@@ -124,7 +122,8 @@ export class CodexAppServerRunner implements AgentRunner {
           session.child.kill("SIGTERM");
         }
       },
-      isBusy: (session) => session.activeTurn !== undefined,
+      // Live subagents and shells die with the child, so they keep it from being reaped.
+      isBusy: (session) => session.activeTurn !== undefined || session.background.hasLiveTasks,
       isReusable: (session) => session.child.exitCode === null && !session.child.killed,
       describe: (session) => ({ threadId: session.threadId })
     });
@@ -195,6 +194,7 @@ export class CodexAppServerRunner implements AgentRunner {
     }
 
     if (activeJsonRpcTurn?.turn.turnId) {
+      activeJsonRpcTurn.session.endedTurns.remember(activeJsonRpcTurn.turn.turnId);
       // A question belongs to the turn being stopped; settle it as cancelled
       // so the child gets its (empty) answer and nothing waits on a person.
       this.questions.releaseSession(activeJsonRpcTurn.session.key);
@@ -217,9 +217,7 @@ export class CodexAppServerRunner implements AgentRunner {
         activeJsonRpcTurn.turn.completedByProtocol = true;
         activeJsonRpcTurn.turn.finalEvent = { type: "run_failed", error: "Codex app-server turn interrupted" };
         activeJsonRpcTurn.turn.queue.close();
-        if (activeJsonRpcTurn.session.activeTurn === activeJsonRpcTurn.turn) {
-          activeJsonRpcTurn.session.activeTurn = undefined;
-        }
+        if (activeJsonRpcTurn.session.activeTurn === activeJsonRpcTurn.turn) activeJsonRpcTurn.session.activeTurn = undefined;
       }
       this.activeJsonRpcTurns.delete(runId);
       return;
@@ -249,6 +247,14 @@ export class CodexAppServerRunner implements AgentRunner {
 
   nativeToolRegistration(sessionId: string): { nativeSessionId: string; names: string[] } | undefined {
     return this.sessions.toolRegistration(sessionId);
+  }
+
+  watchBackgroundWork(listener: AgentRunnerBackgroundListener): void {
+    this.backgroundListener = listener;
+  }
+
+  async stopBackgroundTask(input: { sessionId: string; taskId: string }): Promise<BackgroundTaskStopResult> {
+    return this.sessions.acquire(input.sessionId)?.background.stop(input.taskId) ?? "unknown_task";
   }
 
   answerQuestionRequest(input: { sessionId: string; requestId: string; answers: CanonicalQuestionAnswer[] }): QuestionAnswerResult {
@@ -475,9 +481,9 @@ export class CodexAppServerRunner implements AgentRunner {
       this.activeJsonRpcTurns.delete(input.runId);
       if (session) {
         this.sessions.touch(session);
-        if (session.activeTurn === activeTurn) {
-          session.activeTurn = undefined;
-        }
+        session.endedTurns.remember(activeTurn.turnId);
+        if (session.activeTurn === activeTurn) session.activeTurn = undefined;
+        session.background.turnEnded(input.runId);
         // A question belongs to the turn that asked it; nothing may stay open
         // for a person once the turn has settled.
         this.questions.releaseSession(session.key);
@@ -539,7 +545,15 @@ export class CodexAppServerRunner implements AgentRunner {
       client,
       child,
       threadId: "",
-      activeTurn
+      activeTurn,
+      endedTurns: new EndedTurns(),
+      background: new CodexBackgroundWork({
+        sessionId: key,
+        request: (method, params) => client.request(method, params),
+        threadId: () => session.threadId,
+        busy: () => session.activeTurn !== undefined,
+        listener: () => this.backgroundListener
+      })
     };
 
     client.onNotification((notification) => this.handleJsonRpcNotification(session, notification));
@@ -547,6 +561,7 @@ export class CodexAppServerRunner implements AgentRunner {
     child.on("close", (code, signal) => {
       this.sessions.release(session);
       this.questions.releaseSession(session.key);
+      session.background.reset();
       const active = session.activeTurn;
       if (!active) return;
       active.exitStatus = { code, signal };
@@ -564,6 +579,7 @@ export class CodexAppServerRunner implements AgentRunner {
     child.on("error", (error) => {
       this.sessions.release(session);
       this.questions.releaseSession(session.key);
+      session.background.reset();
       const active = session.activeTurn;
       if (!active) return;
       active.failureCategory = "process_error";
@@ -694,11 +710,14 @@ export class CodexAppServerRunner implements AgentRunner {
   }
 
   private handleJsonRpcNotification(session: CodexRunnerSession, notification: JsonRpcNotification): void {
+    if (session.background.observe(notification) || !isSessionThread(session, notification)) return;
+    // A shell can outlive any turn, interrupted ones included; read the list after each.
+    if (notification.method === "turn/completed") void session.background.refresh();
     const active = session.activeTurn;
-    if (!active) return;
+    if (!active || !belongsToTurn(session, active, notification)) return;
     this.sessions.touch(session);
 
-    active.turnId ??= runnerMetadataFromNotification(notification).nativeTurnId;
+    if (notification.method === "turn/started") active.turnId ??= runnerMetadataFromNotification(notification).nativeTurnId;
     const mapped = mapCodexNotification(notification);
     for (const event of mapped) active.queue.push(event);
 
@@ -709,38 +728,4 @@ export class CodexAppServerRunner implements AgentRunner {
       active.queue.close();
     }
   }
-}
-
-// The app-server writes diagnostics to stderr, and that pipe must always be
-// drained: left unconsumed, the OS pipe buffer fills and blocks the child
-// mid-write, silently wedging the session. Draining also keeps a bounded tail
-// so startup and crash failures can carry the child's own explanation.
-function collectStderrTail(child: ChildProcessWithoutNullStreams): () => string | undefined {
-  let tail = "";
-  child.stderr.on("data", (chunk: Buffer) => {
-    tail = (tail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT_CHARS);
-  });
-  return () => {
-    const text = tail.trim();
-    return text.length > 0 ? text : undefined;
-  };
-}
-
-// The tail is the child's own text, not ours: it can quote a config line or an
-// MCP server's diagnostics, so it is redacted before being appended to an error
-// that reaches `/api/coding-agent/capabilities`, turn-failure events, and
-// `/api/logs`.
-function appendStderrTail(message: string, stderrTail: string | undefined): string {
-  return stderrTail ? `${message} (stderr: ${redactSecrets(stderrTail)})` : message;
-}
-
-// Codex inherits the operator's environment so it can find its own credentials
-// and tooling, minus AgentRoom's bearer token: `AUTH_TOKEN` is our transport
-// secret, nothing the app-server or the MCP servers it starts needs, and it
-// would otherwise propagate into every process the turn spawns. Mirrors the
-// scrubs in terminal/TerminalSessionService.ts and runner/claudeCode/settings.ts.
-function codexChildEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  delete env.AUTH_TOKEN;
-  return env;
 }

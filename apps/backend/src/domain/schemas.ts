@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { WorkspaceTreeEntry } from "./models";
 import { agentRunnerKindSchema } from "../runner/registry";
+import { agentBackgroundTaskSchema, agentTurnTriggerSchema, BACKGROUND_TASK_LIMITS } from "./backgroundWork";
 import { PLAN_LIMITS, planMutationReceiptSchema, threadPlanSchema } from "../plans/planModel";
 import {
   defaultClaudeCodeLoadWorkspaceSkills,
@@ -427,7 +428,8 @@ export const agentSessionSchema = z.object({
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   sketchToolsAvailable: z.boolean().optional(),
-  threadAgentToolIds: z.array(z.string().min(1)).max(64).optional()
+  threadAgentToolIds: z.array(z.string().min(1)).max(64).optional(),
+  backgroundTasks: z.array(agentBackgroundTaskSchema).max(BACKGROUND_TASK_LIMITS.listed).optional()
 });
 
 export const agentSessionTurnSchema = z.object({
@@ -442,7 +444,8 @@ export const agentSessionTurnSchema = z.object({
   outputTokens: z.number().int().nonnegative(),
   totalTokens: z.number().int().nonnegative(),
   modelContextWindowTokens: z.number().int().positive().optional(),
-  contextCompactionThresholdTokens: z.number().int().positive().optional()
+  contextCompactionThresholdTokens: z.number().int().positive().optional(),
+  trigger: agentTurnTriggerSchema.optional()
 });
 
 export const agentSessionMessageSchema = z.object({

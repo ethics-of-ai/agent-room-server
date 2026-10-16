@@ -17,7 +17,13 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
         /// absolute, readable, and present.
         case filePath(slotID: String)
         /// Check a Node SDK entrypoint without starting the backend or runtime.
-        case nodeEntrypoint(executableSlotID: String, argumentsSlotID: String)
+        /// With a `package`, the entrypoint must also come from that package
+        /// at a version no older than the tested one, built after its sources.
+        case nodeEntrypoint(
+            executableSlotID: String,
+            argumentsSlotID: String,
+            package: RunnerBootstrapEntrypointPackage? = nil
+        )
         /// Presence-only Keychain lookup. It requests no item data and never
         /// reads, returns, or logs the credential — see
         /// `docs/safety/TRUST_AND_SAFETY.md`.
@@ -47,6 +53,23 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
     var actionTitle: String
     var actionSymbol: String
     var messages: RunnerBootstrapProbeMessages
+    /// A stored choice that makes this probe `informational`, for a value one
+    /// setup mode never reads. DeepSeek's composition is the case: managed
+    /// setup generates its own graph, so only custom setup needs the file, and
+    /// asking a managed operator to supply one would block setup on a value the
+    /// backend ignores.
+    var waivedBy: RunnerBootstrapChoiceSelection? = nil
+
+    /// The requirement that applies to the slot values stored now. A closure
+    /// that knows no values leaves the declared requirement in force.
+    func effectiveRequirement(storedValue: (String) -> String?) -> Requirement {
+        isWaived(storedValue: storedValue) ? .informational : requirement
+    }
+
+    /// Whether the stored choice makes this probe's value unused.
+    func isWaived(storedValue: (String) -> String?) -> Bool {
+        waivedBy?.isSelected(storedValue: storedValue) == true
+    }
 
     func message(for status: RunnerBootstrapCheckStatus) -> String {
         switch status {
@@ -62,9 +85,13 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
     }
 
     /// The setup-checklist line this probe contributes, or `nil` when it
-    /// contributes none — because it is satisfied, or because it never blocks.
-    func blockingItem(for status: RunnerBootstrapCheckStatus?) -> String? {
-        guard requirement == .required else { return nil }
+    /// contributes none — because it is satisfied, or because it does not block
+    /// under the stored slot values.
+    func blockingItem(
+        for status: RunnerBootstrapCheckStatus?,
+        storedValue: (String) -> String? = { _ in nil }
+    ) -> String? {
+        guard effectiveRequirement(storedValue: storedValue) == .required else { return nil }
         switch status {
         case .some(let status) where status.isSatisfied:
             return nil
@@ -75,6 +102,16 @@ struct RunnerBootstrapProbe: Equatable, Identifiable {
         default:
             return messages.blockingUnchecked
         }
+    }
+
+    /// The slot whose row shows this probe: the slot it resolves, or the one
+    /// whose value it checks. A Node entrypoint check reads the Arguments
+    /// value, so it belongs on that row rather than above the whole section.
+    var displaySlotID: String? {
+        if case .nodeEntrypoint(_, let argumentsSlotID, _) = kind {
+            return argumentsSlotID
+        }
+        return resolvedSlotID
     }
 
     /// The slot this probe resolves a value into, if any.

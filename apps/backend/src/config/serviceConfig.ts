@@ -111,17 +111,12 @@ export function getServiceConfig(): ServiceConfig {
     codexRunnerProtocol: optionalEnv("CODEX_RUNNER_PROTOCOL") ?? "jsonrpc",
     claudeCodeExecutable: optionalEnv("CLAUDE_CODE_EXECUTABLE"),
     deepseekExecutable: optionalEnv("DEEPSEEK_EXECUTABLE"),
-    // The SDK runtime takes its composition from `$DSH_CORDIS_CONFIG`, else an
-    // argv positional, and exits nonzero when it has neither — there is no
-    // working-directory search and no built-in default. AgentRoom therefore
-    // carries the path as its own tier-3 key and injects it on the documented
-    // env channel, which also keeps it independent of DEEPSEEK_ARGS (a
-    // non-empty argv would otherwise occupy the positional slot).
-    //
-    // An operator who already exports DSH_CORDIS_CONFIG is honored rather than
-    // told to rename it: the child inherits that value either way, so refusing
-    // to see it would report an unconfigured runner that in fact works.
-    deepseekCordisConfig: optionalEnv("DEEPSEEK_CORDIS_CONFIG") ?? optionalEnv("DSH_CORDIS_CONFIG"),
+    // The `dsh` launcher composes a profile from patch files only. In custom
+    // setup this is the operator's patch, passed as `--patch` over AgentRoom's
+    // empty profile; managed setup generates its own and does not read it.
+    // The launcher no longer reads DSH_CORDIS_CONFIG, so that name is not an
+    // alias: an old complete composition is not a patch and would mount nothing.
+    deepseekCordisConfig: optionalEnv("DEEPSEEK_CORDIS_CONFIG"),
     deepseekCompositionMode: optionalEnv("DEEPSEEK_COMPOSITION_MODE") ?? "custom",
     // Extra fixed arguments for the runtime. Unlike CODEX_ARGS this selects
     // nothing by itself — the composition above is what decides which plugins,

@@ -1,16 +1,20 @@
 import type { Duplex } from "node:stream";
 import { unboundAgentToolResult, type AgentToolAdvertisement } from "../../../agentTools/dispatch";
-import type { AgentRunnerToolBinding } from "../../AgentRunner";
+import type { AgentRunnerToolBinding, BackgroundTaskStopResult } from "../../AgentRunner";
 import {
   AGENTROOM_TOOLS_MAX_FRAME_BYTES,
   AGENTROOM_TOOLS_PROTOCOL_VERSION,
   childToolMessageSchema,
   encodeToolMessage,
+  type BackgroundStopTarget,
   type ChildToolMessage,
   type ParentToolMessage
 } from "./protocol";
 
 const READY_TIMEOUT_MESSAGE = "Timed out waiting for the AgentRoom Cordis tools plugin";
+/** How long a new runtime's plugin has to answer `ready`. */
+export const TOOLS_READY_TIMEOUT_MS = 10_000;
+const STOP_TIMEOUT_MS = 5_000;
 
 export class DeepSeekToolRelay {
   private buffer = "";
@@ -20,6 +24,8 @@ export class DeepSeekToolRelay {
   private binding?: AgentRunnerToolBinding;
   private readonly calls = new Map<string, AbortController>();
   private readonly seenCallIds = new Set<string>();
+  private readonly stops = new Map<number, { resolve(result: BackgroundTaskStopResult): void; reject(error: Error): void }>();
+  private nextStopId = 0;
   private readonly readyPromise: Promise<void>;
   private resolveReady!: () => void;
   private rejectReady!: (error: Error) => void;
@@ -79,9 +85,34 @@ export class DeepSeekToolRelay {
     if (!this.closed) this.send({ version: AGENTROOM_TOOLS_PROTOCOL_VERSION, type: "unbind", runId });
   }
 
+  /** Ask the plugin to stop one job or subagent inside the runtime; `unavailable` until it is ready. */
+  async stop(target: BackgroundStopTarget): Promise<BackgroundTaskStopResult> {
+    if (!this.ready || this.closed) return "unavailable";
+    const requestId = this.nextStopId++;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await new Promise<BackgroundTaskStopResult>((resolve, reject) => {
+        this.stops.set(requestId, { resolve, reject });
+        timer = setTimeout(() => reject(new Error("Timed out stopping DeepSeek background work")), STOP_TIMEOUT_MS);
+        timer.unref?.();
+        this.send({ version: AGENTROOM_TOOLS_PROTOCOL_VERSION, type: "stop", requestId, target });
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.stops.delete(requestId);
+    }
+  }
+
+  /** Ask the plugin to refuse or allow new subagents; a relay that is not live has nothing to pause. */
+  pauseSubagents(paused: boolean): void {
+    if (this.ready && !this.closed) this.send({ version: AGENTROOM_TOOLS_PROTOCOL_VERSION, type: "subagents", paused });
+  }
+
   close(error = new Error("AgentRoom tools relay closed")): void {
     if (this.closed) return;
     this.closed = true;
+    for (const stop of this.stops.values()) stop.reject(error);
+    this.stops.clear();
     for (const controller of this.calls.values()) controller.abort();
     this.calls.clear();
     this.binding = undefined;
@@ -141,6 +172,10 @@ export class DeepSeekToolRelay {
       return;
     }
     if (!this.ready) return this.close(new Error("AgentRoom tools pipe invoked before readiness"));
+    if (message.type === "stopped") {
+      this.stops.get(message.requestId)?.resolve(message.result);
+      return;
+    }
     if (message.type === "cancel") {
       if (message.runId === this.binding?.runId) this.calls.get(message.callId)?.abort();
       return;

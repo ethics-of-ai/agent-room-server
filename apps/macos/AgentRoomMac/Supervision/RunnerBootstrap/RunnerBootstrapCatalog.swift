@@ -227,6 +227,15 @@ enum RunnerBootstrapCatalog {
         )
     )
 
+    /// The launcher package and the Harness pin the backend runs. Move both
+    /// with the pin in `docs/engineering/DEEPSEEK_HARNESS_RUNNER.md`.
+    private static let dshPackage = RunnerBootstrapEntrypointPackage(
+        name: "@deepseek-ai/dsh",
+        displayName: "dsh",
+        testedVersion: "0.2.1-alpha.4",
+        testedRevision: "86a402200d95fecef4529d969836f1fe13c6cb0d"
+    )
+
     private static let deepseek = RunnerBootstrapDescriptor(
         runnerKind: "deepseek",
         slots: [
@@ -235,10 +244,10 @@ enum RunnerBootstrapCatalog {
                 kind: .executablePath,
                 environmentName: "DEEPSEEK_EXECUTABLE",
                 title: "Executable",
-                // Deliberately not `dsh`. That launcher boots profiles and has
-                // no entry mode serving this protocol; on the recommended
-                // source path this is the Node interpreter that runs the
-                // entrypoint in Arguments, which is why the example shows one.
+                // Either the `dsh` launcher itself or, on the recommended
+                // source path, the Node interpreter that runs its entrypoint
+                // in Arguments. The example shows Node because a launcher bin
+                // relies on a `#!/usr/bin/env node` shebang.
                 prompt: "e.g. /opt/homebrew/bin/node"
             ),
             // Second, because it completes the field above: an interpreter with
@@ -248,10 +257,10 @@ enum RunnerBootstrapCatalog {
                 kind: .arguments,
                 environmentName: "DEEPSEEK_ARGS",
                 title: "Arguments",
-                prompt: "e.g. ~/src/deepseek-harness/packages/examples/jsonrpc-demo/lib/bin.js",
+                prompt: "e.g. ~/src/deepseek-harness/apps/cli/lib/bin.js",
                 note: RunnerBootstrapNote(
                     id: "entrypoint",
-                    text: "For a source build, put the absolute built SDK entrypoint here. Run its local check before starting the backend.",
+                    text: "Use a source checkout fills this in. AgentRoom adds its own --profile and --patch arguments.",
                     systemImage: "terminal"
                 )
             ),
@@ -262,7 +271,7 @@ enum RunnerBootstrapCatalog {
                 title: "Setup",
                 note: RunnerBootstrapNote(
                     id: "compositionMode",
-                    text: "AgentRoom managed setup generates its tool configuration and refreshes installed plugin paths automatically. It selects workspace-write policy, file and shell tools, and no subagents. The selected composition locates installed Harness packages; your file stays unchanged. Custom setup runs your own graph.",
+                    text: "AgentRoom managed needs no composition file. It runs a workspace-write sandbox with file and shell tools, background shell jobs, and subagents. Custom runs a composition file of your own.",
                     systemImage: "gearshape"
                 ),
                 choices: [
@@ -275,10 +284,10 @@ enum RunnerBootstrapCatalog {
                 kind: .filePath,
                 environmentName: "DEEPSEEK_CORDIS_CONFIG",
                 title: "Composition",
-                prompt: "e.g. ~/src/deepseek-harness/examples/jsonrpc-agent/cordis.yml",
+                prompt: "e.g. ~/agentroom/deepseek.cordis.patch.yml",
                 note: RunnerBootstrapNote(
                     id: "composition",
-                    text: "In custom setup, review this file's tools and execution policy before launching. In managed setup, its folder is used only to locate installed Harness packages. Runtime startup does not verify provider access or sandbox enforcement.",
+                    text: "A Cordis patch whose insert rows form the whole graph. Review its tools and execution policy before launching. AgentRoom does not check provider access or sandbox enforcement.",
                     systemImage: "lock.shield"
                 )
             ),
@@ -290,7 +299,7 @@ enum RunnerBootstrapCatalog {
                 prompt: "sk-…",
                 note: RunnerBootstrapNote(
                     id: "apiKey",
-                    text: "Kept in this Mac's Keychain and injected when the backend launches — which is also why an exported DEEPSEEK_API_KEY no longer reaches it. It has to be here rather than in the composition's own credential store, which publishes too late for the first turn.",
+                    text: "Kept in this Mac's Keychain and passed to DeepSeek when the backend starts. A DEEPSEEK_API_KEY exported in your shell does not reach it.",
                     systemImage: "key"
                 )
             )
@@ -300,14 +309,13 @@ enum RunnerBootstrapCatalog {
                 id: "executable",
                 kind: .executablePath(
                     slotID: "executable",
-                    // `dsh-jsonrpc-agent` is the bin that serves this protocol;
-                    // searching for `dsh` would resolve the launcher, save it,
-                    // and report a ready runner that can never complete a
-                    // handshake. The packaged single-file runtime carries a
-                    // platform suffix this search cannot express, so an
-                    // operator who installed that one fills the slot by hand.
+                    // Every Harness app boots through the `dsh` launcher, and the
+                    // backend appends `--profile agentroom --patch` to it. A
+                    // packaged single-file runtime carries a platform suffix
+                    // this search cannot express, so an operator who installed
+                    // one fills the slot by hand.
                     search: ExecutableSearch(
-                        binaryName: "dsh-jsonrpc-agent",
+                        binaryName: "dsh",
                         searchPathFallbacks: [
                             "/opt/homebrew/bin",
                             "/usr/local/bin",
@@ -319,18 +327,18 @@ enum RunnerBootstrapCatalog {
                             "/bin"
                         ],
                         absoluteCandidates: [
-                            "/opt/homebrew/bin/dsh-jsonrpc-agent",
-                            "/usr/local/bin/dsh-jsonrpc-agent",
-                            "~/.local/bin/dsh-jsonrpc-agent",
-                            "~/.npm-global/bin/dsh-jsonrpc-agent",
-                            "~/.bun/bin/dsh-jsonrpc-agent",
-                            "~/bin/dsh-jsonrpc-agent"
+                            "/opt/homebrew/bin/dsh",
+                            "/usr/local/bin/dsh",
+                            "~/.local/bin/dsh",
+                            "~/.npm-global/bin/dsh",
+                            "~/.bun/bin/dsh",
+                            "~/bin/dsh"
                         ],
-                        // Builds before the SDK launch-contract correction
-                        // auto-saved this still-executable launcher in the same
-                        // slot. Reject it so the next probe migrates to the
-                        // serving runtime instead of preserving stale state.
-                        rejectedBinaryNames: ["dsh"]
+                        // Harness 86a40220 removed this bin, and earlier builds
+                        // of this app saved it here. A leftover install stays
+                        // executable but cannot take the launcher's arguments,
+                        // so reject it and let the next check find `dsh`.
+                        rejectedBinaryNames: ["dsh-jsonrpc-agent"]
                     )
                 ),
                 requirement: .required,
@@ -354,10 +362,12 @@ enum RunnerBootstrapCatalog {
             ),
             RunnerBootstrapProbe(
                 id: "entrypoint",
-                kind: .nodeEntrypoint(executableSlotID: "executable", argumentsSlotID: "arguments"),
+                kind: .nodeEntrypoint(executableSlotID: "executable", argumentsSlotID: "arguments", package: dshPackage),
                 requirement: .required,
-                actionTitle: "Check SDK entrypoint",
-                actionSymbol: "doc.badge.gearshape",
+                // It shares the Arguments row with the field, so it is
+                // titled like the other per-field checks.
+                actionTitle: "Check",
+                actionSymbol: "magnifyingglass",
                 messages: RunnerBootstrapProbeMessages(
                     satisfied: "SDK entrypoint is ready: %@.",
                     detected: "SDK entrypoint is ready: %@.",
@@ -379,15 +389,22 @@ enum RunnerBootstrapCatalog {
                     detected: "Saved the DeepSeek Harness composition at %@. Start or restart the backend to apply it.",
                     absent: "The DeepSeek Harness composition was not found. Choose a readable absolute path, then rerun this check.",
                     failure: "Could not save the DeepSeek Harness composition path: %@",
-                    blockingAbsent: "Choose an existing DeepSeek Harness Cordis composition, then rerun the check.",
+                    blockingAbsent: "Choose an existing DeepSeek Harness Cordis patch, or select AgentRoom managed setup.",
                     blockingFailed: "Resolve the DeepSeek Harness composition check error.",
-                    blockingUnchecked: "Set or check the DeepSeek Harness Cordis composition path."
-                )
+                    blockingUnchecked: "Set or check the DeepSeek Harness composition, or select AgentRoom managed setup."
+                ),
+                // Managed setup generates its own graph and never reads the
+                // file. Only an explicit `managed` waives it: the backend
+                // treats an unset mode as custom.
+                waivedBy: RunnerBootstrapChoiceSelection(slotID: "compositionMode", choiceID: "managed")
             )
         ],
-        // The recommended install is a source checkout, and the three values
-        // above are all derivable from it — so the operator names the one thing
-        // they actually know and this walks the rest.
+        // The recommended install is a source checkout, and the interpreter and
+        // entrypoint are both derivable from it, so the operator names the one
+        // thing they actually know and this walks the rest. The checkout ships
+        // no composition AgentRoom should run unchanged, so none is derived.
+        // Choosing it selects managed setup instead, unless the operator
+        // already keeps a readable composition of their own.
         sourceCheckout: RunnerBootstrapSourceCheckout(
             interpreterSlotID: "executable",
             interpreterSearch: ExecutableSearch(
@@ -406,16 +423,16 @@ enum RunnerBootstrapCatalog {
                 ]
             ),
             entrypointSlotID: "arguments",
-            entrypointPackagePath: "packages/examples/jsonrpc-demo",
-            entrypointBinName: "dsh-jsonrpc-agent",
-            compositionSlotID: "cordisConfig",
-            // Only the unattended example, never `minimal.cordis.yml`. The
-            // minimal one mounts `danger-full-access` and a terminal UI, and
-            // this one's own header reserves stdout for JSON-RPC — which is the
-            // property AgentRoom's transport depends on. Offering the operator
-            // the safer of two files without saying so would be the wrong kind
-            // of convenience, so the resolution names what it took.
-            compositionCandidates: ["examples/jsonrpc-agent/cordis.yml"]
+            entrypointPackagePath: "apps/cli",
+            entrypointBinName: "dsh",
+            package: dshPackage,
+            setupChoice: RunnerBootstrapChoiceSelection(slotID: "compositionMode", choiceID: "managed"),
+            customSetupFileSlotID: "cordisConfig",
+            note: RunnerBootstrapNote(
+                id: "sourceCheckout",
+                text: "Choose your deepseek-harness folder. AgentRoom fills in Node and the dsh entrypoint, checks for a built dsh \(dshPackage.testedVersion), and offers to update or build the checkout if it needs it.",
+                systemImage: "folder"
+            )
         ),
         // The credentials note that used to sit here explained an *absence*.
         // The field above replaced it, and the explanation went with it — a

@@ -460,17 +460,17 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
         valueKind: "string"
       }
     ],
-    // The SDK wire has no resume method, and the same session id creates a fresh
-    // pair when the selected composition did not mount persistence. Because the
-    // handshake cannot prove that capability, AgentRoom must not idle-reap this
-    // child or claim a killed/crashed one can continue its conversation.
+    // The SDK wire now has `session/resume`, but AgentRoom has not verified it
+    // against a restarted child, and the same session id still creates a fresh
+    // pair when the composition mounts no persistence. Until that is proven,
+    // AgentRoom must not idle-reap this child or claim a killed/crashed one can
+    // continue its conversation.
     restoreStrategy: "unsupported",
-    // Both halves are bootstrap this runner cannot start without. The runtime
-    // demands an explicit Cordis composition and exits nonzero when it has
-    // none, so an executable on its own is not a configured runner — reporting
-    // one would put a runner in every picker that fails its first turn with the
-    // child's one-line usage error.
-    isConfigured: (config) => Boolean(config.deepseekExecutable && config.deepseekCordisConfig)
+    // The executable is always required. Custom setup also needs its patch
+    // file, which is the runtime's whole graph: without one the empty profile
+    // mounts no SDK server and the first turn fails at the handshake.
+    isConfigured: (config) => Boolean(config.deepseekExecutable
+      && (config.deepseekCompositionMode === "managed" || config.deepseekCordisConfig))
   },
   cursor: {
     id: "cursor",

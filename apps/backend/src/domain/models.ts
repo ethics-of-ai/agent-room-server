@@ -1,6 +1,7 @@
 import type { RegisteredRunnerKind } from "../runner/registry";
 import type { LanguageServiceExecutableConfig } from "./languageService";
 import type { PlanPersistedState } from "../plans/planModel";
+import type { AgentBackgroundTask, AgentTurnTrigger } from "./backgroundWork";
 export interface ServiceConfig extends LanguageServiceExecutableConfig {
   runnerKind: AgentRunnerKind;
   agentRoomHome?: string;
@@ -45,14 +46,11 @@ export interface ServiceConfig extends LanguageServiceExecutableConfig {
   // keys — an executable path is "run this binary", and the composition decides
   // which tools the agent has, which is a deployment decision, not a preference.
   //
-  // The executable is `dsh-jsonrpc-agent` (or the packaged single-file runtime),
-  // never the `dsh` launcher: `dsh` boots profiles (`--profile`, `web`,
-  // `headless`) and has no entry mode that serves this protocol.
+  // The executable is the `dsh` launcher, or Node running its built CLI
+  // entrypoint. AgentRoom appends `--profile agentroom --patch <composition>`.
   deepseekExecutable?: string;
-  // The runtime demands an explicit composition and exits nonzero without one,
-  // so this is required rather than optional. Resolved from
-  // DEEPSEEK_CORDIS_CONFIG, else an operator-exported DSH_CORDIS_CONFIG, and
-  // handed to the child as DSH_CORDIS_CONFIG.
+  // Custom setup's patch file, applied over AgentRoom's empty profile and
+  // required in that mode. Managed setup generates its own patch.
   deepseekCordisConfig?: string;
   deepseekCompositionMode?: "custom" | "managed";
   deepseekArgs: string[];
@@ -581,6 +579,7 @@ export interface AgentSession {
   sketchToolsAvailable?: boolean;
   /** The AgentRoom tool logical ids the session's thread registered when it started. */
   threadAgentToolIds?: string[];
+  backgroundTasks?: AgentBackgroundTask[];
 }
 
 export interface AgentSessionTurn {
@@ -596,6 +595,7 @@ export interface AgentSessionTurn {
   totalTokens: number;
   modelContextWindowTokens?: number;
   contextCompactionThresholdTokens?: number;
+  trigger?: AgentTurnTrigger;
 }
 
 export interface AgentSessionMessage {

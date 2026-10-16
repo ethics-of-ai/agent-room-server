@@ -18,6 +18,17 @@ export class EventBus {
     return event;
   }
 
+  /**
+   * Broadcast without entering the replay buffer. For level signals whose
+   * current value a REST read already returns: frequent updates would only
+   * push replayable events out of the buffer.
+   */
+  publishLive<TPayload>(type: AgentRoomEventType, payload: TPayload): AgentRoomEvent<TPayload> {
+    const event = this.createEvent(type, payload);
+    this.emitter.emit("event", event);
+    return event;
+  }
+
   createTransient<TPayload>(type: AgentRoomEventType, payload: TPayload): AgentRoomEvent<TPayload> {
     return this.createEvent(type, payload);
   }

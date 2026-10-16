@@ -38,30 +38,43 @@ describe("DeepSeek session event mapping", () => {
     });
   });
 
-  it("streams assistant text as an update the artifact parser can see", () => {
+  it("publishes assembled assistant text as an update the artifact parser can see", () => {
     // `agent_update` is what AgentTurnEventApplier runs the in-band <artifact>
     // parser over, so the live-sketch channel works for this runner without the
     // adapter knowing the channel exists.
     const result = mapDeepSeekSessionEvent(
-      event("assistant/chunk", { turn: 1, step: 1, chunk: { type: "text-delta", index: 0, text: "Hello" } }),
+      event("assistant/message", {
+        turn: 1,
+        step: 1,
+        message: { role: "assistant", content: [
+          { type: "reasoning", text: "thinking" },
+          { type: "text", text: "Hello" },
+          { type: "tool-call", id: "call-1", name: "bash", arguments: {} }
+        ] },
+        stream: [{ type: "text-chunks", time0: 0, index: 1, dt: [], texts: ["Hel", "lo"] }]
+      }),
       context()
     );
 
+    // Reasoning keeps its canonical kind; the stream that built the message is
+    // not replayed, so the text arrives exactly once.
     expect(result.events).toEqual([
+      expect.objectContaining({ type: "agent_activity", activity: expect.objectContaining({
+        canonical: { kind: "reasoning", delta: "thinking" }
+      }) }),
       expect.objectContaining({ type: "agent_update", message: "Hello" })
     ]);
   });
 
-  it("maps reasoning deltas to the canonical reasoning kind", () => {
-    const result = mapDeepSeekSessionEvent(
-      event("assistant/chunk", { chunk: { type: "reasoning-delta", index: 0, text: "thinking" } }),
+  it("ignores the retired chunk event and an attempt that committed no message", () => {
+    expect(mapDeepSeekSessionEvent(
+      event("assistant/chunk", { chunk: { type: "text-delta", index: 0, text: "stale" } }),
       context()
-    );
-
-    expect(result.events[0]).toMatchObject({
-      type: "agent_activity",
-      activity: { canonical: { kind: "reasoning", delta: "thinking" } }
-    });
+    ).events).toEqual([]);
+    expect(mapDeepSeekSessionEvent(
+      event("assistant/attempt", { turn: 1, step: 1, stream: [{ type: "text-chunks", time0: 0, index: 0, dt: [], texts: ["x"] }] }),
+      context()
+    ).events).toEqual([]);
   });
 
   it("correlates a tool call with its result through the runtime's own call id", () => {
@@ -197,20 +210,10 @@ describe("DeepSeek session event mapping", () => {
     // number of requests in the turn.
     const ctx = context();
     mapDeepSeekSessionEvent(event("request/context", { provider: "deepseek-official", contextWindow: 128_000 }), ctx);
-    expect(mapDeepSeekSessionEvent(
-      event("assistant/chunk", { chunk: { type: "usage", usage: { inputTokens: 1_000, outputTokens: 100 } } }),
-      ctx
-    ).events).toEqual([]);
     mapDeepSeekSessionEvent(
       event("assistant/message", { turn: 1, step: 1, message: {}, usage: { inputTokens: 1_000, outputTokens: 100 } }),
       ctx
     );
-    expect(mapDeepSeekSessionEvent(
-      event("assistant/chunk", {
-        chunk: { type: "usage", usage: { inputTokens: 1_500, outputTokens: 50, cacheReadTokens: 900, reasoningTokens: 20 } }
-      }),
-      ctx
-    ).events).toEqual([]);
     const second = mapDeepSeekSessionEvent(
       event("assistant/message", {
         turn: 1,

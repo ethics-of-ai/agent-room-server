@@ -8,7 +8,7 @@ extension EditorCatalogActionStatus {
         case .success:
             StatusStyle(systemImage: "checkmark.circle.fill", tint: .green)
         case .failure:
-            StatusStyle(systemImage: "xmark.octagon.fill", tint: .red)
+            .failure
         }
     }
 }

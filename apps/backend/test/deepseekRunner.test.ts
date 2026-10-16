@@ -296,10 +296,10 @@ describe("DeepSeekHarnessRunner", () => {
     await runner.dispose();
   });
 
-  it("refuses to spawn at all without the composition the runtime demands", async () => {
-    // The real runtime prints one line of usage to stderr and exits 1 when it
-    // has neither $DSH_CORDIS_CONFIG nor an argv positional. Failing here says
-    // which piece of setup is missing instead of relaying that.
+  it("refuses to spawn at all in custom setup without its patch file", async () => {
+    // Without a patch, AgentRoom's empty profile mounts no SDK server and the
+    // handshake would time out. Failing here says which piece of setup is
+    // missing instead of relaying that.
     const runtime = await writeFakeRuntime();
     const serviceConfig = await config({ deepseekArgs: [runtime], deepseekCordisConfig: undefined });
     const runner = new DeepSeekHarnessRunner(serviceConfig);
@@ -356,9 +356,9 @@ describe("DeepSeekHarnessRunner", () => {
   });
 
   it("refuses a child that is not the SDK runtime instead of failing later on a shape", async () => {
-    // The usual cause is DEEPSEEK_EXECUTABLE pointing at the `dsh` launcher,
-    // which boots profiles and serves no SDK protocol. Naming that beats a turn
-    // that dies on an unrecognized frame.
+    // The usual cause is a custom composition that mounts no SDK server, or a
+    // program that is not the launcher. Naming that beats a turn that dies on an
+    // unrecognized frame.
     const runtime = await writeFakeRuntime({ serverName: "some-other-server" });
     const serviceConfig = await config({ deepseekArgs: [runtime] });
     const runner = new DeepSeekHarnessRunner(serviceConfig);
@@ -373,7 +373,7 @@ describe("DeepSeekHarnessRunner", () => {
 
     expect(events.at(-1)).toMatchObject({
       type: "run_failed",
-      error: expect.stringContaining("dsh-jsonrpc-agent")
+      error: expect.stringContaining("SDK JSON-RPC server")
     });
   });
 
@@ -603,6 +603,15 @@ function status(sessionId, value) {
   send({ jsonrpc: "2.0", method: "session.status", params: { sessionId, status: value } });
 }
 
+// The runtime streams no deltas: each model message arrives once, assembled.
+function say(sessionId, text) {
+  event(sessionId, "assistant/message", {
+    turn: promptNumber,
+    step: 1,
+    message: { role: "assistant", content: [{ type: "text", text }] }
+  });
+}
+
 rl.on("line", (line) => {
   let message;
   try { message = JSON.parse(line); } catch { return; }
@@ -647,26 +656,16 @@ rl.on("line", (line) => {
   event(sessionId, "request/header", { reason: promptNumber === 1 ? "initial" : "change" });
   event(sessionId, "request/context", { provider: initialize.provider, model: initialize.model, contextWindow: 128000 });
   event(sessionId, "turn/start", { turn });
-  event(sessionId, "assistant/chunk", {
-    turn,
-    step: 1,
-    chunk: {
-      type: "text-delta",
-      index: 0,
-      text: promptNumber === 1
+  say(sessionId, promptNumber === 1
         ? "session=" + sessionId + " cwd=" + initialize.cwd + " model=" + initialize.model
         : "continued with " + (
             text.includes("macOS")
               ? "macOS " + (text.includes("Keep this private") ? "private-note-received" : "")
               : text.includes("best judgment") ? "best judgment" : "the answer"
-          )
-    }
-  });
+          ));
 
   if (options.emitForeignSession) {
-    event(sessionId + "-child", "assistant/chunk", {
-      chunk: { type: "text-delta", index: 0, text: "SUBAGENT output" }
-    });
+    say(sessionId + "-child", "SUBAGENT output");
   }
 
   // A turn the caller asked to hang: work started and nothing settles it, which
@@ -687,21 +686,7 @@ rl.on("line", (line) => {
         sensitive: Boolean(options.sensitiveQuestion)
       }]
     });
-    event(sessionId, "assistant/chunk", {
-      turn,
-      step: 1,
-      chunk: { type: "text-delta", index: 1, text: "\\n<agentroom-ques" }
-    });
-    event(sessionId, "assistant/chunk", {
-      turn,
-      step: 1,
-      chunk: { type: "text-delta", index: 2, text: "tion>" + question.slice(0, 40) }
-    });
-    event(sessionId, "assistant/chunk", {
-      turn,
-      step: 1,
-      chunk: { type: "text-delta", index: 3, text: question.slice(40) + "</agentroom-question>" }
-    });
+    say(sessionId, "\\n<agentroom-question>" + question + "</agentroom-question>");
     if (options.dieAfterQuestion) {
       process.stderr.write("dsh: failed after asking\\n");
       process.exit(4);
@@ -722,11 +707,7 @@ rl.on("line", (line) => {
 
   if (options.delayContinuationCompletion && promptNumber > 1) {
     setTimeout(() => {
-      event(sessionId, "assistant/chunk", {
-        turn,
-        step: 1,
-        chunk: { type: "text-delta", index: 1, text: " continuation-finished" }
-      });
+      say(sessionId, " continuation-finished");
       event(sessionId, "turn/end", { turn, reason: { kind: "completed" } });
       status(sessionId, "idle");
     }, 50);
@@ -743,7 +724,6 @@ rl.on("line", (line) => {
       content: [{ type: "tool-result", toolCallId: "call-" + turn, content: [{ type: "text", text: "ok" }] }]
     }
   });
-  event(sessionId, "assistant/chunk", { chunk: { type: "usage", usage: { inputTokens: 10, outputTokens: 2 } } });
   event(sessionId, "assistant/message", {
     turn,
     step: 1,

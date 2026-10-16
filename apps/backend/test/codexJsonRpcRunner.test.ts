@@ -228,11 +228,8 @@ describe("CodexAppServerRunner JSON-RPC protocol mode", () => {
     expect(threadStartParams).toMatchObject({
       approvalPolicy: "on-request",
       sandbox: "workspace-write",
-      config: {
-        sandbox_workspace_write: {
-          network_access: true
-        }
-      }
+      developerInstructions: expect.stringContaining("spawn_agent"),
+      config: { sandbox_workspace_write: { network_access: true } }
     });
     expect(events.at(-1)).toEqual({
       type: "run_succeeded",
@@ -620,6 +617,8 @@ describe("CodexAppServerRunner JSON-RPC protocol mode", () => {
     const methods = (await readFile(fakeServer.logPath, "utf8")).trim().split("\n");
     expect(methods.filter((method) => method === "thread/start")).toHaveLength(1);
     expect(methods.filter((method) => method === "thread/resume:codex-thread-resumable")).toHaveLength(1);
+    // The resumed thread keeps the background delegation instruction a new one gets.
+    expect(methods).toContain("thread/resume:developerInstructions");
     expect(methods.filter((method) => method === "turn/start")).toHaveLength(2);
     await runner.dispose();
   });
@@ -1027,21 +1026,14 @@ const logPath = process.argv[2];
 const flags = (process.argv[3] || "").split(",");
 const rl = readline.createInterface({ input: process.stdin });
 
-function send(message) {
-  process.stdout.write(JSON.stringify(message) + "\\n");
-}
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const log = (entry) => fs.appendFileSync(logPath, entry + "\\n");
 
-function log(entry) {
-  fs.appendFileSync(logPath, entry + "\\n");
-}
+const thread = (id) => ({ id, status: "running", cwd: "/tmp/workspace", turns: [] });
 
-function thread(id) {
-  return { id, status: "running", cwd: "/tmp/workspace", turns: [] };
-}
-
-function turn(status) {
-  return { id: "codex-turn-resumable", status, items: [], error: null };
-}
+const turn = (status) => ({ id: "codex-turn-resumable", status, items: [], error: null });
+// Turn events name the thread this child started or resumed, as Codex's do.
+let threadId = "codex-thread-resumable";
 
 rl.on("line", (line) => {
   const message = JSON.parse(line);
@@ -1058,10 +1050,12 @@ rl.on("line", (line) => {
   }
   if (message.method === "thread/resume") {
     log("thread/resume:" + message.params.threadId);
+    if (typeof message.params.developerInstructions === "string" && message.params.developerInstructions.includes("spawn_agent")) log("thread/resume:developerInstructions");
     if (flags.includes("reject-resume")) {
       send({ id: message.id, error: { code: -32600, message: "no rollout found for thread id " + message.params.threadId } });
       return;
     }
+    threadId = message.params.threadId;
     send({ id: message.id, result: { thread: thread(message.params.threadId), model: "gpt-test", cwd: message.params.cwd, approvalPolicy: message.params.approvalPolicy, sandbox: message.params.sandbox } });
     return;
   }
@@ -1069,9 +1063,9 @@ rl.on("line", (line) => {
     log("turn/start");
     const currentTurn = turn("inProgress");
     send({ id: message.id, result: { turn: currentTurn } });
-    send({ method: "turn/started", params: { threadId: "codex-thread-resumable", turn: currentTurn } });
-    send({ method: "item/agentMessage/delta", params: { threadId: "codex-thread-resumable", turnId: currentTurn.id, itemId: "assistant-resumable", delta: "ok" } });
-    send({ method: "turn/completed", params: { threadId: "codex-thread-resumable", turn: { ...currentTurn, status: "completed" } } });
+    send({ method: "turn/started", params: { threadId, turn: currentTurn } });
+    send({ method: "item/agentMessage/delta", params: { threadId, turnId: currentTurn.id, itemId: "assistant-resumable", delta: "ok" } });
+    send({ method: "turn/completed", params: { threadId, turn: { ...currentTurn, status: "completed" } } });
     if (flags.includes("exit-after-turn")) {
       // Die shortly after the completion has flushed, emulating a crashed
       // app-server between turns.

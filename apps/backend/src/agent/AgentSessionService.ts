@@ -10,7 +10,6 @@ import type {
   AgentSessionTurn,
   AgentTurnContext,
   AgentRunnerKind,
-  CodingAgentTurnSettings,
   DurableAgentSessionDocument,
   ServiceConfig,
   StatusSnapshot
@@ -19,13 +18,7 @@ import { DURABLE_AGENT_SESSION_SCHEMA_VERSION } from "../domain/schemas";
 import type { ArtifactSnapshot, ArtifactStore } from "../artifact/ArtifactStore";
 import type { EventBus } from "../events/EventBus";
 import { logger } from "../logging/logger";
-import {
-  AgentRunnerInputError,
-  type AgentRunner,
-  type AgentRunnerInputPart,
-  type AgentRunnerToolSet,
-  type CanonicalQuestionAnswer
-} from "../runner/AgentRunner";
+import type { AgentRunner, AgentRunnerEvent, CanonicalQuestionAnswer } from "../runner/AgentRunner";
 import { questionAnswerRefusal, type QuestionAnswerResult } from "../runner/shared/PendingQuestionRequests";
 import { isRegisteredRunnerKind, runnerDescriptor } from "../runner/registry";
 import type { DurableAgentSessionStore } from "../state/DurableAgentSessionStore";
@@ -36,11 +29,9 @@ import {
   codingTurnFailedEvent,
   type CodingAgentEventCandidate
 } from "../protocol/coding/events";
-import {
-  LocalWorkspaceRegistryError,
-  type CheckoutLocalWorkspaceBranchResult,
-  type LocalWorkspaceRegistry
-} from "../workspace/LocalWorkspaceRegistry";
+import type { LocalWorkspaceRegistry } from "../workspace/LocalWorkspaceRegistry";
+import { AgentBackgroundWork } from "./AgentBackgroundWork";
+import { checkoutSessionBranch, validateRunnerInputParts } from "./sessionRunnerSupport";
 import { AgentSessionMessageStore } from "./AgentSessionMessageStore";
 import { AgentTurnEventApplier, type OutstandingQuestionRequest } from "./AgentTurnEventApplier";
 import { AgentTurnGitDiffTracker } from "./AgentTurnGitDiffTracker";
@@ -51,6 +42,7 @@ import {
   agentTurnId,
   BACKEND_RESTARTED_TURN_ERROR,
   hasSettings,
+  type AgentTurnOpening,
   type CreateAgentSessionInput,
   type StartAgentTurnInput
 } from "./agentSessionTypes";
@@ -62,6 +54,7 @@ import type { PlanPersistedState } from "../plans/planModel";
 export {
   AgentSessionError,
   BACKEND_RESTARTED_TURN_ERROR,
+  type AgentTurnOpening,
   type CreateAgentSessionInput,
   type StartAgentTurnInput
 } from "./agentSessionTypes";
@@ -80,6 +73,7 @@ export class AgentSessionService {
   /** Every tool family's per-turn binding and standing instructions. */
   readonly turnTools: SessionTurnTools;
   private readonly runnerEvents: AgentTurnEventApplier;
+  private readonly background: AgentBackgroundWork;
   private readonly turnGitDiffs: AgentTurnGitDiffTracker;
   private readonly cancelledTurnIds = new Set<string>();
   private readonly countedCancelledTurnIds = new Set<string>();
@@ -139,6 +133,9 @@ export class AgentSessionService {
     this.turnGitDiffs = new AgentTurnGitDiffTracker({
       gitStatus: (workspaceId) => deps.registry.gitStatus(workspaceId)
     });
+    this.background = new AgentBackgroundWork({ sessions: this.sessions, eventBus: deps.eventBus,
+      openTurn: (session, opening) => this.openTurn(session, opening), consume: (session, turn, events) => void this.consumeTurn(session, turn, events) });
+    for (const runner of Object.values(deps.runners)) runner?.watchBackgroundWork?.(this.background.listener);
   }
 
   /** Hydrate before routes open, fail interrupted turns, and seed verified resume ids. */
@@ -211,7 +208,7 @@ export class AgentSessionService {
     const toolRegistration = this.deps.runners[session.runnerKind]?.nativeToolRegistration?.(sessionId);
     return {
       schemaVersion: DURABLE_AGENT_SESSION_SCHEMA_VERSION,
-      session: { ...session },
+      session: { ...session, backgroundTasks: undefined },
       turns: [...this.turns.values()].filter((turn) => turn.sessionId === sessionId).map((turn) => ({ ...turn })),
       messages: this.messages.list(sessionId),
       plan: plan.plan,
@@ -266,7 +263,7 @@ export class AgentSessionService {
       throw new AgentSessionError("Workspace is not registered", 404);
     }
     if (input.gitBranch?.trim()) {
-      const result = await this.checkoutSessionBranch(workspace.id, input.gitBranch.trim());
+      const result = await checkoutSessionBranch(this.deps, workspace.id, input.gitBranch.trim());
       workspace = result.workspace;
     }
 
@@ -298,9 +295,7 @@ export class AgentSessionService {
     }
     const requestStartedAtMs = Date.now();
     const session = this.requireSession(input.sessionId);
-    if (session.activeTurnId) {
-      throw new AgentSessionError("Agent session already has a running turn", 409);
-    }
+    this.refuseWhileRunning(session);
     if (this.uncontinuableSessionIds.has(session.id)) {
       // The same refusal the adapter gives after cancellation or child loss.
       // It has to live here as well because the adapter's own mark is
@@ -323,14 +318,14 @@ export class AgentSessionService {
       throw new AgentSessionError("Workspace is not registered", 404);
     }
     if (session.gitBranch) {
-      await this.checkoutSessionBranch(session.workspaceId, session.gitBranch);
+      await checkoutSessionBranch(this.deps, session.workspaceId, session.gitBranch);
     }
 
     const runner = this.requireRunner(session.runnerKind);
     const runnerInput = await this.assembleRunnerInput(session, input.message, input.context);
     // The awaits above let a second start on this session interleave.
-    if (session.activeTurnId) throw new AgentSessionError("Agent session already has a running turn", 409);
-    this.validateRunnerInputParts(runner, runnerInput.inputParts);
+    this.refuseWhileRunning(session);
+    validateRunnerInputParts(runner, runnerInput.inputParts);
     // A volatile prompt addition (currently human diagram edits) may only mark
     // itself delivered after all request validation has passed. A rejected turn
     // never reaches the runner and must leave that addition available to retry.
@@ -339,45 +334,17 @@ export class AgentSessionService {
       session.settings = input.settings;
     }
 
-    const now = new Date().toISOString();
-    const turn: AgentSessionTurn = {
-      id: agentTurnId(),
-      sessionId: session.id,
-      status: "running",
-      startedAt: now,
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0
-    };
-    this.turns.set(turn.id, turn);
+    const turn = this.openTurn(session, {
+      role: "user",
+      content: input.message,
+      ...(runnerInput.messageContext ? { context: runnerInput.messageContext } : {})
+    });
     this.telemetry.logAccepted(session, turn, {
       requestStartedAtMs,
       promptBytes: Buffer.byteLength(input.message, "utf8"),
       contextPathCount: input.context?.paths?.length ?? 0,
       attachmentCount: input.context?.attachments?.length ?? 0,
       runnerInputPartCount: runnerInput.inputParts.length
-    });
-    this.messages.append({
-      sessionId: session.id,
-      turnId: turn.id,
-      role: "user",
-      content: input.message,
-      ...(runnerInput.messageContext ? { context: runnerInput.messageContext } : {}),
-      status: "sent",
-      at: now
-    });
-    session.status = "running";
-    session.activeTurnId = turn.id;
-    session.error = undefined;
-    session.updatedAt = now;
-    this.persist(session.id);
-
-    this.deps.eventBus.publish("agent_turn_started", {
-      sessionId: session.id,
-      turnId: turn.id,
-      workspaceId: session.workspaceId,
-      workspacePath: session.workspacePath,
-      runnerKind: session.runnerKind
     });
     // A fresh binding: live only while this turn is the session's running turn.
     const tools = this.turnTools.bind({
@@ -386,7 +353,32 @@ export class AgentSessionService {
       context: input.context,
       isLive: () => session.activeTurnId === turn.id && turn.status === "running" && !this.cancelledTurnIds.has(turn.id)
     });
-    void this.consumeTurn(runner, session, turn, runnerInput.prompt, runnerInput.inputParts, session.settings, tools);
+    void this.consumeTurn(session, turn, runner.run({ runId: turn.id, sessionId: session.id, workspacePath: session.workspacePath,
+      prompt: runnerInput.prompt, inputParts: runnerInput.inputParts, title: session.title, settings: session.settings, ...(tools ? { tools } : {}) }));
+    return turn;
+  }
+
+  /** A person's turn waits for the running turn, and for an agent turn queued behind it. */
+  private refuseWhileRunning(session: AgentSession): void {
+    if (session.activeTurnId || this.background.isWaiting(session.id)) throw new AgentSessionError("Agent session already has a running turn", 409);
+  }
+
+  /** Record a turn and its opening message on an idle session, mark the session running, and announce it. */
+  private openTurn(session: AgentSession, opening: AgentTurnOpening): AgentSessionTurn {
+    const { id = agentTurnId(), trigger, ...message } = opening;
+    const now = new Date().toISOString();
+    const turn: AgentSessionTurn = {
+      id, sessionId: session.id, status: "running", startedAt: now, inputTokens: 0, outputTokens: 0, totalTokens: 0, ...(trigger ? { trigger } : {})
+    };
+    this.turns.set(turn.id, turn);
+    this.messages.append({ sessionId: session.id, turnId: turn.id, ...message, status: "sent", at: now });
+    session.status = "running";
+    session.activeTurnId = turn.id;
+    session.error = undefined;
+    session.updatedAt = now;
+    this.persist(session.id);
+    this.deps.eventBus.publish("agent_turn_started", { sessionId: session.id, turnId: turn.id, workspaceId: session.workspaceId,
+      workspacePath: session.workspacePath, runnerKind: session.runnerKind, ...(trigger ? { trigger } : {}) });
     return turn;
   }
 
@@ -483,6 +475,14 @@ export class AgentSessionService {
     return this.runnerEvents.outstandingQuestionRequests(sessionId);
   }
 
+  /** Stop one live background task; its end arrives as a task list change. */
+  async stopBackgroundTask(sessionId: string, taskId: string): Promise<AgentSession> {
+    const session = this.requireSession(sessionId);
+    const result = await this.deps.runners[session.runnerKind]?.stopBackgroundTask?.({ sessionId, taskId });
+    if (result === "stopped") return session;
+    throw result === "unavailable" ? new AgentSessionError("This session cannot stop its background work", 409) : new AgentSessionError("Background task is not running in this session", 404);
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     const session = this.requireSession(sessionId);
     const activeTurnId = session.activeTurnId;
@@ -509,6 +509,7 @@ export class AgentSessionService {
     await this.deps.durableSessions?.remove(sessionId);
     this.uncontinuableSessionIds.delete(sessionId);
     this.hydratedSeeds.delete(sessionId);
+    this.background.forget(sessionId);
     this.deps.artifacts?.releaseSession(sessionId);
     this.sessions.delete(sessionId);
     this.messages.deleteSession(sessionId);
@@ -552,57 +553,23 @@ export class AgentSessionService {
     return runner;
   }
 
-  private async checkoutSessionBranch(workspaceId: string, branch: string): Promise<CheckoutLocalWorkspaceBranchResult> {
-    try {
-      const result = await this.deps.registry.checkoutBranch(workspaceId, branch);
-      if (result.changed) {
-        this.deps.eventBus.publish("workspace_branch_changed", {
-          workspaceId: result.workspace.id,
-          path: result.workspace.path,
-          previousBranch: result.previousBranch,
-          branch: result.branch
-        });
-      }
-      return result;
-    } catch (error) {
-      if (error instanceof LocalWorkspaceRegistryError) {
-        throw new AgentSessionError(error.message, error.statusCode);
-      }
-      throw error;
-    }
-  }
-
-  private async consumeTurn(
-    runner: AgentRunner,
-    session: AgentSession,
-    turn: AgentSessionTurn,
-    message: string,
-    inputParts: AgentRunnerInputPart[] | undefined,
-    settings: CodingAgentTurnSettings | undefined,
-    tools: AgentRunnerToolSet | undefined
-  ): Promise<void> {
+  /** Drive one turn's runner events: a person's turn from `run()`, or one the agent started. */
+  private async consumeTurn(session: AgentSession, turn: AgentSessionTurn, events: AsyncIterable<AgentRunnerEvent>): Promise<void> {
     this.telemetry.logRunnerStarted(session, turn);
     // Runners without native turn diffs get one settle-time Git delta.
     if (runnerDescriptor(session.runnerKind).turnDiffSource === "settle_time_git") {
       await this.turnGitDiffs.beginTurn(turn.id, session.workspaceId);
     }
     try {
-      for await (const event of runner.run({
-        runId: turn.id,
-        sessionId: session.id,
-        workspacePath: session.workspacePath,
-        prompt: message,
-        inputParts,
-        title: session.title,
-        settings,
-        ...(tools ? { tools } : {})
-      })) {
+      for await (const event of events) {
         if (event.type === "run_succeeded" || event.type === "run_failed") {
           // Before the terminal event applies, so the diff precedes
           // coding_turn_completed/failed — the order Codex diffs arrive in.
           await this.publishTurnGitDiff(session, turn);
         }
         this.runnerEvents.apply(session, turn, event);
+        // A settle frees the session in this same tick, so no person's turn can take it first.
+        this.background.openWaitingTurn(session);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -632,6 +599,7 @@ export class AgentSessionService {
         this.cancelledTurnIds.delete(turn.id);
         this.countedCancelledTurnIds.delete(turn.id);
       }
+      this.background.openWaitingTurn(session);
     }
   }
 
@@ -644,17 +612,6 @@ export class AgentSessionService {
       return await this.deps.contextAssembler.assemble({ session, message, context });
     } catch (error) {
       if (error instanceof AgentTurnContextAssemblyError) {
-        throw new AgentSessionError(error.message, error.statusCode);
-      }
-      throw error;
-    }
-  }
-
-  private validateRunnerInputParts(runner: AgentRunner, inputParts: AgentRunnerInputPart[]): void {
-    try {
-      runner.validateInputParts(inputParts);
-    } catch (error) {
-      if (error instanceof AgentRunnerInputError) {
         throw new AgentSessionError(error.message, error.statusCode);
       }
       throw error;

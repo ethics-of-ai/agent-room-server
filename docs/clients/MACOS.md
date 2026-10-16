@@ -192,23 +192,45 @@ the Mac shares. The command runs in Terminal the same way, followed by
 capabilities with `refresh=true`, so the backend's discovery cache cannot hide a
 sign-in or sign-out that just happened.
 
-DeepSeek requires an executable, composition source, fixed arguments for Node,
-and a provider key. Local checks validate executable, composition, and Node SDK
-entrypoint while the backend is stopped. They do not validate provider access.
+DeepSeek requires an executable, fixed arguments for Node, and a provider key.
+Custom setup also requires a composition. The executable is the Harness `dsh`
+launcher or the Node interpreter that runs its entrypoint; the backend appends
+`--profile agentroom --patch <composition>` itself. The executable check looks
+for `dsh` and replaces a saved `dsh-jsonrpc-agent`, which Harness no longer
+ships. Local checks validate executable, Node entrypoint, and, in custom setup,
+composition while the backend is stopped. They do not validate provider access.
 The key is stored in Keychain and masked unless the operator reveals it. Its
 row can also remove the stored key after a confirmation. A source checkout can
-populate Node, entrypoint, and composition through **Use a source checkout**.
+populate Node and the `apps/cli` entrypoint through **Use a source checkout**.
 The chooser reads without executing, resolves paths, confines files to the
-checkout, and rejects comma-containing entrypoints. Review the selected Cordis
-graph before launch. Full setup is in the
+checkout, and rejects comma-containing entrypoints. It fills no composition,
+and it selects **AgentRoom managed** unless a readable custom composition is
+already stored. It also reads the checkout's `apps/cli/package.json`. A dsh
+version older than the one the backend pins offers **Update in Terminal**. A
+checkout that is unbuilt, or whose build predates its manifest, offers **Build
+in Terminal**. Both open a fixed script in Terminal, the same way runner sign-in
+does. The update script refuses a folder that is not a Git checkout and
+uncommitted changes to tracked files. It runs `git fetch origin` only when the
+pinned commit is missing, and stops if there is no `origin` remote. It then runs
+`git checkout --detach <pinned revision>`. Both scripts then run
+`pnpm install --frozen-lockfile` and `pnpm run build`. **Check again** walks the
+same folder again. At launch, and on each run of the safe checks, the app
+rechecks the checkout behind a saved `apps/cli` entrypoint without writing
+anything. An entrypoint outside any checkout clears the checkout message. The Node entrypoint check
+fails an entrypoint from another package, such as the removed
+`dsh-sdk-jsonrpc-demo`, and an outdated or stale dsh build. It sits on the
+Arguments row, and it shows no failure there while the checkout row already
+offers the fix for that entrypoint's checkout. The composition row is hidden
+while managed setup is selected. Full setup is in the
 [DeepSeek guide](../engineering/DEEPSEEK_HARNESS_RUNNER.md).
 The packaged backend includes the compiled AgentRoom Cordis-tools plugin; the
 packaging script refuses a missing, non-regular, or symlinked plugin resource.
-Select **AgentRoom managed** to generate the standard graph and refresh plugin
-paths automatically. Custom is the default for existing configurations and
-preserves the operator's YAML. Custom tool compositions still need an explicit
-plugin entry. The setup choice is bundled and Keychain-held, outside remotely
-managed settings. Changes apply after backend restart.
+Select **AgentRoom managed** to generate the standard graph; it needs no
+composition file. Custom is the default for existing configurations and runs
+the operator's Cordis patch, whose `insert` rows form the whole graph. Review
+it before launch. Custom tool compositions still need an explicit plugin entry.
+The setup choice is bundled and Keychain-held, outside remotely managed
+settings. Changes apply after backend restart.
 
 Backend checks display runtime and optional-tool readiness separately, with
 repair text and the session-continuation notice. The provider stays unverified
