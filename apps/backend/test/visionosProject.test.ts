@@ -545,7 +545,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(turnComposer).toContain("WorkspaceRunProfileControls");
     expect(turnComposer).toContain("ComposerDraftField(");
     expect(turnComposer).toContain("ComposerActionGroup(");
-    expect(composerField).toContain("Ask for follow-up changes");
+    expect(composerField).toContain("ComposerPromptText(");
     expect(composerActions).toContain("Send Turn");
     expect(composerRunProfile).toContain("CodingAgentSettingsSelection");
     expect(composerRunProfile).toContain("select: store.selectCodingAgentSetting");
