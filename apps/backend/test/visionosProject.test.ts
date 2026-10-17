@@ -254,6 +254,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     const threadTranscript = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Transcript/ThreadTranscriptView.swift"), "utf8");
     const composerPanel = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/WorkspaceComposerPanel.swift"), "utf8");
     const turnComposer = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/TurnComposerView.swift"), "utf8");
+    const composerActions = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerActionGroup.swift"), "utf8");
 
     expect(app).toContain('WindowGroup("Dashboard"');
     expect(app).toContain('WindowGroup("Workspace"');
@@ -305,7 +306,8 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(workspaceThreads).toContain("WorkspaceThreadPanel");
     expect(threadTranscript).toContain("ThreadMessageRow(message: message)");
     expect(composerPanel).toContain("TurnComposerView");
-    expect(turnComposer).toContain("Send Turn");
+    expect(turnComposer).toContain("ComposerActionGroup(");
+    expect(composerActions).toContain("Send Turn");
   });
 
   test("dashboard window uses a native sidebar list and selected workspace detail", async () => {
@@ -457,12 +459,14 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(sidebarRow).toContain("DashboardDesign.sidebarItemHeight");
   });
 
-  test("settings tab is built from the workspace browser's sidebar and pocket chrome", async () => {
+  test("settings tab is built from the workspace browser's sidebar and the Settings form kit", async () => {
     const settingsSidebar = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Settings/SettingsSidebar.swift"), "utf8");
     const settingsSidebarRow = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Settings/SettingsSidebarRow.swift"), "utf8");
     const settingsDetail = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Settings/SettingsDetailView.swift"), "utf8");
+    const settingsForm = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Settings/SettingsForm.swift"), "utf8");
     const connectionPane = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Settings/ConnectionSettingsView.swift"), "utf8");
     const backendPane = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Settings/BackendSettingsPane.swift"), "utf8");
+    const runnerPage = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Settings/ManagedRunnerSettingsPage.swift"), "utf8");
     const workspaceList = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Dashboard/DashboardWorkspaceListView.swift"), "utf8");
     const sidebarRow = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Dashboard/DashboardSidebarRow.swift"), "utf8");
 
@@ -477,14 +481,16 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(settingsSidebarRow).not.toContain("Label(pane.title");
     expect(settingsSidebar).not.toContain(".tint(");
 
-    // One detail column shape, and panes that are pocket contents like the workspace pocket.
-    expect(settingsDetail).toContain("DashboardDesign.pocketColumnWidth");
+    // One reading width, set by the form, and every pane a grouped form.
+    expect(settingsForm).toContain("DashboardDesign.pocketColumnWidth");
     expect(settingsDetail).toContain(".navigationTitle(pane.title)");
-    expect(connectionPane).toContain("DashboardPocket {");
-    expect(connectionPane).toContain("DashboardPocketMetadataRow(");
-    expect(backendPane).toContain("DashboardPocket {");
-    expect(backendPane).toContain("DashboardPocketSection {");
-    expect(backendPane).toContain("ManagedSettingRow(descriptor: descriptor)");
+    expect(settingsDetail).not.toContain("func pocketColumn");
+    for (const pane of [connectionPane, backendPane, runnerPage]) {
+      expect(pane).toContain("SettingsForm {");
+      expect(pane).not.toContain("DashboardPocket");
+    }
+    expect(backendPane).toContain("ManagedSettingSection(descriptor: descriptor)");
+    expect(runnerPage).toContain("ManagedSettingSection(descriptor: descriptor)");
   });
 
   test("keeps workspace window chat, context, composer run profile, and activity concerns separated", async () => {
@@ -497,6 +503,8 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     const threadTranscript = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Transcript/ThreadTranscriptView.swift"), "utf8");
     const composerPanel = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/WorkspaceComposerPanel.swift"), "utf8");
     const turnComposer = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/TurnComposerView.swift"), "utf8");
+    const composerActions = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerActionGroup.swift"), "utf8");
+    const composerField = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerDraftField.swift"), "utf8");
     const composerRunProfile = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Dashboard/WorkspaceRunProfileControls.swift"), "utf8");
     const contextPanel = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/WorkspaceContextPanel.swift"), "utf8");
 
@@ -520,8 +528,10 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(composerPanel).not.toContain("CodingAgentRendererView");
 
     expect(turnComposer).toContain("WorkspaceRunProfileControls");
-    expect(turnComposer).toContain("Ask for follow-up changes");
-    expect(turnComposer).toContain("Send Turn");
+    expect(turnComposer).toContain("ComposerDraftField(");
+    expect(turnComposer).toContain("ComposerActionGroup(");
+    expect(composerField).toContain("Ask for follow-up changes");
+    expect(composerActions).toContain("Send Turn");
     expect(composerRunProfile).toContain("CodingAgentSettingsSelection");
     expect(composerRunProfile).toContain("select: store.selectCodingAgentSetting");
     expect(composerRunProfile).not.toContain("CodingAgentSettingsControlsView");
