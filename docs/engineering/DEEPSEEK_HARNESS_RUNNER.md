@@ -194,7 +194,10 @@ replays it with a scripted model route
   turn owns is that turn, and the runner offers it to the service with the
   tasks that ended since a turn last took them. A notice that arrives during
   any turn, a person's or the agent's, is folded into it, so every turn takes
-  the held tasks when it settles.
+  the held tasks when it settles. The runner drops a refused turn's events
+  through its `turn/end` and the idle status after it, or until the next root
+  `turn/start`. A person's turn that opens while a refused turn runs gets only
+  its own events and does not end on the refused turn's `turn/end`.
 - **What a turn names.** Only endings the runtime reports to the session's own
   agent are held: its own background jobs and the subagents it started. A job
   the model killed with `job_kill` is left out, because that call's result

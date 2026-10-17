@@ -643,6 +643,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     const parsed = notification.method === "session.event" ? sessionEventNotificationSchema.safeParse(notification.params) : undefined;
     const sessionEvent = parsed?.success ? parsed.data : undefined;
     session.background.observe(notification, sessionEvent);
+    if (session.background.holdsRefusedTurn(notification, sessionEvent)) return;
     const active = session.activeTurn ?? this.openAgentTurn(session, sessionEvent);
     if (!active) return;
 
@@ -679,19 +680,15 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     for (const event of result.events) this.pushMappedEvent(session, active, event);
 
     if (result.completion && !active.completedByProtocol) {
-      this.completeProtocolCycle(
-        session,
-        active,
-        result.completion.event,
-        result.completion.turnNumber
-      );
+      this.completeProtocolCycle(session, active, result.completion.event, result.completion.turnNumber);
     }
   }
 
   /**
    * A root `turn/start` no AgentRoom turn owns is one the runtime started to
    * tell the agent that background work ended. The service decides whether it
-   * becomes an AgentRoom turn; a refused turn's events reach no turn.
+   * becomes an AgentRoom turn; a refused turn's events reach no turn, through
+   * its end, even when a person's turn opens before that turn finishes.
    */
   private openAgentTurn(session: DeepSeekRunnerSession, sessionEvent: DeepSeekSessionEventNotification | undefined): DeepSeekActiveTurn | undefined {
     if (sessionEvent?.sessionId !== session.sdkSessionId || sessionEvent.event.type !== "turn/start") return undefined;
@@ -713,6 +710,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
         return this.streamAgentTurn(session, turn);
       }
     });
+    if (!opened) session.background.agentTurnRefused();
     return opened;
   }
 

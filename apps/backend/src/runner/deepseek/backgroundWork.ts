@@ -9,6 +9,7 @@ import {
   assistantMessageDataSchema,
   jobRegisteredDataSchema,
   jobSettledDataSchema,
+  sessionStatusNotificationSchema,
   subagentFinishedNotificationSchema,
   subagentStartedNotificationSchema,
   toolCallDataSchema,
@@ -74,6 +75,8 @@ export class DeepSeekBackgroundWork {
   private finished: AgentFinishedBackgroundTask[] = [];
   /** Turns the runtime started on its own since a person's last turn. */
   private agentTurns = 0;
+  /** The service refused the turn the runtime is running, so its events reach no AgentRoom turn. */
+  private refusedTurnRunning = false;
 
   constructor(
     private readonly deps: {
@@ -106,6 +109,7 @@ export class DeepSeekBackgroundWork {
     this.pendingSubagentCalls.clear();
     this.finished = [];
     this.agentTurns = 0;
+    this.refusedTurnRunning = false;
     this.changed();
   }
 
@@ -133,6 +137,32 @@ export class DeepSeekBackgroundWork {
   agentTurnStarted(): void {
     this.agentTurns += 1;
     if (this.agentTurns === DEEPSEEK_WAKE_BUDGET) this.deps.pauseSubagents(true);
+  }
+
+  /** The service refused the turn the runtime just started. */
+  agentTurnRefused(): void {
+    this.refusedTurnRunning = true;
+  }
+
+  /**
+   * Whether a notification belongs to the refused turn the runtime is still
+   * running. The refusal holds through that turn's `turn/end` and the idle
+   * status after it, so a person's turn that opens meanwhile takes none of
+   * the refused turn's events and does not end on its `turn/end`. The next
+   * root `turn/start` also ends it, for a runtime that starts the person's
+   * queued turn without going idle first; that `turn/start` is not held.
+   */
+  holdsRefusedTurn(notification: JsonRpcNotification, sessionEvent: DeepSeekSessionEventNotification | undefined): boolean {
+    if (!this.refusedTurnRunning) return false;
+    if (sessionEvent?.sessionId === this.deps.sessionId && sessionEvent.event.type === "turn/start") {
+      this.refusedTurnRunning = false;
+      return false;
+    }
+    const status = notification.method === "session.status" ? sessionStatusNotificationSchema.safeParse(notification.params) : undefined;
+    if (status?.success && status.data.sessionId === this.deps.sessionId && status.data.status === "idle") {
+      this.refusedTurnRunning = false;
+    }
+    return true;
   }
 
   /** A person's turn lifts the pause, as a person's message refills the job wake budget upstream. */

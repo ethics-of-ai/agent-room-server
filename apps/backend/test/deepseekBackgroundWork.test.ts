@@ -306,6 +306,29 @@ describe("DeepSeek background work", () => {
     expect(paused).toEqual([true, false]);
   });
 
+  it("holds a refused turn's events until the runtime goes idle or starts its next turn", () => {
+    const work = new DeepSeekBackgroundWork({ sessionId: "session-1", listener: () => undefined, pauseSubagents: () => undefined });
+    const statusHeld = (sessionId: string, status: "running" | "idle") =>
+      work.holdsRefusedTurn({ method: "session.status", params: { sessionId, status } }, undefined);
+    const eventHeld = (type: string) => {
+      const params = { sessionId: "session-1", event: { type, seq: 0, data: {} } };
+      return work.holdsRefusedTurn({ method: "session.event", params }, params);
+    };
+
+    expect(eventHeld("assistant/message")).toBe(false);
+    work.agentTurnRefused();
+    expect(eventHeld("assistant/message")).toBe(true);
+    expect(eventHeld("turn/end")).toBe(true);
+    expect(statusHeld("child-1", "idle")).toBe(true);
+    expect(statusHeld("session-1", "idle")).toBe(true);
+    expect(eventHeld("assistant/message")).toBe(false);
+
+    work.agentTurnRefused();
+    expect(statusHeld("session-1", "running")).toBe(true);
+    expect(eventHeld("turn/start")).toBe(false);
+    expect(eventHeld("assistant/message")).toBe(false);
+  });
+
   it("empties the list when the runtime exits, because its jobs die with it", async () => {
     const { runner, workspace } = await runnerFor([[
       ...rootTurn(1, [
@@ -327,14 +350,17 @@ describe("DeepSeek background work", () => {
 
   it("drops a refused agent turn and keeps the next person's turn to its own events", async () => {
     const notice = { kind: "tool-jobs", form: "notice", summary: "bash sleep 1 [status: completed]" };
+    // The waits pin the order a slow host produced: the person's turn opens
+    // after the refused turn's `turn/start` and before the rest of that turn
+    // arrives, and the runtime answers the person only once its own turn ends.
     const { runner, workspace } = await runnerFor([
       [
         ...rootTurn(1, [backgroundBash("call-1", "sleep 1"), jobRegistered("bash-1", "sleep 1", "call-1"), toolResult("call-1", "started"), say("started")]),
         { wait: 20 },
         jobSettled("bash-1", "sleep 1", "call-1", "completed"),
-        ...rootTurn(2, [say("unrouted agent reply")], notice)
+        ...rootTurn(2, [{ wait: 150 }, say("unrouted agent reply")], notice)
       ],
-      rootTurn(3, [say("answer to the person")])
+      [{ wait: 400 }, ...rootTurn(3, [say("answer to the person")])]
     ]);
     const { turns } = watch(runner, { refuse: true });
 
