@@ -234,7 +234,6 @@ describe("Swift model structure", () => {
       "WorkspaceThreadColumn",
       "WorkspaceWindow",
       "WorkspaceWindowContent",
-      "WorkspaceWindowDirectoryHeader",
       "WorkspaceWindowModel"
     ];
 

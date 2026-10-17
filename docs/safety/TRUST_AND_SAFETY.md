@@ -863,6 +863,17 @@ type, hashes content, and stores it under `STATE_DIR`. Session deletion removes
 its attachment storage. ACP prompts add the separate 16 MiB aggregate bound
 described above.
 
+The visionOS client gets images only from the system photo picker and the
+system Files importer. Both run out of process and hand over just the items the
+person selects. The app holds each security-scoped URL the importer returns
+open only for the read, and the backend still validates every upload as above.
+The app declares no photo-library read usage and never reads the pasteboard for
+attachments. It declares add-only usage
+(`NSPhotoLibraryAddUsageDescription`) for one flow: Share Image in the sketch
+editor offers Save Image, and the system asks for add access the first time the
+person uses it. A saved drawing leaves the device only if the person later
+attaches it to a turn.
+
 Live artifacts are line-start `<artifact kind="svg|mermaid">` regions in model
 text, gated by `ARTIFACTS_ENABLED`, which defaults on. Unknown, malformed, or
 inline tags remain ordinary text except an empty self-closing control tag. The

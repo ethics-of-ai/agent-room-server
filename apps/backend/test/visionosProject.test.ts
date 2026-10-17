@@ -197,6 +197,15 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(infoPlist).toContain("<key>NSAllowsLocalNetworking</key>");
   });
 
+  test("asks only to add to the photo library, never to read it", async () => {
+    const infoPlist = await readFile(resolve(visionOSRoot, "AgentRoom/Info.plist"), "utf8");
+
+    // Share Image's Save Image needs add access; attachments come from the out-of-process
+    // photo picker, which needs no library permission.
+    expect(infoPlist).toContain("<key>NSPhotoLibraryAddUsageDescription</key>");
+    expect(infoPlist).not.toContain("<key>NSPhotoLibraryUsageDescription</key>");
+  });
+
   test("defaults simulator connections to localhost and clears stale physical-device placeholders", async () => {
     const endpointPolicy = await readFile(resolve(visionOSRoot, "AgentRoom/State/Connection/ServerEndpointPolicy.swift"), "utf8");
     const appStore = await readFile(resolve(visionOSRoot, "AgentRoom/State/AppStore/AppStore.swift"), "utf8");
@@ -506,7 +515,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     const composerActions = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerActionGroup.swift"), "utf8");
     const composerField = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerDraftField.swift"), "utf8");
     const composerRunProfile = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Dashboard/WorkspaceRunProfileControls.swift"), "utf8");
-    const contextPanel = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/WorkspaceContextPanel.swift"), "utf8");
+    const composerAttachments = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerAttachmentGroup.swift"), "utf8");
 
     expect(workspaceWindow).toContain("WorkspaceThreadColumn(");
     expect(workspaceWindow).toContain("WorkspaceChatColumn(");
@@ -521,8 +530,14 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(workspaceWindow).not.toContain("WorkspaceSceneRunProfilePanel");
 
     expect(composerPanel).toContain("TurnComposerView");
-    expect(composerPanel).toContain("WorkspaceContextPanel");
-    expect(composerPanel).toContain("isContextPanelPresented");
+    // File context comes only from `@` mentions in the draft, and text paste is the system's,
+    // so the composer has no context panel or paste button.
+    expect(composerPanel).not.toContain("WorkspaceContextPanel");
+    expect(composerPanel).not.toContain("isContextPanelPresented");
+    expect(composerAttachments).toContain(".fileImporter(");
+    expect(composerAttachments).toContain(".photosPicker(");
+    expect(composerAttachments).not.toContain("PasteButton(");
+    expect(composerAttachments).not.toContain("toggleContextPanel");
     expect(composerPanel).not.toContain("Thread Chat");
     expect(composerPanel).not.toContain("SessionDetailContent");
     expect(composerPanel).not.toContain("CodingAgentRendererView");
@@ -536,22 +551,15 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(composerRunProfile).toContain("select: store.selectCodingAgentSetting");
     expect(composerRunProfile).not.toContain("CodingAgentSettingsControlsView");
 
-    expect(contextPanel).toContain("WorkspaceMentionPickerView");
-    expect(contextPanel).toContain("SelectedContextList");
-    expect(contextPanel).not.toContain("TurnComposerView");
-    expect(contextPanel).not.toContain("CodingAgentRendererView");
-
     // The per-turn diff summary card — the turn-scoped change review entry —
-    // mounts in the workspace window's chat column, not in the composer or
-    // context panels.
+    // mounts in the workspace window's chat column, not in the composer.
     expect(workspaceChatColumn).toContain("CodingDiffView(diff: diff, startReview: { startDiffReview(diff) })");
     expect(composerPanel).not.toContain("CodingDiffView");
-    expect(contextPanel).not.toContain("CodingDiffView");
 
     // The clarifying-question deck is a trailing scene ornament owned by the
     // chat column, beside the composer's bottom one; the record cards sit in
-    // the same column. Neither reaches the composer, the context panel, or
-    // the navigation-only window view.
+    // the same column. Neither reaches the composer or the navigation-only
+    // window view.
     expect(workspaceChatColumn).toContain("CodingQuestionDeckView(presentation: questionDeck)");
     expect(workspaceChatColumn).toContain("attachmentAnchor: .scene(.trailing)");
     expect(workspaceChatColumn).toContain("CodingQuestionRequestView(");
@@ -560,7 +568,6 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(workspaceChatColumn).toContain("reopenQuestionDeck(request)");
     expect(workspaceWindow).toContain("model.questionDrafts.isDismissed(requestId)");
     expect(composerPanel).not.toContain("CodingQuestionDeckView");
-    expect(contextPanel).not.toContain("CodingQuestionDeckView");
     expect(workspaceWindow).not.toContain("CodingQuestionDeckView(");
   });
 
