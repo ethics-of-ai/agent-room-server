@@ -66,6 +66,8 @@ export class LocalWorkspaceRegistry {
    */
   readonly git: LocalWorkspaceGit;
   private registryCache?: LocalWorkspace[];
+  /** The tail of the write queue; see `commit`. */
+  private writes: Promise<unknown> = Promise.resolve();
   private readonly gitSnapshots: GitSnapshotCache;
 
   constructor(
@@ -104,8 +106,7 @@ export class LocalWorkspaceRegistry {
     if (index < 0) return undefined;
     const refreshed = await this.refreshWorkspaceGitSnapshot(snapshot.workspaces[index]);
     if (!sameWorkspace(refreshed, snapshot.workspaces[index])) {
-      snapshot.workspaces[index] = refreshed;
-      await this.save(snapshot);
+      await this.replaceWorkspace(refreshed);
     }
     return refreshed;
   }
@@ -117,6 +118,11 @@ export class LocalWorkspaceRegistry {
   async findByIdWithoutGitRefresh(workspaceId: string): Promise<LocalWorkspace | undefined> {
     const snapshot = await this.load();
     return snapshot.workspaces.find((workspace) => workspace.id === workspaceId);
+  }
+
+  /** Every registered workspace, without touching git; each `git` block may be stale. */
+  async listWithoutGitRefresh(): Promise<LocalWorkspace[]> {
+    return (await this.load()).workspaces;
   }
 
   async gitStatus(workspaceId: string): Promise<LocalWorkspaceGitStatus> {
@@ -175,35 +181,42 @@ export class LocalWorkspaceRegistry {
       throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
     }
     const refreshed = await this.refreshWorkspaceGitSnapshot(snapshot.workspaces[existingIndex], { fresh: true });
-    snapshot.workspaces[existingIndex] = refreshed;
-    await this.save(snapshot);
+    if (!(await this.replaceWorkspace(refreshed))) {
+      throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
+    }
     return refreshed;
   }
 
   async register(input: RegisterLocalWorkspaceInput): Promise<RegisterLocalWorkspaceResult> {
     const workspacePath = await this.resolveExistingDirectory(input.path);
     const now = new Date().toISOString();
-    const snapshot = await this.load();
-    const existingIndex = snapshot.workspaces.findIndex((workspace) => workspace.id === localWorkspaceId(workspacePath));
-    const existing = existingIndex >= 0 ? snapshot.workspaces[existingIndex] : undefined;
-    const workspace: LocalWorkspace = {
-      id: existing?.id ?? localWorkspaceId(workspacePath),
-      name: displayName(input.name, workspacePath, existing?.name),
-      path: workspacePath,
-      kind: input.kind ?? existing?.kind ?? "user_selected",
-      trustedAt: existing?.trustedAt ?? now,
-      lastOpenedAt: now,
-      git: await this.gitSnapshots.refresh(workspacePath)
-    };
-
-    if (existingIndex >= 0) {
-      snapshot.workspaces[existingIndex] = workspace;
-    } else {
-      snapshot.workspaces.push(workspace);
-      snapshot.workspaces.sort((left, right) => left.name.localeCompare(right.name));
-    }
-    await this.save(snapshot);
-    return { workspace, created: existingIndex < 0 };
+    const id = localWorkspaceId(workspacePath);
+    const git = await this.gitSnapshots.refresh(workspacePath);
+    let result!: RegisterLocalWorkspaceResult;
+    // Built from the registry as it stands once the git read is done, so a
+    // change made meanwhile is kept.
+    await this.commit((workspaces) => {
+      const existingIndex = workspaces.findIndex((workspace) => workspace.id === id);
+      const existing = existingIndex >= 0 ? workspaces[existingIndex] : undefined;
+      const workspace: LocalWorkspace = {
+        id,
+        name: displayName(input.name, workspacePath, existing?.name),
+        path: workspacePath,
+        kind: input.kind ?? existing?.kind ?? "user_selected",
+        trustedAt: existing?.trustedAt ?? now,
+        lastOpenedAt: now,
+        git
+      };
+      if (existingIndex >= 0) {
+        workspaces[existingIndex] = workspace;
+      } else {
+        workspaces.push(workspace);
+        workspaces.sort((left, right) => left.name.localeCompare(right.name));
+      }
+      result = { workspace, created: existingIndex < 0 };
+      return true;
+    });
+    return result;
   }
 
   async checkoutBranch(workspaceId: string, branch: string): Promise<CheckoutLocalWorkspaceBranchResult> {
@@ -218,9 +231,9 @@ export class LocalWorkspaceRegistry {
       throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
     }
 
-    // Fast path for the per-turn session-branch restore: when the working tree is
-    // already on the requested branch, one fresh `git branch --show-current`
-    // replaces the full five-command snapshot and its whole-worktree status scan.
+    // Fast path for a switch to the branch the checkout is already on: one fresh
+    // `git branch --show-current` replaces the full five-command snapshot and
+    // its whole-worktree status scan.
     const registered = snapshot.workspaces[existingIndex];
     const currentBranch = await this.git.currentBranch(registered.path);
     if (currentBranch && currentBranch === requestedBranch) {
@@ -260,8 +273,7 @@ export class LocalWorkspaceRegistry {
 
     const previousBranch = workspace.git.branch;
     if (previousBranch === requestedBranch) {
-      snapshot.workspaces[existingIndex] = workspace;
-      await this.save(snapshot);
+      await this.replaceWorkspace(workspace);
       return {
         workspace,
         ...(previousBranch ? { previousBranch } : {}),
@@ -271,8 +283,7 @@ export class LocalWorkspaceRegistry {
     }
 
     if (workspace.git.hasUncommittedChanges) {
-      snapshot.workspaces[existingIndex] = workspace;
-      await this.save(snapshot);
+      await this.replaceWorkspace(workspace);
       throw new LocalWorkspaceRegistryError("Workspace has uncommitted changes; commit or stash them before switching branches", 409);
     }
 
@@ -283,8 +294,7 @@ export class LocalWorkspaceRegistry {
     }
 
     const updated = await this.refreshWorkspaceGitSnapshot(workspace, { fresh: true });
-    snapshot.workspaces[existingIndex] = updated;
-    await this.save(snapshot);
+    await this.replaceWorkspace(updated);
     return {
       workspace: updated,
       ...(previousBranch ? { previousBranch } : {}),
@@ -294,15 +304,45 @@ export class LocalWorkspaceRegistry {
   }
 
   async unregister(workspaceId: string): Promise<UnregisterLocalWorkspaceResult> {
-    const snapshot = await this.load();
-    const existingIndex = snapshot.workspaces.findIndex((workspace) => workspace.id === workspaceId);
-    if (existingIndex < 0) {
+    let removed: LocalWorkspace | undefined;
+    await this.commit((workspaces) => {
+      const existingIndex = workspaces.findIndex((workspace) => workspace.id === workspaceId);
+      if (existingIndex < 0) return false;
+      [removed] = workspaces.splice(existingIndex, 1);
+      return true;
+    });
+    if (!removed) {
       throw new LocalWorkspaceRegistryError("Workspace is not registered", 404);
     }
+    return { workspace: removed };
+  }
 
-    const [workspace] = snapshot.workspaces.splice(existingIndex, 1);
-    await this.save(snapshot);
-    return { workspace };
+  /**
+   * Applies `change` to the registry as it is now and persists it when `change`
+   * returns true. Changes run one at a time, and none awaits git, so a writer
+   * that read the registry before a slow git command can't save over a
+   * workspace registered or removed while it waited.
+   */
+  private async commit(change: (workspaces: LocalWorkspace[]) => boolean): Promise<void> {
+    const run = this.writes.then(async () => {
+      const snapshot = await this.load();
+      if (change(snapshot.workspaces)) await this.save(snapshot);
+    });
+    this.writes = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Stores a refreshed workspace if it is still registered; returns whether it was. */
+  private async replaceWorkspace(updated: LocalWorkspace): Promise<boolean> {
+    let replaced = false;
+    await this.commit((workspaces) => {
+      const index = workspaces.findIndex((workspace) => workspace.id === updated.id);
+      if (index < 0) return false;
+      workspaces[index] = updated;
+      replaced = true;
+      return true;
+    });
+    return replaced;
   }
 
   private async load(): Promise<LocalWorkspaceRegistrySnapshot> {
@@ -336,15 +376,24 @@ export class LocalWorkspaceRegistry {
     const workspaces = await Promise.all(
       snapshot.workspaces.map((workspace) => this.refreshWorkspaceGitSnapshot(workspace))
     );
-    const changed = workspaces.some((workspace, index) => !sameWorkspace(workspace, snapshot.workspaces[index]));
-    const refreshedSnapshot = {
+    const changed = workspaces.filter((workspace, index) => !sameWorkspace(workspace, snapshot.workspaces[index]));
+    if (changed.length > 0) {
+      const byId = new Map(changed.map((workspace) => [workspace.id, workspace]));
+      await this.commit((current) => {
+        let replaced = false;
+        current.forEach((workspace, index) => {
+          const refreshed = byId.get(workspace.id);
+          if (!refreshed) return;
+          current[index] = refreshed;
+          replaced = true;
+        });
+        return replaced;
+      });
+    }
+    return {
       defaultWorkspaceRoot: this.config.workspaceRoot,
       workspaces
     };
-    if (changed) {
-      await this.save(refreshedSnapshot);
-    }
-    return refreshedSnapshot;
   }
 
   private async refreshWorkspaceGitSnapshot(

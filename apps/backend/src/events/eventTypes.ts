@@ -75,6 +75,21 @@ export interface ConfigReloadedPayload {
   audit: { changedKeys: ManagedSettingKey[] };
 }
 
+// Emitted when a registered workspace's checkout lands on a different branch.
+// AgentRoom's own switches (the branch routes, a session create that names a
+// branch) carry no `origin`. The HEAD watcher's carry `origin: "observed"`: the
+// checkout moved outside AgentRoom, or an agent switched it during a turn. A
+// detached HEAD omits `branch` and sets `detached`. Build it with
+// `publishWorkspaceBranchChanged`.
+export interface WorkspaceBranchChangedPayload {
+  workspaceId: string;
+  path: string;
+  previousBranch?: string;
+  branch?: string;
+  detached?: true;
+  origin?: "observed";
+}
+
 export interface AgentSessionPayload {
   session: AgentSession;
 }

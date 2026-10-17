@@ -33,6 +33,7 @@ struct ThreadMirrorSection: View {
             HSplitView {
                 ThreadSessionListCard(
                     sessions: visibleSessions,
+                    workspaceSnapshot: supervisor.workspaceSnapshot,
                     hasSessions: !threadMirrorStore.sessions.isEmpty,
                     selectedSessionID: $threadMirrorStore.selectedSessionID,
                     query: $query, filter: $filter
@@ -42,6 +43,7 @@ struct ThreadMirrorSection: View {
                     if let session = threadMirrorStore.selectedSession {
                         ThreadSelectedDetail(
                             session: session,
+                            branch: ThreadCheckoutBranch.label(for: session, in: supervisor.workspaceSnapshot),
                             messages: threadMirrorStore.selectedMessages,
                             events: threadMirrorStore.selectedEvents,
                             isCancelling: threadMirrorStore.isCancelling(session),

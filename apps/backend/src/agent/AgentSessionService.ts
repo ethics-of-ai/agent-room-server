@@ -31,7 +31,7 @@ import {
 } from "../protocol/coding/events";
 import type { LocalWorkspaceRegistry } from "../workspace/LocalWorkspaceRegistry";
 import { AgentBackgroundWork } from "./AgentBackgroundWork";
-import { SessionBranchFollower, validateRunnerInputParts } from "./sessionRunnerSupport";
+import { checkoutSessionBranch, validateRunnerInputParts } from "./sessionRunnerSupport";
 import { AgentSessionMessageStore } from "./AgentSessionMessageStore";
 import { AgentTurnEventApplier, type OutstandingQuestionRequest } from "./AgentTurnEventApplier";
 import { AgentTurnGitDiffTracker } from "./AgentTurnGitDiffTracker";
@@ -75,7 +75,6 @@ export class AgentSessionService {
   private readonly runnerEvents: AgentTurnEventApplier;
   private readonly background: AgentBackgroundWork;
   private readonly turnGitDiffs: AgentTurnGitDiffTracker;
-  private readonly branches: SessionBranchFollower;
   private readonly cancelledTurnIds = new Set<string>();
   /** Hydrated non-restorable sessions that must refuse a fresh conversation. */
   private readonly uncontinuableSessionIds = new Set<string>();
@@ -131,7 +130,6 @@ export class AgentSessionService {
       }
     });
     this.turnGitDiffs = new AgentTurnGitDiffTracker(deps.registry);
-    this.branches = new SessionBranchFollower({ ...deps, sessions: this.sessions, persist: (sessionId) => this.persist(sessionId) });
     this.background = new AgentBackgroundWork({ sessions: this.sessions, eventBus: deps.eventBus,
       openTurn: (session, opening) => this.openTurn(session, opening), consume: (session, turn, events) => void this.consumeTurn(session, turn, events) });
     for (const runner of Object.values(deps.runners)) runner?.watchBackgroundWork?.(this.background.listener);
@@ -142,7 +140,6 @@ export class AgentSessionService {
     const store = this.deps.durableSessions;
     if (!store) return;
     const inventory = await store.initialize();
-    this.branches.noteInterruptedTurns(inventory.documents);
     for (const document of inventory.documents) {
       await this.hydrate(document);
     }
@@ -263,7 +260,7 @@ export class AgentSessionService {
       throw new AgentSessionError("Workspace is not registered", 404);
     }
     if (input.gitBranch?.trim()) {
-      const result = await this.branches.checkout(workspace.id, input.gitBranch.trim());
+      const result = await checkoutSessionBranch(this.deps, workspace.id, input.gitBranch.trim());
       workspace = result.workspace;
     }
 
@@ -311,15 +308,16 @@ export class AgentSessionService {
     if (!(await this.plans.prepareForTurn(session.id))) {
       throw new AgentSessionError("This thread's plan state could not be saved; retry shortly", 503);
     }
-    // Turn start only needs the workspace to still be registered; the branch
-    // restore below probes git itself, so skip the full snapshot refresh here.
+    // Turn start only needs the workspace to still be registered, so skip the
+    // full snapshot refresh here.
     const workspace = await this.deps.registry.findByIdWithoutGitRefresh(session.workspaceId);
     if (!workspace) {
       throw new AgentSessionError("Workspace is not registered", 404);
     }
-    if (session.gitBranch) {
-      await this.branches.checkout(session.workspaceId, session.gitBranch);
-    }
+    // The turn runs on whatever branch the Mac's checkout is on; AgentRoom never
+    // switches it here. An accepted turn records that branch as history only. A
+    // detached HEAD, or a read failure, leaves the last recorded branch.
+    const branch = await this.deps.registry.gitCurrentBranch(session.workspaceId).catch(() => undefined);
 
     const runner = this.requireRunner(session.runnerKind);
     const runnerInput = await this.assembleRunnerInput(session, input.message, input.context);
@@ -333,6 +331,7 @@ export class AgentSessionService {
     if (hasSettings(input.settings)) {
       session.settings = input.settings;
     }
+    if (branch) session.gitBranch = branch;
 
     const turn = this.openTurn(session, {
       role: "user",
@@ -371,7 +370,6 @@ export class AgentSessionService {
       id, sessionId: session.id, status: "running", startedAt: now, inputTokens: 0, outputTokens: 0, totalTokens: 0, ...(trigger ? { trigger } : {})
     };
     this.turns.set(turn.id, turn);
-    this.branches.beginTurn(session.workspaceId, turn);
     this.messages.append({ sessionId: session.id, turnId: turn.id, ...message, status: "sent", at: now });
     session.status = "running";
     session.activeTurnId = turn.id;
@@ -580,7 +578,6 @@ export class AgentSessionService {
       // parser and hanging the client's streaming spinner open.
       if (this.cancelledTurnIds.has(turn.id) || turn.status === "cancelled") {
         this.runnerEvents.releaseTurn(turn.id);
-        await this.branches.follow(session, turn);
       } else {
         this.runnerEvents.finalizeTurn(session, turn);
         await this.settleTurnWorkspace(session, turn);
@@ -774,15 +771,11 @@ export class AgentSessionService {
     }
   }
 
-  // Before a turn's terminal event, a restart's included: re-pin the session to
-  // the branch the turn ended on, then emit the settle-time Git delta if the turn
-  // still holds a baseline. settleTurn takes it before its first await. A stop
-  // and the runner's own end both settle here before they free the session, so
-  // a turn that starts the moment the stop lands runs on the followed pin.
+  // Before a turn's terminal event, a restart's included: emit the settle-time
+  // Git delta if the turn still holds a baseline. settleTurn takes it before its
+  // first await.
   private async settleTurnWorkspace(session: AgentSession, turn: AgentSessionTurn): Promise<void> {
-    const settlingDiff = this.turnGitDiffs.settleTurn(turn.id);
-    await this.branches.follow(session, turn);
-    const diff = await settlingDiff;
+    const diff = await this.turnGitDiffs.settleTurn(turn.id);
     if (!diff || !this.sessions.has(session.id)) return;
     this.publishCodingEvent(codingDiffUpdatedEvent({ sessionId: session.id, turnId: turn.id, runnerKind: session.runnerKind,
       files: diff.files, ...(diff.truncated ? { truncated: true } : {}) }));

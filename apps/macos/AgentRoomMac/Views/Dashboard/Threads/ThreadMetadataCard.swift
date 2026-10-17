@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ThreadMetadataCard: View {
     var session: AgentSession
+    var branch: String
     var isCancelling: Bool
     var stopAction: () -> Void
 
@@ -40,7 +41,7 @@ struct ThreadMetadataCard: View {
 
             DisclosureGroup("Session details") {
                 ScrollView {
-                    ThreadSessionDetails(session: session)
+                    ThreadSessionDetails(session: session, branch: branch)
                 }
                 .frame(maxHeight: 200)
             }

@@ -108,7 +108,7 @@ final class BackendSupervisor {
     @ObservationIgnored private var isGracefullyStopping = false
     @ObservationIgnored private var pendingCrashRestartTask: Task<Void, Never>?
     @ObservationIgnored private var restartLimiter = BackendCrashRestartLimiter(maxAttempts: 3, windowSeconds: 300)
-    @ObservationIgnored private let backendSettingsEventMonitor = BackendSettingsEventMonitor()
+    @ObservationIgnored private let backendEventMonitor = BackendEventMonitor()
 
     private let crashRestartDelay: Duration = .seconds(2)
     private let backendReadinessAttempts = 40
@@ -249,7 +249,7 @@ final class BackendSupervisor {
             return
         }
         settings.serverPort = value
-        backendSettingsEventMonitor.disconnect()
+        backendEventMonitor.disconnect()
         persistSettings()
         appendDiagnostic("info", "Updated server port to \(value).")
     }
@@ -495,7 +495,7 @@ final class BackendSupervisor {
             secretLoadError = nil
             appendDiagnostic("info", "Updated backend secrets in Keychain.")
             if connectionState == .reachable {
-                startBackendSettingsEventMonitor()
+                startBackendEventMonitor()
             }
         } catch {
             secretLoadError = error
@@ -1084,16 +1084,16 @@ final class BackendSupervisor {
                         : .externalRunning
                 }
                 appendDiagnostic("info", "Backend reachable. Runner: \(response.runnerKind), mode: \(response.mode).")
-                startBackendSettingsEventMonitor()
+                startBackendEventMonitor()
                 await refreshWorkspaces()
                 await refreshBackendSettingsMetadata()
             } else {
-                backendSettingsEventMonitor.disconnect()
+                backendEventMonitor.disconnect()
                 runnerCatalog = offlineRunnerCatalog
                 appendDiagnostic("warning", "Backend responded but did not report healthy state.")
             }
         } catch {
-            backendSettingsEventMonitor.disconnect()
+            backendEventMonitor.disconnect()
             health = nil
             workspaceSnapshot = nil
             runnerCatalog = offlineRunnerCatalog
@@ -1121,7 +1121,7 @@ final class BackendSupervisor {
                     connectionState = .reachable
                     serverState = .running
                     appendDiagnostic("info", "Backend reachable. Runner: \(response.runnerKind), mode: \(response.mode).")
-                    startBackendSettingsEventMonitor()
+                    startBackendEventMonitor()
                     await refreshWorkspaces()
                     await refreshBackendSettingsMetadata()
                     return
@@ -1157,6 +1157,17 @@ final class BackendSupervisor {
         } catch {
             workspaceSnapshot = nil
             appendDiagnostic("warning", "Could not load /api/workspaces: \(error.localizedDescription)")
+        }
+    }
+
+    /// Re-reads the registry after a `workspace_branch_changed`. That event can arrive on
+    /// every terminal switch, so a success writes no diagnostic, and a failure keeps the
+    /// last snapshot rather than leaving every thread row without a branch.
+    func refreshWorkspacesAfterBranchChange() async {
+        do {
+            workspaceSnapshot = try await apiClient.fetchWorkspaces()
+        } catch {
+            appendDiagnostic("warning", "Could not reload /api/workspaces after a branch change: \(error.localizedDescription)")
         }
     }
 
@@ -1428,7 +1439,7 @@ final class BackendSupervisor {
     }
 
     private func resetCachedBackendSnapshot(connectionState: BackendConnectionState) {
-        backendSettingsEventMonitor.disconnect()
+        backendEventMonitor.disconnect()
         health = nil
         workspaceSnapshot = nil
         // Provenance describes a running process; a stopped backend has none, and
@@ -1577,14 +1588,15 @@ final class BackendSupervisor {
         Task { await refreshBackendSettingsMetadata() }
     }
 
-    private func startBackendSettingsEventMonitor() {
-        backendSettingsEventMonitor.connect(
+    private func startBackendEventMonitor() {
+        backendEventMonitor.connect(
             baseURL: settings.localServerURL,
-            authToken: secrets.authToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        ) { [weak self] in
-            guard let self else { return }
-            await refreshBackendSettingsMetadata()
-        }
+            authToken: secrets.authToken?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            handlers: BackendEventMonitor.Handlers(
+                onConfigReloaded: { [weak self] in await self?.refreshBackendSettingsMetadata() },
+                onWorkspaceBranchChanged: { [weak self] in await self?.refreshWorkspacesAfterBranchChange() }
+            )
+        )
     }
 
     /// `/api/config` re-reads the settings file per request, so its metadata is

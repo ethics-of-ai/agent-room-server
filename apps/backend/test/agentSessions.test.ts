@@ -237,7 +237,7 @@ describe("agent sessions", () => {
     await app.close();
   });
 
-  it("binds new sessions to the current workspace branch and restores it before turns", async () => {
+  it("records the current branch on new sessions and runs turns on the machine's branch", async () => {
     const serviceConfig = await config();
     const selectedDirectory = await createGitWorkspace();
     await git(selectedDirectory, "switch", "-c", "feature/session-branch");
@@ -253,7 +253,7 @@ describe("agent sessions", () => {
     const turn = await app.inject({
       method: "POST",
       url: `/api/agent-sessions/${session.json().session.id}/turns`,
-      payload: { message: "run on the thread branch" }
+      payload: { message: "run on whatever branch the Mac is on" }
     });
 
     expect(session.statusCode).toBe(201);
@@ -262,8 +262,10 @@ describe("agent sessions", () => {
       gitBranch: "feature/session-branch"
     });
     expect(turn.statusCode).toBe(202);
-    await waitForSession(app, session.json().session.id, "idle");
-    await expect(git(selectedDirectory, "branch", "--show-current")).resolves.toBe("feature/session-branch\n");
+    // The person switched to main after creating the thread; the turn runs there
+    // and the thread records it, instead of switching back.
+    await expect(waitForSession(app, session.json().session.id, "idle")).resolves.toMatchObject({ gitBranch: "main" });
+    await expect(git(selectedDirectory, "branch", "--show-current")).resolves.toBe("main\n");
 
     await app.close();
   });

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ThreadSelectedDetail: View {
     var session: AgentSession
+    var branch: String
     var messages: [AgentSessionMessage]
     var events: [AgentRoomEvent]
     var isCancelling: Bool
@@ -10,7 +11,7 @@ struct ThreadSelectedDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DashboardTheme.rowSpacing) {
-            ThreadMetadataCard(session: session, isCancelling: isCancelling, stopAction: stopAction)
+            ThreadMetadataCard(session: session, branch: branch, isCancelling: isCancelling, stopAction: stopAction)
             Picker("Thread content", selection: $tab) {
                 ForEach(ThreadContentTab.allCases) { tab in
                     Text(tab.title).tag(tab)

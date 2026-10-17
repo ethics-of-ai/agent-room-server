@@ -130,7 +130,10 @@ invalid, empty, or newer cache falls back to identities bundled into this app.
 Environment-locked values render read-only. File values differing from a live
 backend appear as pending and offer restart. Paired-client changes arrive as a
 value-free `config_reloaded` event, after which the app rereads the API metadata
-and file.
+and file. The same event socket delivers `workspace_branch_changed`, after which
+the app rereads `/api/workspaces`. A burst of branch events runs one refresh and
+queues at most one more. These rereads write no diagnostic when they succeed, and
+a failed one keeps the last registry snapshot so thread rows keep their branch.
 
 The Advanced pane owns the spatial-engine preference, the
 tier-2 terminal and language-service controls, plus `REMOTE_SETTINGS_ADMIN`.
@@ -266,6 +269,11 @@ case-insensitive substring after trimming whitespace. Status filters preserve
 the newest-updated order. Running includes an active turn even if the status
 string differs; Idle and Failed exclude running sessions. All includes unknown
 statuses. Summary counts describe all sessions independently of search/filter.
+
+Each thread row and its details show the branch the thread's workspace checkout
+is on now, read from the workspace list, because every thread runs on the Mac's
+branch. The details also show `gitBranch` as the branch the latest turn started
+on. A workspace the app hasn't loaded shows "Branch unknown".
 
 The store initially selects the first available session. Refresh and sorting
 preserve that id. Filtering out the selected session shows a Clear filters

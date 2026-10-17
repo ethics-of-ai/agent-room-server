@@ -31,6 +31,7 @@ import type { AuditLogStore } from "./state/AuditLogStore";
 import { initializeServiceStorage } from "./config/serviceStorage";
 import { LocalWorkspaceRegistry } from "./workspace/LocalWorkspaceRegistry";
 import { WorkspaceExplorer } from "./workspace/WorkspaceExplorer";
+import { WorkspaceHeadWatcher } from "./workspace/git/headWatcher";
 import { AgentSessionService } from "./agent/AgentSessionService";
 import { AgentAttachmentStore } from "./agent/AgentAttachmentStore";
 import { AgentTurnContextAssembler } from "./agent/AgentTurnContextAssembler";
@@ -109,6 +110,18 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
   const runnerReadiness = new RunnerRuntimeReadiness();
   const localWorkspaceRegistry = new LocalWorkspaceRegistry(input.config);
   const workspaceExplorer = new WorkspaceExplorer(localWorkspaceRegistry);
+  // Reports branch changes made outside AgentRoom, such as a `git switch` in a
+  // Mac terminal, so clients never show a branch the checkout has left.
+  const headWatcher = new WorkspaceHeadWatcher({
+    registry: localWorkspaceRegistry,
+    eventBus,
+    invalidateFileIndex: (workspaceId) => workspaceExplorer.invalidateFileIndex(workspaceId),
+    onError: (error) => app.log.warn({ err: error }, "Workspace HEAD watcher work failed")
+  });
+  await headWatcher.start();
+  app.addHook("onClose", async () => {
+    await headWatcher.close();
+  });
   const languageServiceRegistry = new LanguageServiceRegistry(
     input.config,
     input.languageServices?.descriptors ?? configuredLanguageServiceDescriptors()

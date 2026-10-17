@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ThreadSessionRow: View {
     var session: AgentSession
+    /// The branch the workspace's checkout is on now; see `ThreadCheckoutBranch`.
+    var branch: String
 
     private var style: ThreadStatusStyle {
         ThreadStatusStyle.style(for: session)
@@ -28,7 +30,7 @@ struct ThreadSessionRow: View {
                 HStack(spacing: 8) {
                     Text(style.label)
                         .foregroundStyle(style.tint)
-                    Text(session.gitBranch ?? "No branch")
+                    Text(branch)
                     Text("\(session.turnCount.formatted()) turns")
                 }
                 .font(.caption.weight(.semibold))

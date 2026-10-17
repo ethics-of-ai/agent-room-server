@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ThreadSessionListCard: View {
     var sessions: [AgentSession]
+    /// The registry each row reads its workspace's live branch from.
+    var workspaceSnapshot: LocalWorkspaceRegistrySnapshot?
     var hasSessions: Bool
     @Binding var selectedSessionID: String?
     @Binding var query: String
@@ -26,7 +28,11 @@ struct ThreadSessionListCard: View {
             } else {
                 List(selection: $selectedSessionID) {
                     ForEach(sessions) { session in
-                        ThreadSessionRow(session: session).tag(session.id)
+                        ThreadSessionRow(
+                            session: session,
+                            branch: ThreadCheckoutBranch.label(for: session, in: workspaceSnapshot)
+                        )
+                        .tag(session.id)
                     }
                 }
                 .listStyle(.inset)

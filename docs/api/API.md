@@ -1701,7 +1701,10 @@ The route is a fixed Git branch operation, not arbitrary shell execution. The
 workspace must be a registered Git repository, the branch must already exist
 locally, and the working tree must have no uncommitted or untracked changes
 when changing branches. On success it returns the updated workspace snapshot
-plus `previousBranch`, `branch`, and `changed`.
+plus `previousBranch`, `branch`, and `changed`. A switch that changed the
+branch publishes `workspace_branch_changed`. The same event reports a switch
+made outside AgentRoom; [Broadcast WebSocket](#broadcast-websocket) describes
+both.
 
 `DELETE /api/workspaces/:workspaceId` unregisters a workspace from AgentRoom.
 It removes only registry metadata under `STATE_DIR`; it does not delete or
@@ -2383,39 +2386,27 @@ clients should read `runner`. Image attachments are supported for
 `claude_code` and `cursor`; both SDK runners receive base64 image content as
 described under turns below.
 
-`gitBranch` is optional. If omitted, the backend records the workspace's
-current branch when the session is created. Before invoking the runner, turn
-execution switches the registered workspace back to the session branch when
-needed, so threads that share a workspace each run on their own branch.
+AgentRoom is always on the branch the Mac's checkout is on. A turn runs on
+whatever branch the registered workspace is on when it starts, and AgentRoom
+never switches branches at turn start, at settle, or after a stop. A branch an
+agent or a person moves to is where the next turn of every thread in that
+checkout runs. Every workspace registered inside one Git working tree shares
+its HEAD, a repository root and its subdirectories alike, so those threads
+share one branch. A linked worktree has its own HEAD; register one to work on
+another branch in parallel.
 
-The session branch follows the agent. When a turn completes, fails, or is
-stopped on a different branch than the session's, the backend records that
-branch as the session's `gitBranch` and emits `workspace_branch_changed`
-(`workspaceId`, `path`, optional `previousBranch`, `branch`). The event
-precedes the turn's terminal `coding_*` event, `coding_turn_cancelled` included,
-and the session takes no new turn until then. The next turn therefore stays on
-the branch the agent chose, even one sent the moment a stop lands, and including
-when the agent left uncommitted work there. A turn that was running when the backend stopped follows the branch at
-startup, just before the restart marks it failed. A turn that ends on a
-detached HEAD, or on a branch with no commit yet, keeps the previous session
-branch. A Git read failure leaves the session branch unchanged and never fails
-the turn.
+A session's `gitBranch` is history, not a pin. The backend records the current
+branch when the session is created, then the branch each turn starts on. A turn
+that starts on a detached HEAD, or whose Git read fails, leaves the last
+recorded value. Clients that show which branch a thread is on use the
+workspace's live `git.branch`, which `workspace_branch_changed` keeps current.
 
-A turn follows only when nothing but its own agent could have moved the
-checkout. Every workspace registered inside one Git working tree shares its
-HEAD, a repository root and its subdirectories alike; a linked worktree has its
-own. Threads in one checkout take turns checking it out, so a turn keeps its
-session branch if another session's turn in the same checkout runs at any point
-during it, whether that turn started earlier, is still running, or has already
-settled. The same applies when AgentRoom announces a `workspace_branch_changed`
-for a workspace in the checkout before the turn settles, such as a person's
-branch switch or create through the Git routes. A turn in another repository
-never blocks a follow. The cost is that an
-agent which did switch branches during such an overlap is not followed, and its
-next turn restores the old pin.
-After a restart, a checkout with two interrupted turns follows neither. A
-`run_succeeded` or `run_failed` that a runner delivers after the turn was
-stopped never moves the session branch; the stop already followed it once.
+`gitBranch` on session create is optional. When given, it is an explicit
+request to switch the checkout to that existing local branch before the
+session is recorded. It follows the branch-switch route's rules, refuses a
+dirty working tree, and publishes `workspace_branch_changed` when the branch
+changed. A client that only wants the session to start on the current branch
+should omit it, so a stale cached branch never moves the checkout.
 
 ### Turns and token usage
 
@@ -3534,6 +3525,21 @@ above). It is sanitized like the terminal payloads: `workspaceId`,
 it produced, `fileCount` (paths acted on), and `changedFileCount` (changed paths
 remaining) — **never** file content, a path list, or a remote URL, which for an
 HTTPS remote can carry credentials.
+`workspace_branch_changed` fires when a registered workspace's checkout lands on
+another branch. It carries `workspaceId`, `path`, `previousBranch` when the
+checkout was on a branch before, and `branch`, or `detached: true` with no
+`branch` for a detached HEAD. AgentRoom's own changes carry no `origin`: the
+branch switch and create routes, and a session create that names a branch. The
+backend's HEAD watcher publishes
+`origin: "observed"` for any other move, once per registered workspace in the
+checkout, and only when the branch actually differs, so a commit, a no-op switch,
+or a rebase that ends where it began publishes nothing. An observed event can
+also repeat a change AgentRoom just announced when the two race. An observed
+event arrives within about a second of the switch, and the next workspace read
+already shows the new branch. Clients treat every `workspace_branch_changed` as
+an invalidation and re-read the workspace. Which of these events reach durable
+audit is a trust decision; see
+[Git operations](../safety/TRUST_AND_SAFETY.md#git-operations).
 `config_reloaded` fires when `PATCH /api/config` changes at least one managed
 setting. It carries `changedKeys` (key **names** only), `requiresRestart: true`,
 and an `audit` block repeating those names for the durable log — **never**

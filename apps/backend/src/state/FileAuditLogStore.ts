@@ -128,6 +128,9 @@ export class FileAuditLogStore implements AuditLogStore {
 function toAuditLogEntry(event: AgentRoomEvent): AuditLogEntry | null {
   if (!DURABLE_EVENT_TYPES.has(event.type)) return null;
   const payload = event.payload as Record<string, unknown> | undefined;
+  // The audit records what AgentRoom did. A checkout the HEAD watcher saw move
+  // was moved by someone else, or by an agent whose turn settles on its own.
+  if (event.type === "workspace_branch_changed" && payload?.origin === "observed") return null;
   const session = objectValue(payload?.session);
   const audit = payload?.audit;
 

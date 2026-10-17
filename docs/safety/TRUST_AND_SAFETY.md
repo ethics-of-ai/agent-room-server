@@ -660,21 +660,37 @@ Git status is read-only, bearer-gated when configured, and capped at 200 changed
 file summaries. Branch switch accepts an existing local branch only, uses fixed
 `git switch`, and refuses a dirty workspace.
 
-Turn settlement reads the current branch, the HEAD commit, and the files changed
-between the turn-start commit and that HEAD commit through fixed read-only argv.
-When another session's turn or an announced branch change touched a different
-workspace during the turn, a fixed `git rev-parse --absolute-git-dir` read of
-each workspace involved tells whether they share the turn's checkout.
-The range read uses only the two full commit ids the backend itself read,
+Turn start reads the current branch with a fixed `git branch --show-current`
+to record it on the session, and never switches branches. A turn runs on
+whatever branch the checkout is on. Turn settlement reads the HEAD commit and
+the files changed between the turn-start commit and that HEAD commit through
+fixed read-only argv. The range read uses only the two full commit ids the backend itself read,
 checked as such. When the turn started on an unborn branch, Git's fixed
 empty-tree id for the repository's hash format stands in for the first. The
 read ends with `--` so no path is parsed as a revision, disables
 external diff and text conversion, and uses `--relative` to stay inside the
-registered subtree. These reads publish only the branch name and
-the bounded file summary already described for
-[`coding_diff_updated`](../api/API.md#broadcast-websocket). Following the agent's
-branch changes which branch the next turn restores. It never switches branches
-itself.
+registered subtree. These reads publish only the bounded file summary
+already described for
+[`coding_diff_updated`](../api/API.md#broadcast-websocket). The only switch a
+session makes is the one a client asks for by naming a branch on session create,
+which follows the branch-switch rules below.
+
+The backend watches HEAD for every registered repository so that a branch
+change made outside AgentRoom reaches clients. It holds one non-persistent,
+non-recursive directory watch per distinct git dir, which every workspace
+registered inside one checkout shares. The git dir comes from a fixed
+`git rev-parse --absolute-git-dir` read, and for a
+linked worktree or submodule it sits outside the registered workspace. The
+watch reads change notifications only, never file content, and acts only on an
+entry named exactly `HEAD`. Each burst of changes ends in one fixed
+`git branch --show-current` read and, when the branch moved, the fixed snapshot
+read every workspace refresh already runs. The resulting event carries the
+branch name only. Observed changes are not written to durable audit, because
+AgentRoom did not make them. The number of
+watches is bounded by the registered repositories. A watch closes when its last
+workspace is unregistered or its git dir disappears. A 60-second pass also
+closes a watch whose git dir was replaced, as by a re-clone, and retries
+workspaces that have no watch.
 
 The only mutating Git operations are stage, unstage, discard, commit, fetch,
 fast-forward-only pull, push, and branch create. They are bearer-gated fixed argv

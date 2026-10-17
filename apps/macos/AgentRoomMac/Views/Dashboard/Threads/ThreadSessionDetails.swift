@@ -2,12 +2,14 @@ import SwiftUI
 
 struct ThreadSessionDetails: View {
     var session: AgentSession
+    var branch: String
     @State private var isRawSnapshotExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: DashboardTheme.elementSpacing) {
             InfoRow(label: "Workspace", value: session.workspacePath)
-            InfoRow(label: "Branch", value: session.gitBranch ?? "Not recorded", isMonospaced: false)
+            InfoRow(label: "Branch", value: branch, isMonospaced: false)
+            InfoRow(label: "Last turn started on", value: session.gitBranch ?? "Not recorded", isMonospaced: false)
             InfoRow(label: "Runner", value: session.runnerKind, isMonospaced: false)
             InfoRow(label: "Settings", value: session.threadSettingsLabel, isMonospaced: false)
             InfoRow(label: "Active turn", value: session.activeTurnId ?? "None")

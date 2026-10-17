@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { AgentSessionService } from "../src/agent/AgentSessionService";
 import { AgentTurnContextAssembler } from "../src/agent/AgentTurnContextAssembler";
 import { EventBus } from "../src/events/EventBus";
+import type { AgentRunner } from "../src/runner/AgentRunner";
 import { buildServer } from "../src/server";
 import { LocalWorkspaceRegistry } from "../src/workspace/LocalWorkspaceRegistry";
 import { WorkspaceExplorer } from "../src/workspace/WorkspaceExplorer";
@@ -303,16 +304,32 @@ describe("agent sessions", () => {
     const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
     const registry = new LocalWorkspaceRegistry(serviceConfig);
     const registered = await registry.register({ path: selectedDirectory });
-    const service = newAgentSessionService(registry, { codex: compactionThresholdRunner() }, new EventBus());
+    // The first turn holds until both starts have answered, so the second's
+    // recheck always finds it running, however long each start's Git reads take.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runner: AgentRunner = {
+      ...compactionThresholdRunner(),
+      async *run() {
+        await released;
+        yield { type: "run_succeeded", message: "done" };
+      }
+    };
+    const service = newAgentSessionService(registry, { codex: runner }, new EventBus());
     const session = await service.createSession({ workspaceId: registered.workspace.id });
 
     const results = await Promise.allSettled([
       service.startTurn({ sessionId: session.id, message: "first" }),
       service.startTurn({ sessionId: session.id, message: "second" })
     ]);
+    release();
 
-    expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
-    expect((results[1] as PromiseRejectedResult).reason).toMatchObject({
+    // Which one wins depends on how each start's awaits interleave; exactly one does.
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const refused = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(refused?.reason).toMatchObject({
       message: "Agent session already has a running turn",
       statusCode: 409
     });

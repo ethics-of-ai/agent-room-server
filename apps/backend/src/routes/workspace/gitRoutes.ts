@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { LocalWorkspaceGitOperationResult } from "../../domain/models";
+import { publishWorkspaceBranchChanged } from "../../events/workspaceBranchChanged";
 import { WorkspaceGitService, type WorkspaceGitPathsInput } from "../../workspace/WorkspaceGitService";
 import { replyWorkspaceError, type WorkspaceRouteDeps } from "./deps";
 import {
@@ -51,9 +52,8 @@ export async function registerWorkspaceGitRoutes(app: FastifyInstance, deps: Wor
         changedFileCount: result.status.counts.total
       });
       if (result.operation === "create_branch" && result.branch) {
-        deps.eventBus.publish("workspace_branch_changed", {
-          workspaceId: result.workspaceId,
-          path: result.workspace.path,
+        publishWorkspaceBranchChanged(deps.eventBus, {
+          workspace: result.workspace,
           previousBranch: result.previousBranch,
           branch: result.branch
         });
@@ -81,9 +81,8 @@ export async function registerWorkspaceGitRoutes(app: FastifyInstance, deps: Wor
       if (result.changed) {
         // A checkout can add, remove, or rename tracked files wholesale.
         deps.explorer.invalidateFileIndex(workspaceId);
-        deps.eventBus.publish("workspace_branch_changed", {
-          workspaceId: result.workspace.id,
-          path: result.workspace.path,
+        publishWorkspaceBranchChanged(deps.eventBus, {
+          workspace: result.workspace,
           previousBranch: result.previousBranch,
           branch: result.branch
         });
