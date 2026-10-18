@@ -516,6 +516,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     const composerField = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerDraftField.swift"), "utf8");
     const composerRunProfile = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Dashboard/WorkspaceRunProfileControls.swift"), "utf8");
     const composerAttachments = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/ComposerAttachmentGroup.swift"), "utf8");
+    const artifactTray = await readFile(resolve(visionOSRoot, "AgentRoom/Views/ArtifactTray/ArtifactTrayView.swift"), "utf8");
 
     expect(workspaceWindow).toContain("WorkspaceThreadColumn(");
     expect(workspaceWindow).toContain("WorkspaceChatColumn(");
@@ -551,24 +552,96 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(composerRunProfile).toContain("select: store.selectCodingAgentSetting");
     expect(composerRunProfile).not.toContain("CodingAgentSettingsControlsView");
 
-    // The per-turn diff summary card — the turn-scoped change review entry —
-    // mounts in the workspace window's chat column, not in the composer.
-    expect(workspaceChatColumn).toContain("CodingDiffView(diff: diff, startReview: { startDiffReview(diff) })");
+    // The per-turn diff summary card, the turn-scoped change review entry,
+    // lives in the composer's artifact tray. The chat column keeps only the
+    // permission cards above its transcript.
+    expect(artifactTray).toContain("CodingDiffView(diff: diff, startReview: { startDiffReview(diff) })");
     expect(composerPanel).not.toContain("CodingDiffView");
+    for (const moved of ["CodingDiffView", "CodingQuestionRequestView", "ArtifactCanvasView", "MermaidImportStatusView", "SpatialDiagramChipView"]) {
+      expect(workspaceChatColumn).not.toContain(moved);
+    }
+    expect(workspaceChatColumn).toContain("CodingPermissionRequestView(");
 
     // The clarifying-question deck is a trailing scene ornament owned by the
     // chat column, beside the composer's bottom one; the record cards sit in
-    // the same column. Neither reaches the composer or the navigation-only
+    // the artifact tray. Neither reaches the composer or the navigation-only
     // window view.
     expect(workspaceChatColumn).toContain("CodingQuestionDeckView(presentation: questionDeck)");
     expect(workspaceChatColumn).toContain("attachmentAnchor: .scene(.trailing)");
-    expect(workspaceChatColumn).toContain("CodingQuestionRequestView(");
-    // Closing the deck hides it in this window only; the record card is the
-    // way back while the batch can still be answered.
-    expect(workspaceChatColumn).toContain("reopenQuestionDeck(request)");
+    expect(artifactTray).toContain("CodingQuestionRequestView(");
+    // Closing the deck hides it in this window only; the tray's record card is
+    // the way back while the batch can still be answered.
+    expect(artifactTray).toContain("actions.reopenQuestionDeck(request)");
+    expect(workspaceChatColumn).not.toContain("reopenQuestionDeck");
     expect(workspaceWindow).toContain("model.questionDrafts.isDismissed(requestId)");
     expect(composerPanel).not.toContain("CodingQuestionDeckView");
     expect(workspaceWindow).not.toContain("CodingQuestionDeckView(");
+  });
+
+  test("opens a tray sketch in its own artifact window that is never restored", async () => {
+    const app = await readFile(resolve(visionOSRoot, "AgentRoom/AgentRoomApp.swift"), "utf8");
+    const sceneStart = app.indexOf('WindowGroup("Artifact", id: ArtifactWindow.id, for: ArtifactWindowValue.self)');
+    expect(sceneStart).toBeGreaterThan(-1);
+    // The scene runs until the next scene declaration or the end of `body`.
+    const rest = app.slice(sceneStart + 1);
+    const nextScene = rest.search(/\n\s*(WindowGroup|ImmersiveSpace)\(|\n    @ViewBuilder/);
+    const scene = nextScene === -1 ? rest : rest.slice(0, nextScene);
+
+    expect(scene).toContain("ArtifactWindowView(value: $value)");
+    // The backend keeps sketches in memory only, so a restored window could
+    // show nothing but "unavailable".
+    expect(scene).toContain(".restorationBehavior(.disabled)");
+    expect(scene).toContain("width: ArtifactWindow.defaultSize.width");
+    expect(scene).toContain(".defaultWindowPlacement");
+    // A new window trails the active artifact window, else the workspace
+    // window. Without restoration, falling back to an inactive artifact window
+    // would land a sketch opened from the tray beside an older one.
+    expect(scene).toContain("$0.id == ArtifactWindow.id && $0.phase == .active");
+    expect(scene).not.toContain("context.windows.first(where: { $0.id == ArtifactWindow.id })");
+    expect(scene).not.toContain(".windowStyle(.volumetric)");
+  });
+
+  test("routes a sketch dragged into space to a new artifact window", async () => {
+    const app = await readFile(resolve(visionOSRoot, "AgentRoom/AgentRoomApp.swift"), "utf8");
+    const window = await readFile(resolve(visionOSRoot, "AgentRoom/Views/ArtifactWindow/ArtifactWindow.swift"), "utf8");
+    const windowView = await readFile(resolve(visionOSRoot, "AgentRoom/Views/ArtifactWindow/ArtifactWindowView.swift"), "utf8");
+    const adoption = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Shared/DroppedSceneValueAdoption.swift"), "utf8");
+    const projectYaml = await readFile(resolve(visionOSRoot, "project.yml"), "utf8");
+    const infoPlist = await readFile(resolve(visionOSRoot, "AgentRoom/Info.plist"), "utf8");
+
+    // The system creates a window only for an activity type the app declares.
+    expect(window).toContain('static let activityType = "dev.agentroom.artifact-window"');
+    expect(projectYaml).toMatch(/NSUserActivityTypes:\n\s+- dev\.agentroom\.artifact-window/);
+    expect(infoPlist).toMatch(/<key>NSUserActivityTypes<\/key>\s*<array>\s*<string>dev\.agentroom\.artifact-window<\/string>/);
+
+    // The scene matches every artifact activity, and an open window claims
+    // only its own sketch's, after adopting the value the activity carries. A
+    // window that gets a foreign activity or none stops waiting after a while.
+    const sceneStart = app.indexOf('WindowGroup("Artifact", id: ArtifactWindow.id');
+    expect(sceneStart).toBeGreaterThan(-1);
+    expect(app.slice(sceneStart)).toContain(".handlesExternalEvents(matching: [ArtifactWindow.targetContentPrefix])");
+    expect(windowView).toContain(".adoptingDroppedSceneValue(");
+    expect(windowView).toContain("activityType: ArtifactWindow.activityType");
+    expect(adoption).toContain(".onContinueUserActivity(activityType, perform: adopt)");
+    expect(adoption).toContain(".task(id: value == nil)");
+    expect(windowView).toContain(".handlesExternalEvents(preferring: claimedTargets, allowing: claimedTargets)");
+  });
+
+  test("routes a diagram notice dragged into space to its volume", async () => {
+    const app = await readFile(resolve(visionOSRoot, "AgentRoom/AgentRoomApp.swift"), "utf8");
+    const sceneWindow = await readFile(resolve(visionOSRoot, "AgentRoom/Views/SpatialScene/SpatialSceneWindow.swift"), "utf8");
+    const projectYaml = await readFile(resolve(visionOSRoot, "project.yml"), "utf8");
+    const infoPlist = await readFile(resolve(visionOSRoot, "AgentRoom/Info.plist"), "utf8");
+
+    expect(sceneWindow).toContain('static let activityType = "dev.agentroom.spatial-scene-window"');
+    expect(projectYaml).toMatch(/NSUserActivityTypes:\n(\s+- [\w.-]+\n)*\s+- dev\.agentroom\.spatial-scene-window/);
+    expect(infoPlist).toContain("<string>dev.agentroom.spatial-scene-window</string>");
+
+    const sceneStart = app.indexOf('WindowGroup("Spatial Scene", id: SpatialSceneWindow.id');
+    expect(sceneStart).toBeGreaterThan(-1);
+    const scene = app.slice(sceneStart, app.indexOf("WindowGroup(", sceneStart + 1));
+    expect(scene).toContain("attention(SpatialSceneWindowRoot(value: $value))");
+    expect(scene).toContain(".handlesExternalEvents(matching: [SpatialSceneWindow.targetContentPrefix])");
   });
 
   test("uses a native workspace window shell", async () => {
