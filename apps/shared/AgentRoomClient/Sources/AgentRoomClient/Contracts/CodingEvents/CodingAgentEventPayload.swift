@@ -67,7 +67,7 @@ public struct CodingAgentEventPayload: Codable, Hashable, Sendable {
     /// answered set. `status` and `decidedBy` above say how the batch settled.
     public var questionAnswers: [CodingQuestionAnswer]?
     public var error: String?
-    // Live artifact channel: `artifactId` and `kind` ("svg" | "mermaid") on
+    // Live artifact channel: `artifactId` and `kind` ("svg" | "mermaid" | "mcp_app") on
     // started, `delta` on delta (reuses the field above), and `bytes` on
     // completed. `truncated` applies to completed artifacts and bounded diff
     // summaries.

@@ -26,6 +26,7 @@ const OPEN_PREFIX = "<artifact";
 // The close marker is `</artifact` + optional whitespace + `>`, matched
 // case-insensitively. Stored lowercase for case-insensitive scanning.
 const CLOSE_PREFIX = "</artifact";
+// Only model-authored kinds. `mcp_app` comes from a tool call, never from text.
 const ARTIFACT_KINDS = new Set<CodingArtifactKind>(["svg", "mermaid"]);
 // Matches a trailing `/` (optionally followed by whitespace) inside the tag, i.e.
 // a self-closing `<artifact …/>`. A `/` inside a quoted attribute value is not

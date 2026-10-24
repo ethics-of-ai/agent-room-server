@@ -2322,10 +2322,71 @@ deltas:
 ```
 
 Artifacts are model-authored sketches streamed in-band during a turn (see the
-`coding_artifact_*` events below). They are backend-owned, in-memory, bounded,
-per-session, and released on session deletion; they are never written into the
-registered workspace. When `ARTIFACTS_ENABLED=false`, the list is always empty.
-Returns `404` for an unknown session. Like `/messages`, this read requires the
+`coding_artifact_*` events below), plus MCP tool views. An `mcp_app` artifact's
+`content` is the view's HTML, and it adds `toolApp`:
+
+```json
+{
+  "kind": "mcp_app",
+  "title": "Show usage dashboard",
+  "content": "<!doctype html>...",
+  "isOpen": false,
+  "toolApp": {
+    "serverName": "claude.ai optima-agents",
+    "toolName": "show_usage_dashboard",
+    "resourceUri": "ui://optima/dashboard.html",
+    "tool": {
+      "name": "show_usage_dashboard",
+      "inputSchema": { "type": "object" },
+      "annotations": { "readOnlyHint": true },
+      "_meta": { "ui": { "resourceUri": "ui://optima/dashboard.html" } }
+    },
+    "resourceMeta": { "csp": { "connectDomains": [] }, "prefersBorder": true },
+    "toolInput": {},
+    "toolResult": { "content": [{ "type": "text", "text": "..." }], "structuredContent": {} }
+  }
+}
+```
+
+`tool` is the tool as an MCP `Tool`, built from what the runner reports about
+it. Claude Code reports no input schema, so `inputSchema` is
+`{ "type": "object" }`, the widest one MCP allows. `resourceMeta` is the
+resource content's `_meta.ui`, passed through untouched and absent when the
+server sent none. `toolResult` is the call's MCP `CallToolResult`. Clients hand
+`tool`, `toolInput` and `toolResult` to the view. `supportsToolCalls` is `true`
+when the session's runner can run the view's own tool calls (below), and absent
+otherwise.
+
+`POST /api/agent-sessions/:sessionId/artifacts/:artifactId/tool-calls` runs one
+`tools/call` from an `mcp_app` view on the server its artifact came from, with
+no model turn:
+
+```json
+{ "name": "list_sites", "arguments": { "start_date": "2026-02-01" } }
+```
+
+`name` is the bare MCP tool name, 1 to 128 characters of `[A-Za-z0-9_.-]`.
+`arguments` is a JSON object of at most 64 KiB serialized, and defaults to
+`{}`. The request cannot name a server: the backend takes it from the stored
+artifact. The runner checks the tool against a fresh server status and refuses
+one the server does not list, or lists with a SEP-1865 `_meta.ui.visibility`
+that leaves out `"app"`. A tool with no visibility list is callable.
+
+`200` returns `{ "result": <CallToolResult> }`. A tool-level error is still
+`200`, inside the result. `400` is an invalid body, `413` oversized arguments,
+`404` an unknown session or artifact, an artifact that is not a tool view, or a
+refused tool. `409` means no running agent can make the call: the runner has no
+support, or the session's child process has idled out or the backend
+restarted. The next turn brings it back. `502` is a call the runner could not
+complete, with its redacted reason, or a result over 2 MiB serialized. Like
+every mutating route, it requires the bearer token when `AUTH_TOKEN` is set.
+Each call to a known session's tool view that gets past body validation
+publishes `agent_tool_app_called`. A `404` for an unknown session or artifact
+publishes nothing, since there is no workspace to attribute it to.
+
+Artifacts are backend-owned, in-memory, bounded, per-session, and released on
+session deletion; they are never written into the registered workspace. When
+`ARTIFACTS_ENABLED=false`, the list is always empty. Returns `404` for an unknown session. Like `/messages`, this read requires the
 bearer token when `AUTH_TOKEN` is configured, because it exposes model-authored
 content.
 
@@ -3265,6 +3326,7 @@ authenticated, workspace-scoped protocols. The server sends an initial
 - `agent_question_resolved`
 - `agent_plan_changed` (metadata only; see [Thread plans](#thread-plans))
 - `agent_background_tasks_changed` (live only; see [Background tasks](#background-tasks))
+- `agent_tool_app_called` carries `{sessionId, workspaceId, artifactId, serverName, toolName, outcome, durationMs, audit}` for each tool view call (see [Session reads](#session-reads)). `outcome` is `called`, `unavailable`, `unknown_tool`, `failed` or `result_too_large`. `audit` repeats the names, outcome and duration with `argumentsSha256`, a digest of the arguments. Neither carries the arguments, the result or a failed call's error text; the view gets that text in its `502` response. The durable audit log keeps it.
 - `runner_audit`
 - `coding_session_started`
 - `coding_turn_started`
@@ -3423,6 +3485,18 @@ the reconnect snapshot; `truncated` is `true` when the cap was hit. Clients
 accumulate deltas by `artifactId` to render the sketch live, and seed reconnect
 state from `GET /api/agent-sessions/:sessionId/artifacts`. The channel is gated by
 `ARTIFACTS_ENABLED` (default on).
+An `mcp_app` artifact is an MCP tool's own view (SEP-1865), not model text. The
+model cannot open an `mcp_app` region; the parser admits only `svg` and
+`mermaid`. A runner that read the tool's `ui://` resource reports the finished
+call, and the backend stores the view whole and closed. It publishes
+`coding_artifact_started` (`kind: "mcp_app"`, `title` from the tool name) and
+`coding_artifact_completed` (`bytes` of the HTML) with no delta in between.
+Neither event carries the HTML or the tool's result; only the artifacts read
+returns them (see
+[Trust and safety](../safety/TRUST_AND_SAFETY.md#attachments-and-artifacts)).
+A view whose HTML and `toolApp` together exceed 512 KB in UTF-8 is refused
+whole, with no events and a backend warning, because a truncated document is
+not renderable. It counts toward the 32-artifact session cap.
 Tool activity payloads include a client-renderable `activity.title` and may
 include `activity.description` for the command line, MCP tool target, function
 name, or affected file path. Native clients should render those display fields

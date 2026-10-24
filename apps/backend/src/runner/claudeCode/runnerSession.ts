@@ -3,6 +3,7 @@ import type { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import type { ClaudeSessionTools } from "./agentTools";
 import type { ClaudeCodeBackgroundTasks } from "./backgroundTasks";
 import type { ClaudeCodeToolUseDisplay } from "./messageMapper";
+import type { ClaudeCodeToolApps } from "./toolApps";
 import type { ClaudeCodeQuery } from "./sdk";
 
 export interface ClaudeCodeActiveTurn {
@@ -26,6 +27,8 @@ export interface ClaudeCodeRunnerSession {
   toolUses: Map<string, ClaudeCodeToolUseDisplay>;
   /** AgentRoom tools attached at spawn; absent when the child was spawned without any. */
   tools?: ClaudeSessionTools;
+  /** Reads MCP tool views; absent when artifacts are disabled. */
+  toolApps?: ClaudeCodeToolApps;
   activeTurn?: ClaudeCodeActiveTurn;
   /** The run id of the latest turn this child took, a person's or the agent's own. */
   latestRunId?: string;

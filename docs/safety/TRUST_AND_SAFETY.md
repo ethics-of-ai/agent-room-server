@@ -883,8 +883,46 @@ code-point-safe truncation. Artifacts never enter the workspace.
 Clients must sandbox model markup. visionOS renders SVG without JavaScript and
 Mermaid with a bundled script in strict mode. Both use a hostless in-memory page,
 a CSP with no default network source, data-only images, and navigation denial.
-Mermaid source is passed as a JSON string, never interpolated into HTML. HTML
-with JavaScript and 3D artifact kinds are unsupported.
+Mermaid source is passed as a JSON string, never interpolated into HTML. 3D
+artifact kinds are unsupported, and so is model-authored HTML.
+
+An MCP tool's own view (an `mcp_app` artifact) is the one kind that runs
+third-party script. It is the HTML a tool's server serves for that tool, read
+by the runner's CLI from a server the agent already dialed. The backend never
+connects to the server or holds its credentials. The view's HTML and the
+tool's result stay off `WS /api/events`. Only the bearer-checked artifacts read
+returns them, because a result can carry private account data. visionOS runs
+the view in an iframe with `sandbox="allow-scripts"` inside an AgentRoom shell
+page. It has an opaque origin, a non-persistent data store, no form
+submission, no top navigation and no new windows. Its CSP follows the MCP Apps
+default: inline script and style, data images, and no network unless the
+resource declares origins. Only bare `https` origins from `resourceDomains` and
+`connectDomains` are admitted. Frames stay blocked. Navigation is limited to
+the two documents the app serves. The native message handler lives in an
+isolated content world that the view cannot reach. The view sees its own
+call's input and result. AgentRoom grants it no `resources/read`,
+`ui/message`, model-context update or link opening.
+
+A view may call its own server's tools (`tools/call`) when its runner supports
+it, which today is Claude Code only. The call runs on the server the agent's
+CLI dialed, through the CLI's `mcp_call` control request, so the backend still
+holds no server credentials. The backend takes the server from the stored
+artifact, so a view cannot reach another server. It refuses a tool the server
+hides from apps under SEP-1865 visibility, bounds arguments at 64 KiB and
+results at 2 MiB, and audits every call with a digest of its arguments, never
+the arguments or the result.
+
+The CLI runs `mcp_call` with no permission check: `canUseTool` and
+`PreToolUse` hooks never see it. The view's HTML is untrusted and reaches the
+backend only through the client's bridge, so the client asks first. The first
+call to each tool from a view shows a system alert that names the view, the
+server and the tool, with Allow Once, Allow While Open and Don't Allow. Allow
+While Open covers that tool from that view until the view closes; nothing
+persists. A host without a store gives the view no caller, and the view stays
+static. AgentRoom reaches `mcp_call` through the Agent SDK's private
+`Query.request()`, because no published SDK exposes it. A backend test pins the
+SDK versions that path was checked against, so an SDK bump fails the suite
+until someone re-checks it.
 
 ## Spatial documents
 

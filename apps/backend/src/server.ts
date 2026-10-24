@@ -24,6 +24,8 @@ import { registerHarnessRoutes } from "./routes/harnessRoutes";
 import { registerAuthRoutes } from "./routes/authRoutes";
 import { registerWorkspaceRoutes } from "./routes/workspaceRoutes";
 import { registerAgentSessionRoutes } from "./routes/agentSessionRoutes";
+import { registerToolAppCallRoutes } from "./routes/toolAppCallRoutes";
+import { ToolAppCallService } from "./agent/toolAppCalls";
 import { registerCodingAgentRoutes } from "./routes/codingAgentRoutes";
 import { registerEditorCatalogRoutes } from "./routes/editorCatalogRoutes";
 import { EditorCatalogManager } from "./editor/EditorCatalogStore";
@@ -260,6 +262,12 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     explorer: workspaceExplorer
   });
   await registerAgentSessionRoutes(app, agentSessions, agentAttachments, input.config);
+  await registerToolAppCallRoutes(app, new ToolAppCallService({
+    getSession: (sessionId) => agentSessions.getSession(sessionId),
+    ...(artifactStore ? { artifacts: artifactStore } : {}),
+    runners,
+    eventBus
+  }));
   await registerLanguageServiceRoutes(app, {
     config: input.config,
     registry: languageServiceRegistry,

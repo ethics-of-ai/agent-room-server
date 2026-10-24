@@ -10,7 +10,8 @@ import {
   type AgentRunnerEvent,
   type AgentRunnerInput,
   type AgentRunnerInputPart,
-  type CanonicalQuestionAnswer
+  type CanonicalQuestionAnswer,
+  type ToolAppCallResult
 } from "../AgentRunner";
 import { AsyncEventQueue } from "../shared/AsyncEventQueue";
 import { delay, withTimeout } from "../shared/asyncUtils";
@@ -30,6 +31,7 @@ import {
   type ClaudeCodeQueryLoader
 } from "./sdk";
 import { ClaudeSessionTools } from "./agentTools";
+import { ClaudeCodeToolApps } from "./toolApps";
 import { promptWithRegisteredTools } from "../shared/agentToolSets";
 import {
   claudeCodeCommandAudit,
@@ -300,6 +302,12 @@ export class ClaudeCodeRunner implements AgentRunner {
     return "stopped";
   }
 
+  // Only a live child can call: a reaped session is not respawned for a view.
+  async callToolAppTool(input: { sessionId: string; serverName: string; toolName: string; arguments: Record<string, unknown> }): Promise<ToolAppCallResult> {
+    const toolApps = this.sessions.acquire(input.sessionId)?.toolApps;
+    return toolApps ? toolApps.callTool(input.serverName, input.toolName, input.arguments) : { kind: "unavailable" };
+  }
+
   // An SDK session id hydrated from the durable session store: the next turn's
   // acquire miss passes it as `resume` exactly as after a reap.
   rememberResumableId(input: { sessionId: string; nativeSessionId: string }): void {
@@ -354,6 +362,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       effort: settings.effort,
       toolUses: new Map(),
       ...(tools ? { tools } : {}),
+      ...(this.config.artifactsEnabled !== false ? { toolApps: new ClaudeCodeToolApps(query) } : {}),
       turnsAwaitingResult: [],
       background: new ClaudeCodeBackgroundTasks((tasks) => this.backgroundListener?.tasksChanged({ sessionId: key, tasks }))
     };
@@ -365,7 +374,9 @@ export class ClaudeCodeRunner implements AgentRunner {
   private async consumeSession(session: ClaudeCodeRunnerSession): Promise<void> {
     try {
       for await (const message of session.query) {
-        this.handleSessionMessage(session, message);
+        // Awaited before routing so a tool's view lands in its own turn.
+        const toolApps = await session.toolApps?.eventsFor(message) ?? [];
+        this.handleSessionMessage(session, message, toolApps);
       }
       this.endSession(session, "Claude Code session ended unexpectedly");
     } catch (error) {
@@ -373,7 +384,7 @@ export class ClaudeCodeRunner implements AgentRunner {
     }
   }
 
-  private handleSessionMessage(session: ClaudeCodeRunnerSession, message: unknown): void {
+  private handleSessionMessage(session: ClaudeCodeRunnerSession, message: unknown, toolApps: AgentRunnerEvent[] = []): void {
     this.sessions.touch(session);
     const object = objectValue(message);
     if (object) {
@@ -412,7 +423,7 @@ export class ClaudeCodeRunner implements AgentRunner {
     }
 
     if (target && !target.finalEvent) {
-      for (const event of mapClaudeCodeMessage(message, session.toolUses)) {
+      for (const event of [...mapClaudeCodeMessage(message, session.toolUses), ...toolApps]) {
         target.queue.push(event);
       }
     }

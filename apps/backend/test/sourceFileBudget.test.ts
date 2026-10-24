@@ -84,7 +84,6 @@ const allowlist: Readonly<Record<string, number>> = {
   "apps/backend/src/scene/diagram/humanEdits.ts": 639,
   "apps/visionos/AgentRoom/State/AppStore/AppStore.swift": 623,
   "apps/backend/src/protocol/coding/events.ts": 603,
-  "apps/backend/src/agent/AgentTurnEventApplier.ts": 602,
 
   "apps/backend/test/codexJsonRpcRunner.test.ts": 1480,
   "apps/backend/test/workspaceContext.test.ts": 1233,

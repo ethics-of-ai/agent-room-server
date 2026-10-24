@@ -302,7 +302,52 @@ export type AgentRunnerEvent =
       inputTokens?: number;
       outputTokens?: number;
       totalTokens?: number;
+    }
+  | {
+      type: "tool_app";
+      app: AgentRunnerToolApp;
+      runner?: RunnerMetadata;
     };
+
+/**
+ * A finished MCP tool call whose tool declares an MCP Apps view (SEP-1865):
+ * the `ui://` resource's HTML plus the call's input and full result, which the
+ * client hands the view. Only a runner that can read the resource from the
+ * server its agent dialed emits it; every other runner leaves the call as an
+ * ordinary tool activity.
+ */
+export interface AgentRunnerToolApp {
+  /** The runner's id for the tool call, unique within the turn. */
+  toolId: string;
+  title: string;
+  /** The MCP server's name as the runner reports it, e.g. `claude.ai optima-agents`. */
+  serverName: string;
+  toolName: string;
+  resourceUri: string;
+  /** The tool as an MCP `Tool`, which the client hands the view as `hostContext.toolInfo.tool`. */
+  tool: Record<string, unknown>;
+  html: string;
+  /** The resource content's `_meta.ui` (csp, permissions, prefersBorder), passed through untouched. */
+  resourceMeta?: Record<string, unknown>;
+  toolInput: Record<string, unknown>;
+  /** The call's `CallToolResult`: `content` blocks, `structuredContent` and `_meta`. */
+  toolResult: Record<string, unknown>;
+  /** The view can call its server's tools through `AgentRunner.callToolAppTool`. */
+  supportsToolCalls?: boolean;
+}
+
+/**
+ * A tool view's call to one of its server's tools: the MCP `CallToolResult`,
+ * or why it did not run. `unavailable` means the session has no live agent
+ * that can make the call. `unknown_tool` covers a tool the server does not
+ * list and one it hides from apps, so a view cannot tell them apart. `failed`
+ * carries a redacted reason.
+ */
+export type ToolAppCallResult =
+  | { kind: "called"; result: Record<string, unknown> }
+  | { kind: "unavailable" }
+  | { kind: "unknown_tool" }
+  | { kind: "failed"; message: string };
 
 /**
  * A stop request's answer: `unknown_task` when the runner lists no such live
@@ -429,6 +474,17 @@ export interface AgentRunner {
   watchBackgroundWork?(listener: AgentRunnerBackgroundListener): void;
   /** Ask a live background task to stop. Its end arrives as a task list change. */
   stopBackgroundTask?(input: { sessionId: string; taskId: string }): Promise<BackgroundTaskStopResult>;
+  /**
+   * Run one MCP tool for a tool view (SEP-1865 `tools/call`) on the server the
+   * session's agent dialed, with no model turn. Optional: a runner without it
+   * emits views that cannot call anything.
+   */
+  callToolAppTool?(input: {
+    sessionId: string;
+    serverName: string;
+    toolName: string;
+    arguments: Record<string, unknown>;
+  }): Promise<ToolAppCallResult>;
   // Release per-session runner resources (persistent child processes, queues)
   // when the AgentRoom session is deleted.
   closeSession?(sessionId: string): Promise<void>;

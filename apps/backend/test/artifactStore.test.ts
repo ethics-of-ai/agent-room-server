@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { ArtifactStore } from "../src/artifact/ArtifactStore";
+import { ArtifactStore, MAX_TOOL_APP_BYTES, type ArtifactToolApp } from "../src/artifact/ArtifactStore";
 
 const at = "2026-06-14T00:00:00.000Z";
+const toolApp: ArtifactToolApp = {
+  serverName: "spike",
+  toolName: "show",
+  resourceUri: "ui://spike/view.html",
+  tool: { name: "show", inputSchema: { type: "object" } },
+  toolInput: {},
+  toolResult: { content: [] }
+};
 
 describe("ArtifactStore", () => {
   it("accumulates deltas per artifact and exposes a per-session snapshot", () => {
@@ -93,5 +101,27 @@ describe("ArtifactStore", () => {
     store.start({ sessionId: "s1", turnId: "t1", artifactId: "a1", kind: "svg", at });
     store.releaseSession("s1");
     expect(store.snapshot("s1")).toEqual([]);
+  });
+
+  it("accepts a tool view of exactly 512 KB and refuses one byte more", () => {
+    // The cap counts the HTML and the JSON of `toolApp` together, in UTF-8.
+    const htmlBytes = MAX_TOOL_APP_BYTES - Buffer.byteLength(JSON.stringify(toolApp), "utf8");
+    const put = (artifactId: string, html: string) =>
+      new ArtifactStore().putToolApp({ sessionId: "s1", turnId: "t1", artifactId, html, toolApp, at });
+
+    const atCap = put("a1", "x".repeat(htmlBytes));
+    expect("artifact" in atCap && atCap.artifact.content.length).toBe(htmlBytes);
+    expect(put("a2", "x".repeat(htmlBytes + 1))).toEqual({ refused: "over_byte_cap", bytes: MAX_TOOL_APP_BYTES + 1 });
+    // A multibyte character that crosses the cap is refused, not split.
+    expect(put("a3", "x".repeat(htmlBytes - 1) + "é")).toEqual({ refused: "over_byte_cap", bytes: MAX_TOOL_APP_BYTES + 1 });
+  });
+
+  it("refuses a tool view once the session is at its artifact cap", () => {
+    const store = new ArtifactStore();
+    for (let index = 0; index < 32; index += 1) {
+      store.start({ sessionId: "s1", turnId: "t1", artifactId: `a${index}`, kind: "svg", at });
+    }
+    expect(store.putToolApp({ sessionId: "s1", turnId: "t1", artifactId: "view", html: "<p>", toolApp, at }))
+      .toEqual({ refused: "session_artifact_cap" });
   });
 });

@@ -18,6 +18,7 @@ const DURABLE_EVENT_TYPES = new Set([
   "agent_turn_cancelled",
   "agent_permission_resolved",
   "agent_question_resolved",
+  "agent_tool_app_called",
   "workspace_registered",
   "workspace_removed",
   "workspace_branch_changed",

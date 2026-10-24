@@ -3,9 +3,6 @@ import type { EventBus } from "../events/EventBus";
 import { logger } from "../logging/logger";
 import {
   boundedRunnerActivity,
-  codingArtifactCompletedEvent,
-  codingArtifactDeltaEvent,
-  codingArtifactStartedEvent,
   codingAssistantMessageDeltaEvent,
   codingEventFromRunnerActivity,
   codingTokenUsageUpdatedEvent,
@@ -26,6 +23,7 @@ import { ArtifactStreamParser, stripArtifactRegions, type ArtifactStreamOp } fro
 import type { ArtifactStore } from "../artifact/ArtifactStore";
 import type { AgentSessionMessageStore } from "./AgentSessionMessageStore";
 import type { AgentTurnTelemetryStore } from "./AgentTurnTelemetryStore";
+import { artifactOpEvents, toolAppEvents } from "./turnArtifactEvents";
 
 export interface OutstandingQuestionRequest {
   requestId: string;
@@ -161,6 +159,12 @@ export class AgentTurnEventApplier {
 
     if (event.type === "agent_update") {
       this.applyAgentUpdate(session, turn, event);
+      return;
+    }
+
+    if (event.type === "tool_app") {
+      if (!this.deps.artifacts) return;
+      toolAppEvents(this.deps.artifacts, session, turn, event.app, event.runner).forEach((e) => this.publishCodingEvent(e));
       return;
     }
 
@@ -462,57 +466,8 @@ export class AgentTurnEventApplier {
     ops: ArtifactStreamOp[],
     runner: RunnerMetadata | undefined
   ): void {
-    const store = this.deps.artifacts;
-    if (!store || ops.length === 0) return;
-    const now = new Date().toISOString();
-    for (const op of ops) {
-      if (op.type === "start") {
-        const artifact = store.start({
-          sessionId: session.id,
-          turnId: turn.id,
-          artifactId: op.artifactId,
-          kind: op.kind,
-          ...(op.title ? { title: op.title } : {}),
-          at: now
-        });
-        if (!artifact) continue; // per-session artifact cap reached
-        this.publishCodingEvent(codingArtifactStartedEvent({
-          sessionId: session.id,
-          turnId: turn.id,
-          runnerKind: session.runnerKind,
-          artifactId: op.artifactId,
-          kind: op.kind,
-          ...(op.title ? { title: op.title } : {}),
-          runner
-        }));
-      } else if (op.type === "delta") {
-        const result = store.append({ sessionId: session.id, artifactId: op.artifactId, delta: op.delta, at: now });
-        // Skip when the artifact is missing/closed, or nothing fit under the cap:
-        // publish only what the store actually retained so the live stream and the
-        // reconnect snapshot stay in agreement.
-        if (!result || !result.appended) continue;
-        this.publishCodingEvent(codingArtifactDeltaEvent({
-          sessionId: session.id,
-          turnId: turn.id,
-          runnerKind: session.runnerKind,
-          artifactId: op.artifactId,
-          delta: result.appended,
-          runner
-        }));
-      } else {
-        const result = store.complete({ sessionId: session.id, artifactId: op.artifactId, at: now });
-        if (!result) continue; // never started (e.g. cap-rejected); no orphan completed event
-        this.publishCodingEvent(codingArtifactCompletedEvent({
-          sessionId: session.id,
-          turnId: turn.id,
-          runnerKind: session.runnerKind,
-          artifactId: op.artifactId,
-          bytes: result.byteLength,
-          truncated: result.truncated,
-          runner
-        }));
-      }
-    }
+    if (!this.deps.artifacts || ops.length === 0) return;
+    artifactOpEvents(this.deps.artifacts, session, turn, ops, runner).forEach((event) => this.publishCodingEvent(event));
   }
 
   private flushStreamingArtifacts(session: AgentSession, turn: AgentSessionTurn): void {

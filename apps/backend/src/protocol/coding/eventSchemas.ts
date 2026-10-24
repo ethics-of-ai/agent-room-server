@@ -319,9 +319,11 @@ export const codingActivitySchema = z.object({
 });
 
 // Artifacts are model-authored sketches streamed in-band and rendered live in
-// the client. The first slice supports 2D vector kinds only; richer/3D kinds
-// are intentionally excluded.
-export const codingArtifactKindSchema = z.enum(["svg", "mermaid"]);
+// the client, plus `mcp_app`: an MCP tool's own view (SEP-1865), which the
+// runner captures whole when the call finishes and which never streams. The
+// model cannot author an `mcp_app` region; the parser admits only the sketch
+// kinds. Richer/3D kinds are intentionally excluded.
+export const codingArtifactKindSchema = z.enum(["svg", "mermaid", "mcp_app"]);
 
 export const codingAgentEventPayloadSchema = z.discriminatedUnion("type", [
   baseCodingPayloadSchema.extend({

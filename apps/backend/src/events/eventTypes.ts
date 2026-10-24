@@ -18,6 +18,7 @@ export type AgentRoomEventType =
   | "agent_question_resolved"
   | "agent_plan_changed"
   | "agent_background_tasks_changed"
+  | "agent_tool_app_called"
   | "workspace_registered"
   | "workspace_removed"
   | "workspace_branch_changed"
@@ -41,6 +42,29 @@ export interface AgentRoomEvent<TPayload = unknown> {
   type: AgentRoomEventType;
   at: string;
   payload: TPayload;
+}
+
+// Emitted for each tool call an MCP tool view asks for, once the call has run
+// or the backend has refused it. It carries names, the outcome and a digest of
+// the arguments, never the arguments, the result or the server's error text,
+// since `/api/events` broadcasts to every connected client. `audit` repeats those
+// fields because `FileAuditLogStore` keeps only `payload.audit`.
+export interface AgentToolAppCalledPayload {
+  sessionId: string;
+  workspaceId: string;
+  artifactId: string;
+  serverName: string;
+  toolName: string;
+  outcome: "called" | "unavailable" | "unknown_tool" | "failed" | "result_too_large";
+  durationMs: number;
+  audit: {
+    artifactId: string;
+    serverName: string;
+    toolName: string;
+    outcome: AgentToolAppCalledPayload["outcome"];
+    durationMs: number;
+    argumentsSha256: string;
+  };
 }
 
 export interface StatusSnapshotPayload {

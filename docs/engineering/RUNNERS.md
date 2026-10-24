@@ -91,6 +91,69 @@ The `codex` and `claudeCode` metadata blocks are projections built only by
 `codingEventContractVersion` moves past 2 and every supported client accepts
 the newer floor.
 
+## MCP tool views
+
+A tool can declare its own view under the MCP Apps extension (SEP-1865):
+`_meta.ui.resourceUri` names a `ui://` HTML resource on its server. A runner
+that can read that resource from the server its agent dialed emits a
+`tool_app` event when such a call succeeds. The event carries the view's HTML,
+the tool as an MCP `Tool`, the resource's `_meta.ui`, the call's input and its
+full `CallToolResult`.
+`AgentTurnEventApplier` stores it as an `mcp_app` artifact. A runner that
+cannot read the resource emits nothing extra, and the call stays an ordinary
+tool activity. Code above the boundary never asks which runner it was.
+
+Only Claude Code emits it today. `ClaudeCodeToolApps` remembers each `mcp__`
+tool call. When the call's result arrives without an error, it looks the
+tool up in the latest `mcpServerStatus()`. The CLI reports each tool's MCP Apps
+`_meta` there when it advertises `mcp_tool_ui_meta_v1`, along with its
+description and annotations but no input schema. The status is cached per
+child: only a tool name the last status did not list fetches a fresh one, so a
+server that changes a listed tool's view mid-session is not noticed until the
+child restarts. It then reads the view with
+the SDK's alpha `readMcpResource()`, which needs `mcp_read_resource_v1`. The
+CLI dials the server and holds its credentials, including a claude.ai
+connector's, so the backend never does. The SDK user message's
+`tool_use_result` supplies `structuredContent` and `_meta`. The CLI names a
+tool `mcp__<server>__<tool>` with every server-name character outside
+`[A-Za-z0-9_-]` replaced by `_`, and the lookup reverses that. The session's
+message loop awaits the lookup, bounded at 10 seconds, before it routes the
+result message. That way the view lands in the turn that made the call, before
+that turn's result. A status or resource read that fails or times out, or a
+resource whose MIME type is not `text/html;profile=mcp-app`, drops the view
+with a warning that names the tool and the reason; the call stays an ordinary
+tool activity. A tool with no view is not logged. Nothing reads views while
+`ARTIFACTS_ENABLED` is false.
+
+Codex, Cursor, DeepSeek and ACP adapters do not emit views. Whether Codex
+app-server can read an MCP resource has not been checked.
+
+A runner can also run a view's own `tools/call` through the optional
+`AgentRunner.callToolAppTool`, and sets `supportsToolCalls` on the `tool_app`
+event when it can. A runner without the method emits views that cannot call
+anything. Code above the boundary checks for the method, never the runner id.
+
+Claude Code implements it with the CLI's `mcp_call` control request, which
+runs one MCP tool through the CLI's own client with no model turn and no
+`canUseTool` check. No published Agent SDK exposes it on `Query`
+(anthropics/claude-agent-sdk-typescript#380), so `ClaudeCodeToolApps.callTool`
+sends it through `Query.request()`, which is private in the SDK's types and
+which every public control method wraps. `supportsToolCalls` is true when the
+query has `request` and `mcpServerStatus`. `claudeCodeSdkPin.test.ts` lists
+the SDK versions whose `request()` and CLI handler were checked. Replace the
+call with the public method when one ships.
+
+Each call reads a fresh `mcpServerStatus()`, never the view cache. It refuses
+a server or tool the status does not list, and a tool whose
+`_meta.ui.visibility` leaves out `"app"`, as `unknown_tool`. It then sends
+`{ subtype: "mcp_call", tool: "mcp__<server>__<tool>", arguments }` with a 60
+second timeout. The CLI answers `{ content, structuredContent, _meta }` and
+drops `isError`; `content` can arrive flattened to a string, which the runner
+turns back into a text block. The call goes through the session host's
+`acquire`, so it counts as activity, and it is `unavailable` when no child is
+live. It does not respawn a reaped child.
+`docs/plans/MCP_APP_TOOL_CALLS_PLAN.md` records the decision and what is left.
+
 ## Persistent child lifecycle
 
 `runner/shared/PersistentRunnerSessionHost.ts` owns child registration,

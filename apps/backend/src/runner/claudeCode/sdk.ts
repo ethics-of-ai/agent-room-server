@@ -20,6 +20,20 @@ export interface ClaudeCodeQuery extends AsyncIterable<unknown> {
   stopTask?(taskId: string): Promise<void>;
   /** Connection status of each configured MCP server; a control round trip, not a model call. */
   mcpServerStatus?(): Promise<unknown[]>;
+  /**
+   * Read one MCP Apps `ui://` resource from a server the child dialed, with no
+   * model turn. Alpha in the SDK and gated on the CLI's `mcp_read_resource_v1`
+   * capability; it throws when the child cannot answer.
+   */
+  readMcpResource?(serverName: string, uri: string): Promise<unknown>;
+  /**
+   * The SDK's control-request sender, private in its type declarations; every
+   * public control method wraps it and reads `.response` from what it
+   * resolves. Used only for `mcp_call`, which no published SDK exposes yet
+   * (anthropics/claude-agent-sdk-typescript#380). `claudeCodeSdkPin.test.ts`
+   * pins the SDK versions it was checked against.
+   */
+  request?(request: Record<string, unknown>): Promise<unknown>;
   return?(value?: unknown): Promise<IteratorResult<unknown>>;
 }
 

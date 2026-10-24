@@ -11,6 +11,8 @@ public struct ArtifactSnapshot: Codable, Hashable, Identifiable {
     public var isOpen: Bool
     public var truncated: Bool
     public var updatedAt: String
+    /// Present on an `mcp_app` artifact only.
+    public var toolApp: ArtifactToolApp?
 
     public init(
         id: String,
@@ -22,7 +24,8 @@ public struct ArtifactSnapshot: Codable, Hashable, Identifiable {
         version: Int,
         isOpen: Bool,
         truncated: Bool,
-        updatedAt: String
+        updatedAt: String,
+        toolApp: ArtifactToolApp? = nil
     ) {
         self.id = id
         self.sessionId = sessionId
@@ -34,5 +37,6 @@ public struct ArtifactSnapshot: Codable, Hashable, Identifiable {
         self.isOpen = isOpen
         self.truncated = truncated
         self.updatedAt = updatedAt
+        self.toolApp = toolApp
     }
 }

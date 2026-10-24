@@ -85,6 +85,35 @@ function throwingArtifactRunner(): AgentRunner {
   };
 }
 
+// Yields one MCP tool view, as a runner that read the tool's ui:// resource does.
+function toolAppRunner(html = "<!doctype html><p>view</p>"): AgentRunner {
+  return {
+    async getCapabilities() {
+      return { runnerKind: "codex", settings: { models: [], defaultSettings: {} } };
+    },
+    validateInputParts() {},
+    async *run(): AsyncIterable<AgentRunnerEvent> {
+      yield {
+        type: "tool_app",
+        app: {
+          toolId: "toolu-1",
+          title: "Show usage dashboard",
+          serverName: "claude.ai optima-agents",
+          toolName: "show_usage_dashboard",
+          resourceUri: "ui://optima/dashboard.html",
+          tool: { name: "show_usage_dashboard", inputSchema: { type: "object" } },
+          html,
+          resourceMeta: { prefersBorder: true },
+          toolInput: {},
+          toolResult: { content: [{ type: "text", text: "Total $1" }], structuredContent: { totalCost: 1 } }
+        }
+      };
+      yield { type: "run_succeeded", message: "Shown." };
+    },
+    async cancel() {}
+  };
+}
+
 async function waitForEvent(
   app: Awaited<ReturnType<typeof buildServer>>["app"],
   type: string,
@@ -279,6 +308,72 @@ describe("artifact sketch pipeline", () => {
       .find((message) => message.role === "assistant");
     expect(assistant?.content).toContain("<svg><rect/></svg>");
 
+    const artifacts = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/artifacts` });
+    expect(artifacts.json().artifacts).toEqual([]);
+
+    await app.close();
+  });
+
+  it("stores a tool view whole and keeps its body off the event stream", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-artifact-workspace-"));
+    const { app } = await buildServer({ config: serviceConfig, runners: { codex: toolAppRunner() } });
+    const registered = await app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: { workspaceId: registered.json().workspace.id }
+    });
+    const sessionId = session.json().session.id;
+
+    await app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "dashboard" } });
+    const events = await waitForEvent(app, "coding_turn_completed");
+
+    const started = events.find((event) => event.type === "coding_artifact_started");
+    expect(started?.payload).toMatchObject({ kind: "mcp_app", title: "Show usage dashboard" });
+    const artifactId = started?.payload.artifactId as string;
+    expect(events.find((event) => event.type === "coding_artifact_completed")?.payload).toMatchObject({ artifactId, bytes: 26 });
+    expect(events.some((event) => event.type === "coding_artifact_delta")).toBe(false);
+    expect(JSON.stringify(events)).not.toContain("totalCost");
+
+    const artifacts = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/artifacts` });
+    expect(artifacts.json().artifacts).toEqual([
+      expect.objectContaining({
+        id: artifactId,
+        kind: "mcp_app",
+        content: "<!doctype html><p>view</p>",
+        isOpen: false,
+        truncated: false,
+        toolApp: {
+          serverName: "claude.ai optima-agents",
+          toolName: "show_usage_dashboard",
+          resourceUri: "ui://optima/dashboard.html",
+          tool: { name: "show_usage_dashboard", inputSchema: { type: "object" } },
+          resourceMeta: { prefersBorder: true },
+          toolInput: {},
+          toolResult: { content: [{ type: "text", text: "Total $1" }], structuredContent: { totalCost: 1 } }
+        }
+      })
+    ]);
+
+    await app.close();
+  });
+
+  it("refuses a tool view over its byte cap instead of truncating it", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-artifact-workspace-"));
+    const { app } = await buildServer({ config: serviceConfig, runners: { codex: toolAppRunner("x".repeat(600 * 1024)) } });
+    const registered = await app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+    const session = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: { workspaceId: registered.json().workspace.id }
+    });
+    const sessionId = session.json().session.id;
+
+    await app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "dashboard" } });
+    const events = await waitForEvent(app, "coding_turn_completed");
+    expect(events.some((event) => event.type.startsWith("coding_artifact_"))).toBe(false);
     const artifacts = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/artifacts` });
     expect(artifacts.json().artifacts).toEqual([]);
 
