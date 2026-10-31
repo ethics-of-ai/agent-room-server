@@ -344,7 +344,8 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(workspaceDetail).toContain("openWindow(id: WorkspaceWindow.id");
     expect(workspaceDetail).toContain("openWindow(id: WorkspaceSceneWindow.id");
     expect(workspaceDetail).not.toContain("SpatialSceneWindow.id");
-    expect(workspacePocket).toContain("DashboardPocket {");
+    expect(workspacePocket).not.toContain("DashboardPocket {");
+    expect(workspacePocket).not.toContain(".thinMaterial");
     expect(workspacePocket).toContain("DashboardPocketSection(title: \"Repository\")");
     expect(workspacePocket).toContain("DashboardPocketSection(title: \"Activity\")");
     expect(workspacePocket).toContain("DashboardPocketMetadataRow(");
