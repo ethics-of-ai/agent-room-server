@@ -8,6 +8,8 @@ public struct SketchDocumentSnapshot: Codable, Hashable {
     public var kind: String
     public var sketchId: String
     public var revision: Int
+    /// The table pieces stand on; nil reads as the default cell size.
+    public var table: SketchTable?
     public var objects: [SketchObjectSnapshot]
 
     public init(
@@ -15,12 +17,14 @@ public struct SketchDocumentSnapshot: Codable, Hashable {
         kind: String,
         sketchId: String,
         revision: Int,
+        table: SketchTable? = nil,
         objects: [SketchObjectSnapshot]
     ) {
         self.schemaVersion = schemaVersion
         self.kind = kind
         self.sketchId = sketchId
         self.revision = revision
+        self.table = table
         self.objects = objects
     }
 }

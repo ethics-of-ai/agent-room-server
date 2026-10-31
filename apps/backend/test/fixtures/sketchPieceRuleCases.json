@@ -1,0 +1,281 @@
+[
+  {
+    "name": "new pieces land on top of a cube and a cylinder",
+    "pieces": [],
+    "edits": [
+      {"place": "block.cube", "id": "a", "at": [0, 0]},
+      {"place": "block.cylinder", "id": "b", "at": [0, 0]},
+      {"place": "block.ramp", "id": "c", "at": [0, 0]},
+      {"place": "block.road", "id": "d", "at": [1, 0], "rotation": 3}
+    ],
+    "expect": {"pieces": {"a": [0, 0, 0], "b": [0, 0, 1], "c": [0, 0, 2], "d": [1, 0, 0]}}
+  },
+  {
+    "name": "nothing stacks on a ramp",
+    "pieces": [
+      {"id": "r", "kind": "piece", "catalogId": "block.ramp", "cell": [2, 3], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "n", "at": [2, 3]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "nothing stacks on a road",
+    "pieces": [
+      {"id": "road", "kind": "piece", "catalogId": "block.road", "cell": [1, 1], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "n", "at": [1, 1]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "nothing stacks on a wall",
+    "pieces": [
+      {"id": "wall", "kind": "piece", "catalogId": "block.wall", "cell": [4, 4], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "n", "at": [4, 4]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "nothing stacks on a label",
+    "pieces": [
+      {"id": "sign", "kind": "piece", "catalogId": "block.label", "cell": [5, 5], "level": 0, "rotation": 0, "text": "Dock"}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "n", "at": [5, 5]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "pipes land on cylinder posts",
+    "pieces": [],
+    "edits": [
+      {"place": "block.cylinder", "id": "post1", "at": [2, 2]},
+      {"place": "block.pipe", "id": "pipe", "at": [2, 2], "rotation": 1},
+      {"place": "block.cylinder", "id": "post2", "at": [3, 2]},
+      {"place": "block.pipe-angle", "id": "bend", "at": [3, 2], "rotation": 2}
+    ],
+    "expect": {"pieces": {"post1": [2, 2, 0], "pipe": [2, 2, 1], "post2": [3, 2, 0], "bend": [3, 2, 1]}}
+  },
+  {
+    "name": "nothing stacks on a pipe",
+    "pieces": [
+      {"id": "pipe", "kind": "piece", "catalogId": "block.pipe", "cell": [6, 1], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "n", "at": [6, 1]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "nothing stacks on an angle pipe",
+    "pieces": [
+      {"id": "bend", "kind": "piece", "catalogId": "block.pipe-angle", "cell": [6, 2], "level": 0, "rotation": 3}
+    ],
+    "edits": [
+      {"place": "block.cylinder", "id": "n", "at": [6, 2]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "nothing stacks on a piece this build does not know",
+    "pieces": [
+      {"id": "tree", "kind": "piece", "catalogId": "block.tree", "cell": [0, 0], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "n", "at": [0, 0]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "a cube fills the last level under the ceiling",
+    "pieces": [
+      {"id": "c0", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 0, "rotation": 0},
+      {"id": "c1", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 1, "rotation": 0},
+      {"id": "c2", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 2, "rotation": 0},
+      {"id": "c3", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 3, "rotation": 0},
+      {"id": "c4", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 4, "rotation": 0},
+      {"id": "c5", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 5, "rotation": 0},
+      {"id": "c6", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 6, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "top", "at": [0, 0]}
+    ],
+    "expect": {"pieces": {"c0": [0, 0, 0], "c1": [0, 0, 1], "c2": [0, 0, 2], "c3": [0, 0, 3], "c4": [0, 0, 4], "c5": [0, 0, 5], "c6": [0, 0, 6], "top": [0, 0, 7]}}
+  },
+  {
+    "name": "a wall fills the last two levels under the ceiling",
+    "pieces": [
+      {"id": "c0", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 0, "rotation": 0},
+      {"id": "c1", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 1, "rotation": 0},
+      {"id": "c2", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 2, "rotation": 0},
+      {"id": "c3", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 3, "rotation": 0},
+      {"id": "c4", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 4, "rotation": 0},
+      {"id": "c5", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 5, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.wall", "id": "wall", "at": [0, 0]}
+    ],
+    "expect": {"pieces": {"c0": [0, 0, 0], "c1": [0, 0, 1], "c2": [0, 0, 2], "c3": [0, 0, 3], "c4": [0, 0, 4], "c5": [0, 0, 5], "wall": [0, 0, 6]}}
+  },
+  {
+    "name": "a wall has no room for its two levels one level under the ceiling",
+    "pieces": [
+      {"id": "c0", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 0, "rotation": 0},
+      {"id": "c1", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 1, "rotation": 0},
+      {"id": "c2", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 2, "rotation": 0},
+      {"id": "c3", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 3, "rotation": 0},
+      {"id": "c4", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 4, "rotation": 0},
+      {"id": "c5", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 5, "rotation": 0},
+      {"id": "c6", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 6, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.wall", "id": "wall", "at": [0, 0]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "a full column refuses a cube",
+    "pieces": [
+      {"id": "c0", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 0, "rotation": 0},
+      {"id": "c1", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 1, "rotation": 0},
+      {"id": "c2", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 2, "rotation": 0},
+      {"id": "c3", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 3, "rotation": 0},
+      {"id": "c4", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 4, "rotation": 0},
+      {"id": "c5", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 5, "rotation": 0},
+      {"id": "c6", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 6, "rotation": 0},
+      {"id": "c7", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 7, "rotation": 0}
+    ],
+    "edits": [
+      {"place": "block.cube", "id": "n", "at": [0, 0]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "a place past the board's edge is out of bounds",
+    "pieces": [],
+    "edits": [
+      {"place": "block.cube", "id": "off", "at": [16, 0]}
+    ],
+    "expect": {"refused": "out_of_bounds"}
+  },
+  {
+    "name": "a move past the board's edge is out of bounds",
+    "pieces": [
+      {"id": "edge", "kind": "piece", "catalogId": "block.cube", "cell": [15, 15], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"move": "edge", "to": [0, 16]}
+    ],
+    "expect": {"refused": "out_of_bounds"}
+  },
+  {
+    "name": "a place at a negative column fails validation",
+    "pieces": [],
+    "edits": [
+      {"place": "block.cube", "id": "negative", "at": [-1, 0]}
+    ],
+    "expect": {"refused": "invalid_request"}
+  },
+  {
+    "name": "a place at a negative row fails validation",
+    "pieces": [],
+    "edits": [
+      {"place": "block.cube", "id": "negative", "at": [0, -1]}
+    ],
+    "expect": {"refused": "invalid_request"}
+  },
+  {
+    "name": "a move drops the pieces above its old place",
+    "pieces": [
+      {"id": "bottom", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 0, "rotation": 0},
+      {"id": "middle", "kind": "piece", "catalogId": "block.cylinder", "cell": [0, 0], "level": 1, "rotation": 0},
+      {"id": "top", "kind": "piece", "catalogId": "block.ramp", "cell": [0, 0], "level": 2, "rotation": 0},
+      {"id": "base", "kind": "piece", "catalogId": "block.cube", "cell": [3, 0], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"move": "middle", "to": [3, 0]}
+    ],
+    "expect": {"pieces": {"bottom": [0, 0, 0], "middle": [3, 0, 1], "top": [0, 0, 1], "base": [3, 0, 0]}}
+  },
+  {
+    "name": "a move onto a road is refused",
+    "pieces": [
+      {"id": "cube", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 0, "rotation": 0},
+      {"id": "road", "kind": "piece", "catalogId": "block.road", "cell": [0, 1], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"move": "cube", "to": [0, 1]}
+    ],
+    "expect": {"refused": "piece_blocked"}
+  },
+  {
+    "name": "a move onto its own column changes nothing",
+    "pieces": [
+      {"id": "a", "kind": "piece", "catalogId": "block.cube", "cell": [2, 2], "level": 0, "rotation": 0},
+      {"id": "b", "kind": "piece", "catalogId": "block.cube", "cell": [2, 2], "level": 1, "rotation": 0}
+    ],
+    "edits": [
+      {"move": "a", "to": [2, 2]}
+    ],
+    "expect": {"pieces": {"a": [2, 2, 0], "b": [2, 2, 1]}}
+  },
+  {
+    "name": "a delete drops the pieces above it",
+    "pieces": [
+      {"id": "a", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 0, "rotation": 0},
+      {"id": "b", "kind": "piece", "catalogId": "block.cube", "cell": [0, 0], "level": 1, "rotation": 0},
+      {"id": "c", "kind": "piece", "catalogId": "block.wall", "cell": [0, 0], "level": 2, "rotation": 0}
+    ],
+    "edits": [
+      {"delete": "a"}
+    ],
+    "expect": {"pieces": {"b": [0, 0, 0], "c": [0, 0, 1]}}
+  },
+  {
+    "name": "a smaller cell size widens the board for a later place in the batch",
+    "pieces": [],
+    "edits": [
+      {"setTable": 0.02},
+      {"place": "block.cube", "id": "far", "at": [39, 39]}
+    ],
+    "expect": {"pieces": {"far": [39, 39, 0]}, "table": {"cellSize": 0.02, "cells": 40}}
+  },
+  {
+    "name": "removing the table restores the default board",
+    "table": {"cellSize": 0.08, "cells": 10},
+    "pieces": [
+      {"id": "a", "kind": "piece", "catalogId": "block.cube", "cell": [9, 9], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"setTable": null},
+      {"place": "block.cube", "id": "edge", "at": [15, 0]}
+    ],
+    "expect": {"pieces": {"a": [9, 9, 0], "edge": [15, 0, 0]}, "table": {"cellSize": 0.05, "cells": 16}}
+  },
+  {
+    "name": "a cell size that would leave a piece off the board is refused",
+    "pieces": [
+      {"id": "a", "kind": "piece", "catalogId": "block.cube", "cell": [9, 2], "level": 0, "rotation": 0},
+      {"id": "b", "kind": "piece", "catalogId": "block.cube", "cell": [12, 3], "level": 0, "rotation": 0}
+    ],
+    "edits": [
+      {"setTable": 0.08}
+    ],
+    "expect": {"refused": "out_of_bounds"},
+    "backendOnly": "The fold swaps the board without checking it, because nothing in the editor sends setTable."
+  },
+  {
+    "name": "creating a piece with an unknown catalog id is refused",
+    "pieces": [],
+    "edits": [
+      {"place": "block.tree", "id": "tree", "at": [0, 0]}
+    ],
+    "expect": {"refused": "unknown_piece"},
+    "backendOnly": "The fold lands any id, because SessionSketchModel.placePiece refuses unknown ids before anything queues."
+  }
+]

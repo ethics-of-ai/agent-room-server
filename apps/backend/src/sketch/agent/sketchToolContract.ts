@@ -1,8 +1,14 @@
 import { z } from "zod";
 import { registerAgentTool, type AgentToolDefinition } from "../../agentTools/catalog";
 import { advertisedJsonSchema } from "../../agentTools/jsonSchema";
-import { SKETCH_MAX_BATCH_OPERATIONS, sketchCallerOperationSchema, sketchObjectIdSchema } from "../core";
-import { SKETCH_COORDINATE_CONVENTION, SKETCH_TOOL_RESULT_BYTES } from "./sketchInspect";
+import {
+  SKETCH_MAX_BATCH_OPERATIONS,
+  SKETCH_PIECE_CATALOG,
+  SKETCH_TABLE_WIDTH,
+  sketchCallerOperationSchema,
+  sketchObjectIdSchema
+} from "../core";
+import { SKETCH_COORDINATE_CONVENTION, SKETCH_PIECE_CATALOG_SUMMARY, SKETCH_TOOL_RESULT_BYTES } from "./sketchInspect";
 
 /**
  * The sketch tools as catalog definitions: canonical zod inputs, the names a
@@ -76,7 +82,9 @@ const SKETCH_TOOL_TEXT: Record<SketchToolId, { name: string; description: string
     name: "agentroom_sketch_inspect",
     description:
       "Read a repository sketch: its id, revision, coordinate convention, and one compact line per object " +
-      "(id, kind, parent, transform, world bounds, colors, a text excerpt). Strokes report their point count, not their points. " +
+      "(id, kind, parent, transform, world bounds, colors, a text excerpt). Strokes report their point count, not their points; " +
+      "pieces report their catalog id, cell, level and rotation instead of a transform. " +
+      "Pipes that join are listed as runs with their flow. " +
       "Name object ids in detail to get them in full. Never changes the sketch."
   },
   "sketches.create": {
@@ -102,8 +110,15 @@ const SKETCH_TOOL_TEXT: Record<SketchToolId, { name: string; description: string
     name: "agentroom_sketch_edit",
     description:
       `Commit one step to a repository sketch while the person watches: up to ${SKETCH_MAX_BATCH_OPERATIONS} operations applied all or nothing as one undoable transaction. ` +
-      "Operations are create, update, transform, delete, clear, group, and ungroup. A transform is absolute, relative to the parent group, " +
+      "Operations are create, update, transform, delete, clear, group, ungroup, and setTable. A transform is absolute, relative to the parent group, " +
       "and always carries translation, rotation, and scale; copy the ones you keep from inspect. " +
+      `A piece create names catalogId (${SKETCH_PIECE_CATALOG.map((entry) => entry.id).join(", ")}) and cell, never a level: ` +
+      "the piece lands on top of that column. Updating a piece's cell moves it onto " +
+      "the top of another column, and the pieces above its old place drop down. Pieces cannot be transformed or grouped, " +
+      "and a piece whose catalogId is not in that list cannot be updated. " +
+      "A piece's cell must be on the table, columns and rows 0 to cells − 1; inspect gives the size. " +
+      `setTable sets the table's cellSize in metres, which sets the table to round(${SKETCH_TABLE_WIDTH} / cellSize) cells across, ` +
+      "and refuses a size that would leave a piece off the table. " +
       "Deleting a group deletes everything in it. A step that clears the whole sketch asks the person first. Returns the new revision and the changed objects."
   }
 };
@@ -121,11 +136,17 @@ for (const definition of sketchToolDefinitions) registerAgentTool(definition);
 
 /** The standing sketch instruction, delivered like the plan instruction. */
 export const SKETCH_TOOLS_INSTRUCTION = [
-  "AgentRoom sketch tools read and edit the person's repository sketches (*.sketch.json files) while they watch the canvas. " +
+  "AgentRoom sketch tools read and edit the person's repository sketches (*.sketch.json files) while they watch the table. " +
     "Use them, never your own file tools, to change a .sketch.json file: a raw write skips validation, undo history, and live updates, and can overwrite what the person is drawing.",
   "When the person names a sketch, call agentroom_sketch_list first and pass the path or id it returns. Call agentroom_sketch_inspect before your first edit.",
   SKETCH_COORDINATE_CONVENTION,
-  "Prefer boxes, planar shapes (rectangle, ellipse, triangle), text boxes, and groups. Use strokes only for freehand marks.",
+  "Build on the table with pieces: blocks that snap to cells and stack. The person's editor places pieces only, " +
+    "so create other kinds only when the person asks for them. " + SKETCH_PIECE_CATALOG_SUMMARY +
+    " A piece_blocked result names the column that refused; pick another column or a piece that carries others.",
+  "At rotation 0 a piece faces -z, and each quarter turn turns it clockwise seen from above: -z, +x, +z, -x. " +
+    "Pipes at the same level join where their open ends meet across a cell edge. A block.pipe runs along z at rotation 0 and flows the way it faces, " +
+    "so two quarter turns reverse it. A block.pipe-angle opens toward +z and +x at rotation 0, turns its run 90 degrees, and takes the run's direction. " +
+    "An end against a block at its level ends the run at that block. Inspect lists each run and whether it flows, has no flow, or has pipes pointing against each other.",
   "Make one logical change per agentroom_sketch_edit call, for example place, then align, then label, so the person sees each step land. " +
     "Give every call a short label; the person sees it in Undo.",
   "Keep object ids stable: give new objects short descriptive ids, and change existing objects by id instead of deleting and recreating them.",

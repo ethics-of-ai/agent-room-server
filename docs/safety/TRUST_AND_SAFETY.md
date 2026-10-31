@@ -867,12 +867,8 @@ The visionOS client gets images only from the system photo picker and the
 system Files importer. Both run out of process and hand over just the items the
 person selects. The app holds each security-scoped URL the importer returns
 open only for the read, and the backend still validates every upload as above.
-The app declares no photo-library read usage and never reads the pasteboard for
-attachments. It declares add-only usage
-(`NSPhotoLibraryAddUsageDescription`) for one flow: Share Image in the sketch
-editor offers Save Image, and the system asks for add access the first time the
-person uses it. A saved drawing leaves the device only if the person later
-attaches it to a turn.
+The app declares no photo-library usage and never reads the pasteboard for
+attachments.
 
 Live artifacts are line-start `<artifact kind="svg|mermaid">` regions in model
 text, gated by `ARTIFACTS_ENABLED`, which defaults on. Unknown, malformed, or

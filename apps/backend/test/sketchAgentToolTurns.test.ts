@@ -58,8 +58,9 @@ describe("sketch tool catalog", () => {
     // Every operation the core accepts from a caller is expressible.
     const leaves = (node: any): any[] => node.anyOf ? node.anyOf.flatMap(leaves) : [node];
     const ops = leaves(edit.properties.operations.items).map((entry) => entry.properties.op.enum[0]);
-    expect([...new Set(ops)].sort()).toEqual(["clear", "create", "delete", "group", "transform", "ungroup", "update"]);
-    expect(ops).toHaveLength(15);
+    expect([...new Set(ops)].sort()).toEqual(["clear", "create", "delete", "group", "setTable", "transform", "ungroup", "update"]);
+    // Six creates and six updates (five drawing kinds and the piece), plus the six other caller operations.
+    expect(ops).toHaveLength(18);
   });
 
   it("fits every transport's catalog limits beside the question and plan tools", () => {
@@ -239,6 +240,42 @@ describe("sketch tools in agent sessions", () => {
     await f.turn();
     expect(result).toMatch(/^error invalid_request: operations\.0\.transform\.rotation: Required; operations\.0\.transform\.scale: Required/);
     await f.server.app.close();
+  });
+
+  it("builds on the table with pieces and reads them back", async () => {
+    const results: string[] = [];
+    const f = await start(WRITABLE, [async ({ tools }) => {
+      await call(tools, "agentroom_sketch_inspect", { sketch: f.path });
+      results.push(await call(tools, "agentroom_sketch_edit", { sketch: f.path, baseRevision: 0, label: "Lay out the block", operations: [
+        { op: "setTable", cellSize: 0.08 },
+        { op: "create", objectId: "base", kind: "piece", catalogId: "block.cube", cell: [0, 0] },
+        { op: "create", objectId: "roof", kind: "piece", catalogId: "block.ramp", cell: [0, 0], rotation: 2 },
+        { op: "create", objectId: "sign", kind: "piece", catalogId: "block.label", cell: [1, 0], text: "Main St" }
+      ] }));
+      results.push(await call(tools, "agentroom_sketch_edit", { sketch: f.path, baseRevision: 1, label: "Stack on the roof", operations: [
+        { op: "create", objectId: "chimney", kind: "piece", catalogId: "block.cylinder", cell: [0, 0] }
+      ] }));
+      results.push(await call(tools, "agentroom_sketch_inspect", { sketch: f.path }));
+    }]);
+    await f.turn();
+    expect(results[0]).toMatch(/^ok:/);
+    expect(results[1]).toMatch(/^error piece_blocked \(operation 0\): Column \[0, 0\] is topped by "roof"/);
+    expect(results[2]).toContain("The table is 10 by 10 cells of 0.08 m, columns and rows 0 to 9.");
+    expect(results[2]).toContain('{"id":"roof","kind":"piece","catalogId":"block.ramp","cell":[0,0],"level":1,"rotation":2}');
+    expect(results[2]).toContain('"text":"Main St"');
+    await f.server.app.close();
+  });
+
+  it("tells the agent the table rule and the catalog", () => {
+    expect(SKETCH_TOOLS_INSTRUCTION).toContain("block.wall (2 levels)");
+    expect(SKETCH_TOOLS_INSTRUCTION).toContain("block.cube (1 level, carries pieces)");
+    expect(SKETCH_TOOLS_INSTRUCTION).toContain("block.pipe (1 level, pipe)");
+    expect(SKETCH_TOOLS_INSTRUCTION).toContain("A block.pipe runs along z at rotation 0 and flows the way it faces");
+    expect(SKETCH_TOOLS_INSTRUCTION).toContain("cell [c,r] has its centre at x = (c + 0.5) × cellSize");
+    expect(SKETCH_TOOLS_INSTRUCTION).toContain("The table is the whole board, and no piece can leave it.");
+    expect(agentToolByLogicalId("sketches.edit")?.description).toContain(
+      "catalogId (block.cube, block.ramp, block.cylinder, block.road, block.wall, block.label, block.pipe, block.pipe-angle)"
+    );
   });
 
   it("refuses a call from a turn that has ended", async () => {

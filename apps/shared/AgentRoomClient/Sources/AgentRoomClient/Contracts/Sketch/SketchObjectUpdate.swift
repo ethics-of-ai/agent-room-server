@@ -25,6 +25,9 @@ public struct SketchObjectUpdate: Codable, Hashable {
     public var spans: [SketchTextSpan]?
     public var rendering: SketchTextRendering?
     public var extrusionDepth: Double?
+    /// A new cell moves a piece onto the top of that column.
+    public var cell: [Int]?
+    public var rotation: Int?
 
     public init(
         objectId: String,
@@ -45,7 +48,9 @@ public struct SketchObjectUpdate: Codable, Hashable {
         paragraphs: [SketchTextParagraph]? = nil,
         spans: [SketchTextSpan]? = nil,
         rendering: SketchTextRendering? = nil,
-        extrusionDepth: Double? = nil
+        extrusionDepth: Double? = nil,
+        cell: [Int]? = nil,
+        rotation: Int? = nil
     ) {
         self.objectId = objectId
         self.kind = kind
@@ -66,5 +71,7 @@ public struct SketchObjectUpdate: Codable, Hashable {
         self.spans = spans
         self.rendering = rendering
         self.extrusionDepth = extrusionDepth
+        self.cell = cell
+        self.rotation = rotation
     }
 }

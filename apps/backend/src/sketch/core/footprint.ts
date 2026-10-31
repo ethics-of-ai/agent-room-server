@@ -1,5 +1,6 @@
 import { ancestorIds, indexSketchObjects, readParentId, subtreeOf } from "./geometry";
 import type { SketchDocument, SketchOperation } from "./schemas";
+import { columnPieces, isSketchPiece } from "./pieceRules";
 
 // Which object ids an operation reads and writes. The relaxed revision rule
 // and the revision log both come from this one function, so a commit, undo,
@@ -30,9 +31,21 @@ export function addOperationFootprint(
   const write = (id: string) => footprint.writes.add(id);
   switch (operation.op) {
     case "create":
-    case "update":
+    case "update": {
       write(operation.objectId);
+      if (operation.kind !== "piece") return;
+      // Gravity reads the column a piece lands in and rewrites the levels of
+      // the column it leaves. An update that stays put still reads its column.
+      const piece = document.objects.find((object) => object.id === operation.objectId);
+      if (piece !== undefined && isSketchPiece(piece)) {
+        const touch = operation.cell === undefined ? read : write;
+        for (const member of columnPieces(document.objects, piece.cell)) touch(member.id);
+      }
+      if (operation.cell !== undefined) {
+        for (const member of columnPieces(document.objects, operation.cell)) read(member.id);
+      }
       return;
+    }
     case "transform": {
       write(operation.objectId);
       for (const ancestor of ancestorIds(operation.objectId, indexSketchObjects(document.objects))) read(ancestor);
@@ -40,10 +53,16 @@ export function addOperationFootprint(
     }
     case "delete": {
       write(operation.objectId);
+      const piece = document.objects.find((object) => object.id === operation.objectId);
+      if (piece !== undefined && isSketchPiece(piece)) {
+        for (const member of columnPieces(document.objects, piece.cell)) write(member.id);
+      }
       for (const object of subtreeOf(operation.objectId, indexSketchObjects(document.objects))) write(object.id);
       return;
     }
     case "clear":
+    case "setTable":
+    case "restoreTable":
       footprint.all = true;
       return;
     case "group": {
@@ -72,6 +91,10 @@ export function addOperationFootprint(
     case "remove":
       for (const objectId of operation.objectIds) write(objectId);
       return;
+    case "setPieces":
+      for (const piece of operation.pieces) write(piece.id);
+      for (const objectId of operation.removeIds) write(objectId);
+      return;
     case "setParents":
       for (const assignment of operation.assignments) {
         write(assignment.objectId);
@@ -93,7 +116,11 @@ export function namedOperationIds(operation: SketchOperation): string[] {
     case "delete":
       return [operation.objectId];
     case "clear":
+    case "setTable":
+    case "restoreTable":
       return [];
+    case "setPieces":
+      return [...operation.pieces.map((piece) => piece.id), ...operation.removeIds];
     case "group":
       return [operation.groupId, ...operation.memberIds, ...(operation.parentId ? [operation.parentId] : [])];
     case "ungroup":

@@ -25,6 +25,8 @@ import {
 } from "./schemas";
 import type { SketchTextBoxAppearance } from "./textBoxSchemas";
 import { checkTextBoxFormat, checkTotalExtrudedText } from "./textBoxFormat";
+import { checkPieceBounds, checkPieceRecords } from "./pieceRules";
+import { resolveSketchTable, type SketchTable } from "./pieceSchemas";
 
 // Document-level invariants: everything that spans objects. The evaluator
 // runs this after every operation so a refusal names the operation at fault,
@@ -44,7 +46,9 @@ export type SketchInvariantKind =
   | "text_format"
   | "extruded_text_characters"
   | "total_extruded_text_characters"
-  | "world_bounds";
+  | "world_bounds"
+  | "piece_stack"
+  | "table_bounds";
 
 export interface SketchInvariantIssue {
   kind: SketchInvariantKind;
@@ -52,7 +56,7 @@ export interface SketchInvariantIssue {
   objectId?: string;
 }
 
-export function checkSketchObjects(objects: SketchObject[]): SketchInvariantIssue | null {
+export function checkSketchObjects(objects: SketchObject[], table?: SketchTable): SketchInvariantIssue | null {
   if (objects.length > SKETCH_MAX_OBJECTS) {
     return {
       kind: "object_count",
@@ -135,6 +139,14 @@ export function checkSketchObjects(objects: SketchObject[]): SketchInvariantIssu
     if (formatIssue !== null) {
       return { ...formatIssue, objectId: textBox.id };
     }
+  }
+  const boundsIssue = checkPieceBounds(objects, resolveSketchTable(table));
+  if (boundsIssue !== null) {
+    return { kind: "table_bounds", ...boundsIssue };
+  }
+  const pieceIssue = checkPieceRecords(objects);
+  if (pieceIssue !== null) {
+    return { kind: "piece_stack", ...pieceIssue };
   }
   return checkTotalExtrudedText(textBoxes) ?? checkWorldBounds(index);
 }

@@ -24,6 +24,13 @@ import {
   type SketchKnownObjectKind
 } from "./limits";
 import { sketchTextBoxAppearanceSchema, textBoxFormatFields, textBoxFormatOptionalFields } from "./textBoxSchemas";
+import { sketchColorSchema, sketchObjectIdPattern, sketchObjectIdSchema, unknownSketchObjectSchema } from "./fieldSchemas";
+import {
+  sketchPieceCreateSchema, sketchPieceObjectSchema, sketchPieceUpdateSchema, sketchRestoreTableOperationSchema,
+  sketchSetPiecesOperationSchema, sketchSetTableOperationSchema, sketchTableSchema
+} from "./pieceSchemas";
+
+export { sketchColorSchema, sketchObjectIdPattern, sketchObjectIdSchema };
 
 // Sketch document and operation contracts. Schemas own per-field validity:
 // shapes, grammars, finite numbers, and scalar ranges. Checks that span
@@ -42,10 +49,6 @@ import { sketchTextBoxAppearanceSchema, textBoxFormatFields, textBoxFormatOption
 
 export const sketchIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, {
   message: "Sketch ids must match ^[a-z0-9][a-z0-9-]{0,63}$"
-});
-export const sketchObjectIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-export const sketchObjectIdSchema = z.string().regex(sketchObjectIdPattern, {
-  message: "Object ids must match ^[a-z0-9][a-z0-9_-]{0,63}$"
 });
 // Request ids are caller-minted idempotency keys; a wider grammar keeps
 // client UUID spellings usable verbatim.
@@ -69,11 +72,6 @@ const boxDimensionSchema = finiteNumber.min(SKETCH_MIN_DIMENSION).max(SKETCH_MAX
 const planarSizeSchema = z.tuple([boxDimensionSchema, boxDimensionSchema]);
 const outlineWidthSchema = finiteNumber.min(SKETCH_MIN_DIMENSION).max(SKETCH_MAX_OUTLINE_WIDTH);
 const textSchema = z.string().min(1).max(SKETCH_MAX_TEXT_CHARACTERS);
-export const sketchColorSchema = z
-  .string()
-  .regex(/^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/, {
-    message: "Colors must be #RRGGBB or #RRGGBBAA"
-  });
 export const sketchBrushSchema = z.enum(["finePen", "broadMarker", "highlighter"]);
 export const sketchLineStyleSchema = z.enum(["solid", "dashed", "dotted"]);
 export const sketchPlanarShapeTypeSchema = z.enum(["rectangle", "ellipse", "triangle"]);
@@ -197,22 +195,8 @@ export const sketchGroupObjectSchema = z
 // and the evaluator refuses operations that target them directly (they can
 // still be moved structurally by group membership, which is how forward
 // compatibility avoids orphans). A malformed *known* kind never lands here —
-// its literal fails the refinement below, so it surfaces as a parse error.
-export const sketchUnknownObjectSchema = z
-  .object({
-    id: sketchObjectIdSchema,
-    kind: z.string().min(1).max(64)
-  })
-  .passthrough()
-  .superRefine((object, context) => {
-    if ((SKETCH_KNOWN_OBJECT_KINDS as readonly string[]).includes(object.kind)) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Kind "${object.kind}" is a known kind and must match its strict schema`,
-        path: ["kind"]
-      });
-    }
-  });
+// its literal fails the refinement, so it surfaces as a parse error.
+export const sketchUnknownObjectSchema = unknownSketchObjectSchema(SKETCH_KNOWN_OBJECT_KINDS);
 
 export const sketchObjectSchema = z.union([
   sketchStrokeObjectSchema,
@@ -221,6 +205,7 @@ export const sketchObjectSchema = z.union([
   sketchPlanarShapeObjectSchema,
   sketchTextBoxObjectSchema,
   sketchGroupObjectSchema,
+  sketchPieceObjectSchema,
   sketchUnknownObjectSchema
 ]);
 
@@ -230,6 +215,7 @@ export const sketchDocumentSchema = z
     kind: z.literal("sketch"),
     sketchId: sketchIdSchema,
     revision: z.number().int().min(0),
+    table: sketchTableSchema.optional(),
     objects: z.array(sketchObjectSchema).max(SKETCH_MAX_OBJECTS)
   })
   .strict();
@@ -280,13 +266,15 @@ export const sketchPlanarShapeCreateSchema = z.object({
   transform: sketchTransformSchema.optional()
 }).strict();
 
-export const sketchCreateOperationSchema = z.union([
+// The version-3 creates, which the version-3 reader reuses as they are.
+export const sketchDrawingCreateOperationSchema = z.union([
   sketchStrokeCreateSchema,
   sketchBoxCreateSchema,
   sketchTextCreateSchema,
   sketchTextBoxCreateSchema,
   sketchPlanarShapeCreateSchema
 ]);
+export const sketchCreateOperationSchema = z.union([sketchDrawingCreateOperationSchema, sketchPieceCreateSchema]);
 
 const updateCommon = {
   op: z.literal("update"),
@@ -347,7 +335,7 @@ export const sketchTextBoxUpdateFields = {
 // A text box update that changes `text` must also carry `paragraphs` and
 // `spans`; the operation refuses it otherwise, so formatting never drifts
 // from the text it describes.
-export const sketchUpdateOperationSchema = z.union([
+export const sketchDrawingUpdateOperationSchema = z.union([
   sketchStrokeStyleUpdateSchema,
   sketchBoxUpdateSchema,
   sketchTextUpdateSchema,
@@ -430,6 +418,8 @@ export const sketchSetParentsOperationSchema = z
   })
   .strict();
 
+export const sketchUpdateOperationSchema = z.union([sketchDrawingUpdateOperationSchema, sketchPieceUpdateSchema]);
+
 export const sketchCallerOperationSchema = z.union([
   sketchCreateOperationSchema,
   sketchUpdateOperationSchema,
@@ -437,14 +427,17 @@ export const sketchCallerOperationSchema = z.union([
   sketchDeleteOperationSchema,
   sketchClearOperationSchema,
   sketchGroupOperationSchema,
-  sketchUngroupOperationSchema
+  sketchUngroupOperationSchema,
+  sketchSetTableOperationSchema
 ]);
 
 export const sketchOperationSchema = z.union([
   sketchCallerOperationSchema,
   sketchRestoreOperationSchema,
   sketchRemoveOperationSchema,
-  sketchSetParentsOperationSchema
+  sketchSetParentsOperationSchema,
+  sketchSetPiecesOperationSchema,
+  sketchRestoreTableOperationSchema
 ]);
 
 // --- actor, requests, receipts, state ------------------------------------------
@@ -503,17 +496,21 @@ export const sketchReceiptSchema = z
   })
   .strict();
 
-export const sketchHistoryEntrySchema = z
-  .object({
+// A history entry whose operations follow `operation`; each document version
+// passes its own operation union.
+export function sketchHistoryEntrySchemaOf<Operation extends z.ZodTypeAny>(operation: Operation) {
+  return z.object({
     transactionId: z.string().regex(sketchTransactionIdPattern),
     revision: z.number().int().min(1),
     actor: sketchActorSchema,
     turnId: sketchTurnIdSchema.optional(),
     label: z.string().trim().min(1).max(120),
-    forwardOps: z.array(sketchOperationSchema).min(1).max(SKETCH_MAX_BATCH_OPERATIONS),
-    inverseOps: z.array(sketchOperationSchema).min(1).max(SKETCH_MAX_BATCH_OPERATIONS)
-  })
-  .strict();
+    forwardOps: z.array(operation).min(1).max(SKETCH_MAX_BATCH_OPERATIONS),
+    inverseOps: z.array(operation).min(1).max(SKETCH_MAX_BATCH_OPERATIONS)
+  }).strict();
+}
+
+export const sketchHistoryEntrySchema = sketchHistoryEntrySchemaOf(sketchOperationSchema);
 
 // One entry per revision since `floor`: the object ids that revision changed,
 // or `all` for a clear or a change too wide to list. A request based on a

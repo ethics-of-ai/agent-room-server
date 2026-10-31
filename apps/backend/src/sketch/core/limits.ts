@@ -5,15 +5,17 @@
 // docs/api/API.md#operations-and-limits in the same change, and never override
 // a cap per call site.
 
-export const SKETCH_SCHEMA_VERSION = 3;
+export const SKETCH_SCHEMA_VERSION = 4;
+export const SKETCH_V3_SCHEMA_VERSION = 3;
 export const SKETCH_V2_SCHEMA_VERSION = 2;
 export const SKETCH_LEGACY_SCHEMA_VERSION = 1;
 
 // Whole-document caps. The object count includes groups and preserved
 // unknown-kind objects: they all occupy ids, parent links, and render slots.
-// Raised from 128 on 2026-10-05 so the canvas can work as an open board. The
-// point, segment, text, and byte caps below still bound generated geometry;
-// the render cost of 1,024 entities awaits a headset measurement.
+// Raised from 128 on 2026-10-05. A table of 40 by 40 cells, eight levels
+// deep, holds more pieces than this, so the object cap is what bounds a
+// sketch. The point, segment, text, and byte caps below still bound generated
+// geometry; the render cost of 1,024 entities awaits a headset measurement.
 export const SKETCH_MAX_OBJECTS = 1024;
 export const SKETCH_MAX_DOCUMENT_BYTES = 2 * 1024 * 1024;
 
@@ -54,9 +56,25 @@ export const SKETCH_DEFAULT_LINE_STYLE = "solid" as const;
 
 // Coordinates live in a 1 km cube centered on the sketch origin, faces
 // inclusive — reachable geometry may sit exactly on a face (B01 relies on the
-// clamp landing there). Raised from 5 on 2026-10-05 so the canvas can grow
-// like an open board; float32 clients keep sub-millimetre precision at 500 m.
+// clamp landing there). Raised from 5 on 2026-10-05; float32 clients keep
+// sub-millimetre precision at 500 m. Pieces stay within the table, well
+// inside it.
 export const SKETCH_COORDINATE_LIMIT = 500;
+
+// Tables and pieces. The table is the whole board: a square of cells about
+// SKETCH_TABLE_WIDTH metres across, columns and rows numbered from 0. A piece
+// sits on a whole cell and stacks in levels one cell tall. Setting the cell
+// size sets the board to round(SKETCH_TABLE_WIDTH / cellSize) cells, so 2 cm
+// to 20 cm gives 40 to 4 cells. A piece stays well inside the coordinate
+// cube, so pieces need no composed bounds check.
+export const SKETCH_TABLE_WIDTH = 0.8;
+export const SKETCH_MIN_TABLE_CELL_SIZE = 0.02;
+export const SKETCH_MAX_TABLE_CELL_SIZE = 0.2;
+export const SKETCH_DEFAULT_TABLE_CELL_SIZE = 0.05;
+// The most cells a table can have: the board at the smallest cell size.
+export const SKETCH_MAX_TABLE_CELLS = Math.round(SKETCH_TABLE_WIDTH / SKETCH_MIN_TABLE_CELL_SIZE);
+export const SKETCH_PIECE_MAX_LEVELS = 8;
+export const SKETCH_MAX_PIECE_TEXT_CHARACTERS = 64;
 
 // Transforms.
 export const SKETCH_MIN_SCALE = 0.001;
@@ -100,7 +118,7 @@ export const SKETCH_REVISION_LOG_BYTE_BUDGET = 1536 * 1024;
 export const SKETCH_MAX_STATE_BYTES =
   SKETCH_MAX_DOCUMENT_BYTES + SKETCH_HISTORY_BYTE_BUDGET + SKETCH_REVISION_LOG_BYTE_BUDGET + 512 * 1024;
 
-export const SKETCH_KNOWN_OBJECT_KINDS = ["stroke", "box", "text", "planarShape", "textBox", "group"] as const;
+export const SKETCH_KNOWN_OBJECT_KINDS = ["stroke", "box", "text", "planarShape", "textBox", "group", "piece"] as const;
 export type SketchKnownObjectKind = (typeof SKETCH_KNOWN_OBJECT_KINDS)[number];
 
 // Machine-readable limit names carried by `limit_exceeded` errors so callers

@@ -35,6 +35,12 @@ public struct SketchObjectSnapshot: Codable, Hashable, Identifiable {
     public var rendering: SketchTextRendering?
     public var extrusionDepth: Double?
     public var transform: SketchTransform?
+    /// Piece fields (schema version 4): the catalog entry, the `[column, row]`
+    /// cell, the level the backend set, and quarter turns clockwise from above.
+    public var catalogId: String?
+    public var cell: [Int]?
+    public var level: Int?
+    public var rotation: Int?
 
     public init(
         id: String,
@@ -57,7 +63,11 @@ public struct SketchObjectSnapshot: Codable, Hashable, Identifiable {
         spans: [SketchTextSpan]? = nil,
         rendering: SketchTextRendering? = nil,
         extrusionDepth: Double? = nil,
-        transform: SketchTransform? = nil
+        transform: SketchTransform? = nil,
+        catalogId: String? = nil,
+        cell: [Int]? = nil,
+        level: Int? = nil,
+        rotation: Int? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -80,12 +90,16 @@ public struct SketchObjectSnapshot: Codable, Hashable, Identifiable {
         self.rendering = rendering
         self.extrusionDepth = extrusionDepth
         self.transform = transform
+        self.catalogId = catalogId
+        self.cell = cell
+        self.level = level
+        self.rotation = rotation
     }
 
-    /// The six kinds this client understands. Everything else is a
+    /// The seven kinds this client understands. Everything else is a
     /// forward-compatibility entry: shown as unsupported, never targeted by
     /// operations from this client.
-    public static let knownKinds: Set<String> = ["stroke", "box", "text", "planarShape", "textBox", "group"]
+    public static let knownKinds: Set<String> = ["stroke", "box", "text", "planarShape", "textBox", "group", "piece"]
 
     public var isKnownKind: Bool {
         SketchObjectSnapshot.knownKinds.contains(kind)

@@ -197,12 +197,12 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(infoPlist).toContain("<key>NSAllowsLocalNetworking</key>");
   });
 
-  test("asks only to add to the photo library, never to read it", async () => {
+  test("asks for no photo library access", async () => {
     const infoPlist = await readFile(resolve(visionOSRoot, "AgentRoom/Info.plist"), "utf8");
 
-    // Share Image's Save Image needs add access; attachments come from the out-of-process
-    // photo picker, which needs no library permission.
-    expect(infoPlist).toContain("<key>NSPhotoLibraryAddUsageDescription</key>");
+    // Attachments come from the out-of-process photo picker, which needs no
+    // library permission, and nothing saves to the library.
+    expect(infoPlist).not.toContain("<key>NSPhotoLibraryAddUsageDescription</key>");
     expect(infoPlist).not.toContain("<key>NSPhotoLibraryUsageDescription</key>");
   });
 

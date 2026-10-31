@@ -7,6 +7,9 @@ export {
   SKETCH_LIMIT_NAMES,
   SKETCH_SCHEMA_VERSION,
   SKETCH_V2_SCHEMA_VERSION,
+  SKETCH_V3_SCHEMA_VERSION,
+  SKETCH_TABLE_WIDTH,
+  SKETCH_PIECE_MAX_LEVELS,
   SKETCH_LEGACY_SCHEMA_VERSION,
   SKETCH_DEFAULT_BRUSH,
   SKETCH_DEFAULT_LINE_STYLE,
@@ -137,6 +140,11 @@ export {
   type SketchDocumentV2,
   type SketchStateV2
 } from "./schemasV2";
+
+export { resolveSketchTable } from "./pieceSchemas";
+
+export { SKETCH_PIECE_CATALOG, type SketchPieceCatalogEntry, type SketchPieceEdge } from "./pieceCatalog";
+export { sketchPipeRuns, type SketchPipeFlow, type SketchPipeRun } from "./pipeRuns";
 
 export {
   measureSketchDocumentBytes,

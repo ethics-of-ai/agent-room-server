@@ -544,8 +544,14 @@ each named `agentroom_sketch_<verb>`. The owners are:
 
 - `sketchToolContract.ts`: the strict input schemas, names, descriptions,
   unavailable text, and the standing instruction.
-- `sketchInspect.ts`: the compact object lines, the coordinate convention, and
-  the 48 KiB result cap.
+- `sketchInspect.ts`: the compact object lines, the coordinate convention, the
+  table line, the piece catalog summary the instruction repeats, the pipe run
+  lines, and the 48 KiB result cap. When a sketch has pipes, inspect lists each
+  [pipe run](../api/API.md#pipe-runs) after the objects as one JSON line: its
+  pipes in order (flow order when it flows), what its two ends meet or
+  `loop: true`, its flow, and any conflicting pairs. Runs take the result's
+  budget after requested detail and before the object lines, and a note
+  counts any left out.
 - `sketchToolResults.ts`: listing, refusal, and validation-error text.
 - `SketchLifecycleTools.ts` and `sketchConfirmations.ts`: create, own-step
   history, rename, delete, and the questions before deleting a file or

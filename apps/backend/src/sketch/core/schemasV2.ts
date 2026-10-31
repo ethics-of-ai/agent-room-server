@@ -1,13 +1,11 @@
 import { z } from "zod";
 import {
-  SKETCH_MAX_BATCH_OPERATIONS,
   SKETCH_MAX_EXPIRED_REQUEST_IDS,
   SKETCH_MAX_OBJECTS,
   SKETCH_V2_SCHEMA_VERSION
 } from "./limits";
 import {
   requireUpdateField,
-  sketchActorSchema,
   sketchBoxCreateSchema,
   sketchBoxObjectSchema,
   sketchBoxUpdateSchema,
@@ -15,6 +13,7 @@ import {
   sketchDeleteOperationSchema,
   sketchGroupObjectSchema,
   sketchGroupOperationSchema,
+  sketchHistoryEntrySchemaOf,
   sketchIdSchema,
   sketchPlanarShapeCreateSchema,
   sketchPlanarShapeObjectSchema,
@@ -33,16 +32,14 @@ import {
   sketchTextCreateSchema,
   sketchTextObjectSchema,
   sketchTextUpdateSchema,
-  sketchTransactionIdPattern,
   sketchTransformOperationSchema,
-  sketchTurnIdSchema,
-  sketchUngroupOperationSchema,
-  sketchUnknownObjectSchema
+  sketchUngroupOperationSchema
 } from "./schemas";
 import { SKETCH_TEXT_BOX_FORMAT_KEYS } from "./textBoxSchemas";
+import { sketchUnknownObjectV3Schema } from "./schemasV3";
 
 // Version 2 is version 3 without text box formatting. It knows the same kinds,
-// so its unknown-kind rule is the current one. Every member reuses the
+// so its unknown-kind rule is version 3's. Every member reuses the
 // version-3 definition with the formatting fields removed, and a version-2
 // file that already carries one of them fails as a version-2 file.
 
@@ -60,7 +57,7 @@ export const sketchObjectV2Schema = z.union([
   sketchPlanarShapeObjectSchema,
   sketchTextBoxObjectV2Schema,
   sketchGroupObjectSchema,
-  sketchUnknownObjectSchema
+  sketchUnknownObjectV3Schema
 ]);
 
 export const sketchDocumentV2Schema = z.object({
@@ -97,15 +94,7 @@ const sketchOperationV2Schema = z.union([
   sketchRemoveOperationSchema,
   sketchSetParentsOperationSchema
 ]);
-const sketchHistoryEntryV2Schema = z.object({
-  transactionId: z.string().regex(sketchTransactionIdPattern),
-  revision: z.number().int().min(1),
-  actor: sketchActorSchema,
-  turnId: sketchTurnIdSchema.optional(),
-  label: z.string().trim().min(1).max(120),
-  forwardOps: z.array(sketchOperationV2Schema).min(1).max(SKETCH_MAX_BATCH_OPERATIONS),
-  inverseOps: z.array(sketchOperationV2Schema).min(1).max(SKETCH_MAX_BATCH_OPERATIONS)
-}).strict();
+const sketchHistoryEntryV2Schema = sketchHistoryEntrySchemaOf(sketchOperationV2Schema);
 
 export const sketchStateV2Schema = z.object({
   schemaVersion: z.literal(SKETCH_V2_SCHEMA_VERSION),

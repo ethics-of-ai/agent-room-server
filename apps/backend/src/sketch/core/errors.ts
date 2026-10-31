@@ -19,7 +19,9 @@ export const SKETCH_ERROR_CODES = [
   "nothing_to_undo",
   "nothing_to_redo",
   "invalid_document",
-  "newer_document_version"
+  "newer_document_version",
+  "unknown_piece",
+  "piece_blocked"
 ] as const;
 export type SketchErrorCode = (typeof SKETCH_ERROR_CODES)[number];
 
@@ -38,4 +40,8 @@ export interface SketchCoreError {
   // Set on newer_document_version.
   supportedVersion?: number;
   foundVersion?: number;
+}
+
+export function unknownObjectError(objectId: string): SketchCoreError {
+  return { code: "unknown_object", message: `Unknown object id "${objectId}"` };
 }

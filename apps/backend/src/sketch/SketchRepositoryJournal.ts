@@ -11,6 +11,7 @@ import {
   SKETCH_MAX_REVISION_LOG_ENTRIES,
   SKETCH_SCHEMA_VERSION,
   SKETCH_V2_SCHEMA_VERSION,
+  SKETCH_V3_SCHEMA_VERSION,
   type SketchDocument,
   type SketchRevisionLog,
   type SketchState
@@ -158,7 +159,7 @@ function normalizeStateParts(
 ): SketchState {
   const documentRecord = isRecord(document) ? document : undefined;
   const rawVersion = documentRecord?.schemaVersion;
-  const versions = typeof rawVersion === "number" ? [rawVersion] : [SKETCH_SCHEMA_VERSION, SKETCH_V2_SCHEMA_VERSION, SKETCH_LEGACY_SCHEMA_VERSION];
+  const versions = typeof rawVersion === "number" ? [rawVersion] : [SKETCH_SCHEMA_VERSION, SKETCH_V3_SCHEMA_VERSION, SKETCH_V2_SCHEMA_VERSION, SKETCH_LEGACY_SCHEMA_VERSION];
   for (const version of versions) {
     const sketchId = typeof documentRecord?.sketchId === "string" ? documentRecord.sketchId : "sketch-journal-migration";
     const candidateDocument = documentRecord ?? {

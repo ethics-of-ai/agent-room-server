@@ -3017,15 +3017,120 @@ writes version 3. A version-2 file that already carries a version-3 field is
 refused as `invalid_document`. Version-2 backends refuse version-3 files with
 `newer_document_version` and leave them unchanged.
 
+Schema version 4 adds a table and the `piece` kind. The table is the whole
+board: a square of `cells` by `cells` cells on the document's y = 0 plane,
+and every piece stands on it. A document may carry
+`table: { cellSize, cells }`. `cellSize` is 2 cm to 20 cm. `cells` is 1 to 40
+and at most round(0.8 / cellSize), so the board is never wider than about
+0.8 m. Without a table the board is 16 cells of 5 cm. Cell (c, r), with c and
+r from 0 to cells − 1, has its centre at x = (c + 0.5) × cellSize and
+z = (r + 0.5) × cellSize, and level l sits at y = l × cellSize. The file
+stores `cells` so a saved board keeps its size if the 0.8 m width changes.
+
+| Field | Meaning |
+| --- | --- |
+| `catalogId` | The catalog entry, matching `^[a-z0-9][a-z0-9.-]{0,63}$`. |
+| `cell` | Two integers, 0 to 39: the column the piece stands in, which must be on the table. |
+| `level` | 0 to 7, where the piece starts. The backend sets it. |
+| `rotation` | Quarter turns clockwise seen from above, 0 to 3. |
+| `color` | Optional `#RRGGBB` or `#RRGGBBAA`. |
+| `text` | Optional, 1 to 64 characters, only on a piece whose catalog entry carries text, today `block.label`. |
+
+Pieces have no `transform` and no `parentId`. The catalog holds
+`block.cube`, `block.ramp`, `block.cylinder`, `block.road`, `block.wall`,
+`block.label`, and two pipes, `block.pipe` and `block.pipe-angle`. Each pipe
+entry lists the edges it opens on, and whether it sets its run's direction;
+blocks open on none. [Pipe runs](#pipe-runs) says how pipes join. Cube and
+cylinder can carry another piece; the others cannot.
+Only the label carries text. A wall fills two levels, and every other piece fills one. Each column is a
+stack: levels start at 0 and follow on without gaps, only the top piece may
+be one nothing stacks on, and the stack ends by level 8. A piece off its
+table fails the read as `invalid_document`.
+
+A file can name a catalog id this backend does not know, as a newer build
+might write. The backend keeps that piece unchanged and counts it as one level
+that nothing stacks on, and keeps whatever text it stores, since a newer
+build may allow text there. It refuses to create a piece with an unknown id or
+to update one, and allows deleting one.
+
+#### Pipe runs
+
+Pipes join into runs. Runs are read from where pipes sit and how they are
+turned; the file stores nothing about them, and no edit is refused because of
+one. `apps/backend/src/sketch/core/pipeRuns.ts` reads them, and the visionOS
+client keeps a copy that `test/fixtures/sketchPipeRunCases.json` holds to the
+same answers.
+
+- **Edges.** At rotation 0 a piece's edges are `back` (-z, the way it faces),
+  `right` (+x), `front` (+z) and `left` (-x). Each quarter turn clockwise seen
+  from above moves an edge one place along back, right, front, left. From
+  cell (c, r), `back` faces (c, r - 1), `right` faces (c + 1, r), `front`
+  faces (c, r + 1) and `left` faces (c - 1, r).
+- **Ends.** A catalog entry's `ends` are the edges it opens on at rotation 0:
+  `front` and `back` for `block.pipe`, `front` and `right` for
+  `block.pipe-angle`. A straight pipe takes flow in at its first end and
+  sends it out at its second, so it flows the way it faces.
+- **Joints.** Two pipes join when they sit at the same level in neighbouring
+  cells and each has an end on their shared edge. Pipes never join across
+  levels.
+- **Terminals.** A pipe end facing a piece without ends that fills the pipe's
+  level ends the run at that piece. A wall counts on both of its levels, and
+  a piece with an unknown catalog id counts on its one. Any other end, such as
+  one at the board's edge or facing another pipe's side, is open.
+- **Flow.** Every pipe has two ends, so a run is a line or a loop. When every
+  straight pipe in a run points the same way along it, the run flows that
+  way, and its angle pipes follow. A run with no straight pipe has no flow.
+  Otherwise each pair of neighbouring straight pipes that point against each
+  other, angle pipes between them aside and a loop wrapping round, is a
+  conflict.
+
+Version 1 to 3 files read as version 4 in memory and are not rewritten. The
+first successful commit, undo, or redo writes version 4. Those versions kept
+a `piece` object as opaque data; one that does not match the version-4
+definition fails the read as `invalid_document` naming the object. A
+version-3 file that already carries `table` is refused as `invalid_document`.
+Version-3 backends refuse version-4 files with `newer_document_version`.
+
 ### Operations and limits
 
 A commit applies one all-or-nothing batch of caller operations: `create`,
-`update`, `transform`, `delete`, `clear`, `group`, and `ungroup`. Transforms are
-absolute. Deleting a group removes its whole subtree. `{ "op": "clear" }`
+`update`, `transform`, `delete`, `clear`, `group`, `ungroup`, and `setTable`.
+Transforms are absolute. Deleting a group removes its whole subtree. `{ "op": "clear" }`
 removes every object in one transaction, so a single undo restores them all.
 It returns `422 invalid_operation` on an empty sketch and
 `422 unsupported_object_kind` while any unknown-kind object is present, so it
 never discards content this backend cannot edit.
+
+Pieces follow gravity, so a caller names a column and never a level:
+
+- A piece `create` takes `catalogId`, `cell`, and optional `rotation` (0 by
+  default), `color` and `text`. The piece lands on top of the column. An
+  unknown catalog id returns `422 unknown_piece`. A column topped by a piece
+  nothing stacks on, or without room under level 8, returns
+  `422 piece_blocked` naming the reason. `text` on an entry that carries no
+  text returns `422 invalid_operation` naming the entries that do. A cell off
+  the table returns
+  `422 out_of_bounds` naming the table's width; a negative or larger-than-39
+  cell fails validation as `400 invalid_request`.
+- A piece `update` may change `cell`, `rotation`, `color` and `text`; `null`
+  clears a colour or the text. A new `cell` moves the piece to the top
+  of that column, and the pieces that stood on it drop to close the gap. An
+  update to a piece whose catalog id the backend does not know returns
+  `422 unknown_piece`.
+- A piece `delete` drops the pieces above it the same way.
+- `transform` and `group` refuse pieces with `422 invalid_operation`, and
+  text on a piece whose entry carries no text returns the same.
+- `{ "op": "setTable", "cellSize": 0.08 }` sets the cell size and gives the
+  board round(0.8 / cellSize) cells, here 10. `null` removes the table, which
+  reads as the 16-cell, 5 cm default. A size whose board would leave a piece
+  off it returns `422 out_of_bounds` naming that piece; nothing moves. Undo
+  puts back the exact earlier table, its stored `cells` included.
+
+One undo restores every level a move or delete changed. For the stale-base
+check below, a piece operation also reads the pieces in the column it lands
+in and writes every piece in the column it leaves. An update that keeps the
+piece's cell reads every piece in its column, and `setTable` touches every
+object.
 
 ```json
 {
@@ -3042,8 +3147,9 @@ never discards content this backend cannot edit.
 Core caps: 1,024 objects, 2,048 points per stroke, 16,384 points in total,
 8,192 pattern segments, 8,192 shape segments, 1,000 text characters, 280
 characters per extruded text box and 560 across them, 256 spans per text box, four
-nested group levels, and a 1-kilometer cube (±500 m) centered on the sketch
-origin. The object and coordinate caps rose from 128 and ±5 m on 2026-10-05;
+nested group levels, eight piece levels per column, cells from 0 to the
+table's width in cells less one (at most 39), a 2 cm to 20 cm cell size, and a 1-kilometer cube (±500 m) centered on
+the sketch origin. The object and coordinate caps rose from 128 and ±5 m on 2026-10-05;
 raising a cap keeps existing files valid. A batch
 holds at most 32 operations and 256 KiB; a larger batch is refused `413` before
 parsing. Semantic refusals (unknown object, duplicate id, cycle, bounds,
@@ -3162,12 +3268,19 @@ live turn's tool binding ([Runners](../engineering/RUNNERS.md#repository-sketch-
   revision, object count, last change, and who made it (`agent`, `person`, or
   `unknown`). An optional `filter` matches the title or path ignoring case.
 - `agentroom_sketch_inspect` returns the sketch id, revision, coordinate
-  convention, and one compact JSON line per object: id, kind, parent,
-  transform, world bounds, colors, and a text excerpt. Strokes report their
-  point count. `detail`, up to 64 object ids, adds those objects in full.
+  convention, the table's cell size (or the 5 cm default), and one compact
+  JSON line per object: id, kind, parent, transform, world bounds, colors,
+  and a text excerpt. Strokes report their point count. A piece reports its
+  catalog id, cell, level, rotation, colour and text instead of a transform
+  and bounds. `detail`, up to 64 object ids, adds those objects in full.
 - `agentroom_sketch_edit` commits `{ sketch, baseRevision, label, operations }`
-  as one transaction with up to 32 caller operations, under the same relaxed
-  revision rule as the routes. The actor is `{ kind: "agent", runnerId }` with
+  as one transaction with up to 32 caller operations, including the piece
+  operations and `setTable`, under the same relaxed revision rule as the
+  routes. Its description lists the catalog ids and gives the gravity rule,
+  the table bound and the `setTable` rule. The standing instruction lists each
+  catalog id with its levels and whether it carries pieces or text, and asks the agent
+  to create other kinds only when the person asks, since the person's editor
+  places pieces only. The actor is `{ kind: "agent", runnerId }` with
   the turn id. An overlap returns `stale_revision` with the current compact
   lines of the overlapping objects.
 

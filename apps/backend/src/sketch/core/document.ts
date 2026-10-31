@@ -7,7 +7,8 @@ import {
   SKETCH_MAX_DOCUMENT_BYTES,
   SKETCH_MAX_STATE_BYTES,
   SKETCH_SCHEMA_VERSION,
-  SKETCH_V2_SCHEMA_VERSION
+  SKETCH_V2_SCHEMA_VERSION,
+  SKETCH_V3_SCHEMA_VERSION
 } from "./limits";
 import {
   sketchDocumentSchema,
@@ -30,6 +31,8 @@ import {
   sketchObjectV2Schema,
   sketchStateV2Schema
 } from "./schemasV2";
+import { sketchDocumentV3Schema, sketchStateV3Schema } from "./schemasV3";
+import { sketchPieceObjectSchema } from "./pieceSchemas";
 import { checkSketchObjects } from "./invariants";
 import { defaultTextParagraphs } from "./textBoxFormat";
 
@@ -77,12 +80,25 @@ function canonicalDocument(document: SketchDocument): SketchDocument {
     kind: document.kind,
     sketchId: document.sketchId,
     revision: document.revision,
+    ...(document.table === undefined ? {} : { table: { cellSize: document.table.cellSize, cells: document.table.cells } }),
     objects: document.objects.map(canonicalObject)
   };
 }
 
 function canonicalObject(object: SketchDocument["objects"][number]): SketchDocument["objects"][number] {
   const known = object as KnownSketchObject;
+  if (known.kind === "piece") {
+    return {
+      id: known.id,
+      kind: known.kind,
+      catalogId: known.catalogId,
+      cell: [known.cell[0], known.cell[1]],
+      level: known.level,
+      rotation: known.rotation,
+      ...(known.color === undefined ? {} : { color: known.color }),
+      ...(known.text === undefined ? {} : { text: known.text })
+    };
+  }
   if (known.kind === "stroke" || known.kind === "box" || known.kind === "text" || known.kind === "planarShape" || known.kind === "textBox" || known.kind === "group") {
     const parentId = (object as { parentId?: string }).parentId;
     const color = (object as { color?: string }).color;
@@ -219,7 +235,7 @@ export function parseSketchDocument(serialized: string): SketchParseResult<Sketc
   if (!parsed.success) {
     return { ok: false, error: invalidDocumentError(parsed.error) };
   }
-  const invariant = checkSketchObjects(parsed.data.objects);
+  const invariant = checkSketchObjects(parsed.data.objects, parsed.data.table);
   if (invariant !== null) {
     return {
       ok: false,
@@ -268,7 +284,7 @@ export function parseSketchState(serialized: string): SketchParseResult<SketchSt
       }
     };
   }
-  const invariant = checkSketchObjects(state.document.objects);
+  const invariant = checkSketchObjects(state.document.objects, state.document.table);
   if (invariant !== null) {
     return { ok: false, error: { code: "invalid_document", message: invariant.message } };
   }
@@ -276,8 +292,7 @@ export function parseSketchState(serialized: string): SketchParseResult<SketchSt
 }
 
 // Older versions upgrade one step at a time, each validated strictly as its
-// own version first: version 1 to version 2, then version 2 to the current
-// version. Upgrades happen in memory; only a later successful edit writes
+// own version first: version 1 to 2, 2 to 3, then 3 to the current version. Upgrades happen in memory; only a later successful edit writes
 // the current version.
 function schemaVersionOf(value: unknown): unknown {
   return isRecord(value) ? value.schemaVersion : undefined;
@@ -298,10 +313,18 @@ const V1_TO_V2: UpgradeStep = {
   operation: upgradeV1Operation
 };
 
-const V2_TO_CURRENT: UpgradeStep = {
-  toVersion: SKETCH_SCHEMA_VERSION,
+const V2_TO_V3: UpgradeStep = {
+  toVersion: SKETCH_V3_SCHEMA_VERSION,
   object: upgradeV2Object,
   operation: upgradeV2Operation
+};
+
+// Version 4 only adds the table and pieces, so a version-3 file needs no
+// change beyond its version number.
+const V3_TO_CURRENT: UpgradeStep = {
+  toVersion: SKETCH_SCHEMA_VERSION,
+  object: (object) => object,
+  operation: (operation) => operation
 };
 
 interface StoredDocument {
@@ -325,18 +348,21 @@ type VersionSchema<T> = {
 interface UpgradableForm<T> {
   v1: VersionSchema<T>;
   v2: VersionSchema<T>;
+  v3: VersionSchema<T>;
   apply: (value: T, step: UpgradeStep) => unknown;
 }
 
 const DOCUMENT_FORM: UpgradableForm<StoredDocument> = {
   v1: sketchDocumentV1Schema,
   v2: sketchDocumentV2Schema,
+  v3: sketchDocumentV3Schema,
   apply: upgradeDocumentStep
 };
 
 const STATE_FORM: UpgradableForm<StoredState> = {
   v1: sketchStateV1Schema,
   v2: sketchStateV2Schema,
+  v3: sketchStateV3Schema,
   apply: upgradeStateStep
 };
 
@@ -356,9 +382,34 @@ function upgradeStored<T>(value: unknown, form: UpgradableForm<T>): SketchParseR
     if (!v2.success) {
       return { ok: false, error: (fromV1 ? reclaimedKindError(current) : null) ?? invalidDocumentError(v2.error) };
     }
-    current = form.apply(v2.data, V2_TO_CURRENT);
+    current = form.apply(v2.data, V2_TO_V3);
+  }
+  if (schemaVersionOf(current) === SKETCH_V3_SCHEMA_VERSION) {
+    const v3 = form.v3.safeParse(current);
+    if (!v3.success) {
+      return { ok: false, error: invalidDocumentError(v3.error) };
+    }
+    const piece = reclaimedPieceObject(v3.data);
+    if (piece !== undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "invalid_document",
+          message: `Object "${String(piece.id)}" uses kind "piece", which version 4 defines, and it does not ` +
+            "match that definition; the file was left unchanged"
+        }
+      };
+    }
+    current = form.apply(v3.data, V3_TO_CURRENT);
   }
   return { ok: true, value: current };
+}
+
+// Versions 1 to 3 kept a `piece` object as opaque data. Version 4 defines the
+// kind, so such an object must now match it, or the read fails and names it.
+function reclaimedPieceObject(upgraded: unknown): Record<string, unknown> | undefined {
+  return storedObjects(upgraded).find((object) =>
+    object.kind === "piece" && !sketchPieceObjectSchema.safeParse(object).success);
 }
 
 function upgradeStateStep(state: StoredState, step: UpgradeStep): unknown {
@@ -446,6 +497,17 @@ function reclaimedKindError(upgraded: unknown): SketchCoreError | null {
 }
 
 function reclaimedKindObjects(upgraded: unknown): Record<string, unknown>[] {
+  return storedObjects(upgraded).filter((object) =>
+    typeof object.kind === "string" &&
+    (SKETCH_KNOWN_OBJECT_KINDS as readonly string[]).includes(object.kind) &&
+    !SKETCH_LEGACY_KNOWN_OBJECT_KINDS.includes(object.kind) &&
+    object.kind !== "piece" &&
+    !sketchObjectV2Schema.safeParse(object).success);
+}
+
+// Every stored object a document or state holds: the document's own and those
+// inside history `restore` operations.
+function storedObjects(upgraded: unknown): Record<string, unknown>[] {
   if (!isRecord(upgraded)) return [];
   const document = isRecord(upgraded.document) ? upgraded.document : upgraded;
   const candidates: unknown[] = Array.isArray(document.objects) ? [...document.objects] : [];
@@ -462,12 +524,7 @@ function reclaimedKindObjects(upgraded: unknown): Record<string, unknown>[] {
       }
     }
   }
-  return candidates.filter((object): object is Record<string, unknown> =>
-    isRecord(object) &&
-    typeof object.kind === "string" &&
-    (SKETCH_KNOWN_OBJECT_KINDS as readonly string[]).includes(object.kind) &&
-    !SKETCH_LEGACY_KNOWN_OBJECT_KINDS.includes(object.kind) &&
-    !sketchObjectV2Schema.safeParse(object).success);
+  return candidates.filter(isRecord);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

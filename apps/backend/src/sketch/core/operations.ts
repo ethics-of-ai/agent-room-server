@@ -13,9 +13,10 @@ import {
   type SketchObject,
   type SketchOperation
 } from "./schemas";
-import type { SketchCoreError } from "./errors";
+import { unknownObjectError, type SketchCoreError } from "./errors";
 import { checkSketchObjects, type SketchInvariantKind } from "./invariants";
 import { applyPlanarCreate, applyPlanarUpdate } from "./planarObjectOperations";
+import { applyPieceCreate, applyPieceDelete, applyPieceUpdate, applyRestoreTable, applySetPieces, applySetTable } from "./pieceOperations";
 import { addOperationFootprint, emptySketchFootprint, type SketchFootprint } from "./footprint";
 
 // Operation application: mutate a working document with one operation,
@@ -56,7 +57,7 @@ export function applyOperations(
     // operation's inverse (for example, detach members before removing a group).
     inverses.unshift(...applied.inverse);
 
-    const invariant = checkSketchObjects(document.objects);
+    const invariant = checkSketchObjects(document.objects, document.table);
     if (invariant !== null) {
       return {
         ok: false,
@@ -95,6 +96,10 @@ function invariantError(kind: SketchInvariantKind, message: string): SketchCoreE
       return { code: "invalid_operation", message };
     case "world_bounds":
       return { code: "out_of_bounds", message };
+    case "piece_stack":
+      return { code: "invalid_operation", message };
+    case "table_bounds":
+      return { code: "out_of_bounds", message };
     case "parent_reference":
       return { code: "invalid_operation", message };
   }
@@ -126,6 +131,12 @@ function applyOperation(document: SketchDocument, operation: SketchOperation): O
       return applyRemove(document, operation);
     case "setParents":
       return applySetParents(document, operation);
+    case "setTable":
+      return applySetTable(document, operation);
+    case "setPieces":
+      return applySetPieces(document, operation);
+    case "restoreTable":
+      return applyRestoreTable(document, operation);
   }
 }
 
@@ -133,8 +144,12 @@ function findObject(document: SketchDocument, objectId: string) {
   return document.objects.find((object) => object.id === objectId);
 }
 
-function unknownObjectError(objectId: string): SketchCoreError {
-  return { code: "unknown_object", message: `Unknown object id "${objectId}"` };
+// Pieces have no transform or parent: their place is the table grid.
+function pieceGridError(objectId: string): SketchCoreError {
+  return {
+    code: "invalid_operation",
+    message: `Piece "${objectId}" sits on the table grid; move it by updating its cell`
+  };
 }
 
 function duplicateIdError(objectId: string): SketchCoreError {
@@ -185,6 +200,9 @@ function applyCreate(
 ): OperationOutcome {
   if (findObject(document, operation.objectId) !== undefined) {
     return { ok: false, error: duplicateIdError(operation.objectId) };
+  }
+  if (operation.kind === "piece") {
+    return applyPieceCreate(document, operation);
   }
   const base = {
     id: operation.objectId,
@@ -281,6 +299,9 @@ function applyUpdate(
     (object.kind === "planarShape" || object.kind === "textBox")) {
     return applyPlanarUpdate(object, operation);
   }
+  if (operation.kind === "piece" && object.kind === "piece") {
+    return applyPieceUpdate(document, object, operation);
+  }
   const previous: { text?: string; color?: string | null } = {};
   if (operation.kind === "text" && object.kind === "text") {
     if (operation.text !== undefined) {
@@ -314,6 +335,9 @@ function applyTransform(
   if ("error" in found) {
     return { ok: false, error: found.error };
   }
+  if (found.object.kind === "piece") {
+    return { ok: false, error: pieceGridError(operation.objectId) };
+  }
   const previous = structuredClone(resolveSketchTransform(found.object.transform));
   found.object.transform = structuredClone(operation.transform);
   return {
@@ -329,6 +353,9 @@ function applyDelete(
   const found = requireKnownKind(document, operation.objectId);
   if ("error" in found) {
     return { ok: false, error: found.error };
+  }
+  if (found.object.kind === "piece") {
+    return applyPieceDelete(document, found.object);
   }
   const index = indexSketchObjects(document.objects);
   const removed = subtreeOf(operation.objectId, index).map((object) => structuredClone(object));
@@ -380,6 +407,9 @@ function applyGroup(
     const member = index.byId.get(memberId);
     if (member === undefined) {
       return { ok: false, error: unknownObjectError(memberId) };
+    }
+    if (member.kind === "piece") {
+      return { ok: false, error: pieceGridError(memberId) };
     }
     const parent = readParentId(member);
     inverseAssignments.push({ objectId: memberId, parentId: parent === undefined ? null : parent });

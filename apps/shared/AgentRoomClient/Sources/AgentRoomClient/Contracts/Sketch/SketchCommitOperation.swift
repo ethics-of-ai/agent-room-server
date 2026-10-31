@@ -12,6 +12,8 @@ public enum SketchCommitOperation: Encodable, Hashable {
     case clear
     case group(groupId: String, memberIds: [String], parentId: String?)
     case ungroup(groupId: String)
+    /// Sets the table's cell size in metres; nil removes the table.
+    case setTable(cellSize: Double?)
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -33,6 +35,9 @@ public enum SketchCommitOperation: Encodable, Hashable {
             try container.encodeIfPresent(creation.text, forKey: .text)
             try container.encodeIfPresent(creation.color, forKey: .color)
             try container.encodeIfPresent(creation.transform, forKey: .transform)
+            try container.encodeIfPresent(creation.catalogId, forKey: .catalogId)
+            try container.encodeIfPresent(creation.cell, forKey: .cell)
+            try container.encodeIfPresent(creation.rotation, forKey: .rotation)
         case let .update(update):
             try container.encode("update", forKey: .op)
             try container.encodeIfPresent(update.objectId, forKey: .objectId)
@@ -49,6 +54,8 @@ public enum SketchCommitOperation: Encodable, Hashable {
             try container.encodeIfPresent(update.size, forKey: .size)
             try container.encodeIfPresent(update.text, forKey: .text)
             try container.encodeIfPresent(update.color, forKey: .color)
+            try container.encodeIfPresent(update.cell, forKey: .cell)
+            try container.encodeIfPresent(update.rotation, forKey: .rotation)
         case let .setTransform(objectId, transform):
             try container.encode("transform", forKey: .op)
             try container.encode(objectId, forKey: .objectId)
@@ -66,6 +73,9 @@ public enum SketchCommitOperation: Encodable, Hashable {
         case let .ungroup(groupId):
             try container.encode("ungroup", forKey: .op)
             try container.encode(groupId, forKey: .groupId)
+        case let .setTable(cellSize):
+            try container.encode("setTable", forKey: .op)
+            try container.encode(cellSize, forKey: .cellSize)
         }
     }
 
@@ -89,5 +99,9 @@ public enum SketchCommitOperation: Encodable, Hashable {
         case groupId
         case memberIds
         case parentId
+        case catalogId
+        case cell
+        case rotation
+        case cellSize
     }
 }

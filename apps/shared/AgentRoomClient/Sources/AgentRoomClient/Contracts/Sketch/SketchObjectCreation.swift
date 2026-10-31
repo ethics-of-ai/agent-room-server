@@ -5,8 +5,8 @@ import Foundation
 /// backend's strict schema accepts.
 public struct SketchObjectCreation: Codable, Hashable {
     public var objectId: String
-    /// `stroke`, `box`, `text`, `planarShape`, or `textBox` — groups are created
-    /// by the `group` operation, not by `create`.
+    /// `stroke`, `box`, `text`, `planarShape`, `textBox`, or `piece` — groups
+    /// are created by the `group` operation, not by `create`.
     public var kind: String
     public var points: [[Double]]?
     public var width: Double?
@@ -27,6 +27,11 @@ public struct SketchObjectCreation: Codable, Hashable {
     public var rendering: SketchTextRendering?
     public var extrusionDepth: Double?
     public var transform: SketchTransform?
+    /// A piece names its catalog entry and `[column, row]` cell, never a
+    /// level: the backend lands it on top of that column.
+    public var catalogId: String?
+    public var cell: [Int]?
+    public var rotation: Int?
 
     public init(
         objectId: String,
@@ -48,7 +53,10 @@ public struct SketchObjectCreation: Codable, Hashable {
         spans: [SketchTextSpan]? = nil,
         rendering: SketchTextRendering? = nil,
         extrusionDepth: Double? = nil,
-        transform: SketchTransform? = nil
+        transform: SketchTransform? = nil,
+        catalogId: String? = nil,
+        cell: [Int]? = nil,
+        rotation: Int? = nil
     ) {
         self.objectId = objectId
         self.kind = kind
@@ -70,5 +78,8 @@ public struct SketchObjectCreation: Codable, Hashable {
         self.rendering = rendering
         self.extrusionDepth = extrusionDepth
         self.transform = transform
+        self.catalogId = catalogId
+        self.cell = cell
+        self.rotation = rotation
     }
 }
