@@ -89,7 +89,8 @@ describe("child thread create", () => {
     await expect(git(worktreePath, "rev-parse", "HEAD")).resolves.toBe(`${base}\n`);
 
     // The first turn opens with a system message carrying the task, rules 2 and 8.
-    await waitForSession(app, session.id, "idle");
+    // That system-origin turn leaves the task's title alone.
+    await expect(waitForSession(app, session.id, "idle")).resolves.toMatchObject({ title: "Add a --json flag" });
     const messages = (await app.inject({ method: "GET", url: `/api/agent-sessions/${session.id}/messages` })).json().messages;
     expect(messages[0]).toMatchObject({ role: "system", status: "sent", origin: "parent_task" });
     expect(messages[0].content).toContain("Add a `--json` flag to the status command.");

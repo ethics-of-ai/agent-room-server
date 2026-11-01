@@ -2481,6 +2481,24 @@ first. A closed child deletes as any session does. An unknown session is
 }
 ```
 
+`title` is optional and at most 120 characters (UTF-16 code units), or the
+route answers `400`. A session created without one takes its title from the
+first turn a person sends: the first line of that message with real text,
+skipping blank lines and lines that only open or close a code fence. Leading
+Markdown heading (`# `) and quote (`> `) markers are stripped and runs of
+whitespace collapse to one space. A line over 120 code points is cut at its
+last space within the limit, or at 120 when it has none, with no ellipsis. A
+space right at code point 121 counts, so a word that ends exactly at the limit
+stays whole. A
+message with no such line leaves the session untitled until a later person
+turn. A turn the backend starts, such as a child's opening task or a
+background-task wake, never sets the title, and a refused turn sets nothing.
+Once set, the title doesn't change, and no route renames a session. The
+backend sets it before `agent_turn_started`, so the next session read carries
+it, with no event of its own. It never enters the audit log, because the only
+audited event that carries the session is `agent_session_created`, which comes
+before the first turn.
+
 `runnerKind` accepts `codex`, `claude_code`, `deepseek`, or `cursor` — plus the
 id of any configured ACP adapter — and defaults to the backend's configured
 `RUNNER_KIND`. A session pins its runner kind at creation; for

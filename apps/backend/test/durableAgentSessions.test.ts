@@ -106,6 +106,28 @@ describe("durable agent sessions", () => {
     await second.app.close();
   });
 
+  it("keeps a title filled from the first turn across a restart", async () => {
+    const serviceConfig = await config();
+    const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
+    const first = await buildServer({ config: serviceConfig, runners: { claude_code: nativeSessionRunner("native-thread-title") } });
+    const registered = await first.app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+    const created = await first.app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: { workspaceId: registered.json().workspace.id, runnerKind: "claude_code" }
+    });
+    const sessionId = created.json().session.id;
+    await first.app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "Plan the migration\nwith details" } });
+    await waitForSession(first.app, sessionId, "idle");
+    await first.app.close();
+
+    const second = await buildServer({ config: serviceConfig, runners: { claude_code: nativeSessionRunner("native-thread-title") } });
+    const detail = await second.app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}` });
+    expect(detail.json().session.title).toBe("Plan the migration");
+
+    await second.app.close();
+  });
+
   it("persists the tool names a native conversation registered beside the session and seeds them back", async () => {
     const serviceConfig = await config();
     const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));

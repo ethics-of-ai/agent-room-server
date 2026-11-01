@@ -237,6 +237,53 @@ describe("agent sessions", () => {
     await app.close();
   });
 
+  it("titles an untitled thread from its first person turn and keeps that title", async () => {
+    const { app, created } = await serverWithThread();
+    const sessionId = created.json().session.id;
+    expect(created.json().session.title).toBeUndefined();
+
+    await app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "# Fix the login loop\nIt redirects forever." } });
+    await expect(waitForSession(app, sessionId, "idle")).resolves.toMatchObject({ title: "Fix the login loop" });
+    await app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "Now add a test" } });
+    await expect(waitForSession(app, sessionId, "idle")).resolves.toMatchObject({ title: "Fix the login loop" });
+
+    await app.close();
+  });
+
+  it("keeps a title given at creation over the first turn's line", async () => {
+    const { app, created } = await serverWithThread({ title: "Chosen title" });
+    const sessionId = created.json().session.id;
+
+    await app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "Something else entirely" } });
+    await expect(waitForSession(app, sessionId, "idle")).resolves.toMatchObject({ title: "Chosen title" });
+
+    await app.close();
+  });
+
+  it("refuses a creation title over the thread title cap", async () => {
+    const { app, workspaceId, created } = await serverWithThread({ title: "x".repeat(121) });
+    const atCap = await app.inject({ method: "POST", url: "/api/agent-sessions", payload: { workspaceId, title: "x".repeat(120) } });
+
+    expect(created.statusCode).toBe(400);
+    expect(atCap.statusCode).toBe(201);
+
+    await app.close();
+  });
+
+  it("leaves a thread untitled when its first turn is refused", async () => {
+    const { app, workspaceId, created } = await serverWithThread();
+    const sessionId = created.json().session.id;
+    await app.inject({ method: "DELETE", url: `/api/workspaces/${workspaceId}` });
+
+    const turn = await app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "never runs" } });
+    const detail = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}` });
+
+    expect(turn.statusCode).toBe(404);
+    expect(detail.json().session.title).toBeUndefined();
+
+    await app.close();
+  });
+
   it("records the current branch on new sessions and runs turns on the machine's branch", async () => {
     const serviceConfig = await config();
     const selectedDirectory = await createGitWorkspace();
@@ -270,3 +317,13 @@ describe("agent sessions", () => {
     await app.close();
   });
 });
+
+/** A fresh server with one registered plain-folder workspace and a thread created in it with `payload`. */
+async function serverWithThread(payload: Record<string, unknown> = {}) {
+  const { app } = await buildServer({ config: await config() });
+  const selectedDirectory = await mkdtemp(join(tmpdir(), "agentroom-agent-workspace-"));
+  const registered = await app.inject({ method: "POST", url: "/api/workspaces", payload: { path: selectedDirectory } });
+  const workspaceId: string = registered.json().workspace.id;
+  const created = await app.inject({ method: "POST", url: "/api/agent-sessions", payload: { workspaceId, ...payload } });
+  return { app, workspaceId, created };
+}

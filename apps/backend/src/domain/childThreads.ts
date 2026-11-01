@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { THREAD_TITLE_MAX_CHARACTERS } from "./threadTitles";
 
 /**
  * What a `managed_worktree` workspace records about the linked worktree it
@@ -30,8 +31,8 @@ export const CHILD_THREAD_LIMITS = {
   openPerParent: 4,
   /** Open children across the backend. */
   openTotal: 8,
-  /** A child's title, in characters. */
-  title: 120,
+  /** A child's title, in UTF-16 code units: the thread title cap. */
+  title: THREAD_TITLE_MAX_CHARACTERS,
   /** A child's task, in UTF-8 bytes. */
   taskBytes: 16 * 1024,
   /** The last message a summary carries, in characters. */

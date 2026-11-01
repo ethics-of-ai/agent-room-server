@@ -14,6 +14,7 @@ import type {
   StatusSnapshot
 } from "../domain/models";
 import { DURABLE_AGENT_SESSION_SCHEMA_VERSION } from "../domain/schemas";
+import { fillThreadTitle } from "../domain/threadTitles";
 import type { ArtifactSnapshot, ArtifactStore } from "../artifact/ArtifactStore";
 import type { EventBus } from "../events/EventBus";
 import { logger } from "../logging/logger";
@@ -350,9 +351,8 @@ export class AgentSessionService {
     // itself delivered after all request validation has passed. A rejected turn
     // never reaches the runner and must leave that addition available to retry.
     runnerInput.acknowledgePromptContext?.();
-    if (hasSettings(input.settings)) {
-      session.settings = input.settings;
-    }
+    if (hasSettings(input.settings)) session.settings = input.settings;
+    if (!input.origin) fillThreadTitle(session, input.message);
     if (branch) session.gitBranch = branch;
 
     const turn = this.openTurn(session, {

@@ -16,6 +16,7 @@ import { ChildThreadError } from "../children/ChildThreadError";
 import { sendRefusal } from "./refusals";
 import type { ChildThreadService } from "../children/ChildThreadService";
 import { BACKGROUND_TASK_LIMITS } from "../domain/backgroundWork";
+import { THREAD_TITLE_MAX_CHARACTERS } from "../domain/threadTitles";
 import { agentRunnerKindSchema, agentTurnContextSchema, codingAgentTurnSettingsSchema } from "../domain/schemas";
 import type { ServiceConfig } from "../domain/models";
 import { PLAN_SNAPSHOT_SCHEMA_VERSION } from "../plans/planTools";
@@ -26,7 +27,7 @@ const createSessionPayloadSchema = z.object({
   runnerKind: agentRunnerKindSchema.optional(),
   gitBranch: z.string().trim().min(1).max(240).optional(),
   settings: codingAgentTurnSettingsSchema.optional(),
-  title: z.string().trim().min(1).optional()
+  title: z.string().trim().min(1).max(THREAD_TITLE_MAX_CHARACTERS).optional()
 });
 
 const sessionParamsSchema = z.object({
