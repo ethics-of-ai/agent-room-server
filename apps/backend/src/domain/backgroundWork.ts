@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { childReportTriggerSchema, parentTaskTriggerSchema } from "./childThreads";
 
 /** Bounds a runner reports background work within, and the contract checks. */
 export const BACKGROUND_TASK_LIMITS = {
@@ -37,15 +38,25 @@ export const agentFinishedBackgroundTaskSchema = z.object({
   summary: z.string().max(500).optional()
 });
 
-/**
- * Why a turn without a user message started: the agent answered background
- * work that finished. Absent on every turn a person started.
- */
-export const agentTurnTriggerSchema = z.object({
+/** A turn the agent started to answer background work that finished. */
+export const agentBackgroundTaskTriggerSchema = z.object({
   kind: z.literal("background_task"),
   tasks: z.array(agentFinishedBackgroundTaskSchema).max(BACKGROUND_TASK_LIMITS.finishedPerTurn)
 });
 
+/**
+ * Why a turn without a person's message started: background work finished, a
+ * parent tasked its child, or children reported to their parent. Absent on
+ * every turn a person started. Every kind carries `tasks`, empty outside
+ * `background_task`.
+ */
+export const agentTurnTriggerSchema = z.discriminatedUnion("kind", [
+  agentBackgroundTaskTriggerSchema,
+  parentTaskTriggerSchema,
+  childReportTriggerSchema
+]);
+
 export type AgentBackgroundTask = z.infer<typeof agentBackgroundTaskSchema>;
 export type AgentFinishedBackgroundTask = z.infer<typeof agentFinishedBackgroundTaskSchema>;
 export type AgentTurnTrigger = z.infer<typeof agentTurnTriggerSchema>;
+export type AgentBackgroundTaskTrigger = z.infer<typeof agentBackgroundTaskTriggerSchema>;

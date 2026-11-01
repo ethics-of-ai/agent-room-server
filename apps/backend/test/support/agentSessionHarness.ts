@@ -50,13 +50,22 @@ export async function waitForSession(app: { inject: (input: { method: string; ur
   return waitForSessionWhere(app, id, (session) => session?.status === status, `session ${id} to become ${status}`);
 }
 
+/**
+ * Polls the session every 50 ms. Without `timeoutMs` it gives up after 50
+ * polls, about 2.5 s on an idle machine. A wait behind several scripted runner
+ * steps passes `timeoutMs` instead, so CPU load that stretches those steps
+ * cannot fail it while the condition is still on its way.
+ */
 export async function waitForSessionWhere(
   app: { inject: (input: { method: string; url: string }) => Promise<{ json: () => any }> },
   id: string,
   predicate: (session: any) => boolean,
-  description: string
+  description: string,
+  timeoutMs?: number
 ): Promise<any> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+  const keepPolling = (attempt: number) => (deadline === undefined ? attempt < 50 : Date.now() < deadline);
+  for (let attempt = 0; keepPolling(attempt); attempt += 1) {
     const response = await app.inject({ method: "GET", url: `/api/agent-sessions/${id}` });
     const session = response.json().session;
     if (predicate(session)) return session;

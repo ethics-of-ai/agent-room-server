@@ -7,6 +7,10 @@ public struct AgentSessionMessage: Codable, Hashable, Identifiable {
     public var role: String
     public var content: String
     public var context: AgentSessionMessageContext?
+    /// What opened the turn when the backend wrote this message with role
+    /// `system`: `parent_task`, `parent_message` or `child_report`. Absent on
+    /// every other message and from an older backend.
+    public var origin: String?
     public var status: String
     public var at: String
 
@@ -17,6 +21,7 @@ public struct AgentSessionMessage: Codable, Hashable, Identifiable {
         role: String,
         content: String,
         context: AgentSessionMessageContext?,
+        origin: String? = nil,
         status: String,
         at: String
     ) {
@@ -26,6 +31,7 @@ public struct AgentSessionMessage: Codable, Hashable, Identifiable {
         self.role = role
         self.content = content
         self.context = context
+        self.origin = origin
         self.status = status
         self.at = at
     }

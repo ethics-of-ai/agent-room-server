@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, readFile, realpath } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { LocalWorkspaceWorktree } from "../src/domain/childThreads";
 import type { ServiceConfig } from "../src/domain/models";
+import { registerWorkspacePayloadSchema } from "../src/domain/workspaceSchemas";
 import { defaultGitExecutor, type GitCommandExecutor } from "../src/workspace/git/execution";
 import { LocalWorkspaceRegistry } from "../src/workspace/LocalWorkspaceRegistry";
 
@@ -115,5 +117,58 @@ describe("registry writes during a slow git refresh", () => {
     await expect(refresh).rejects.toMatchObject({ statusCode: 404 });
     await expect(registry.listWithoutGitRefresh()).resolves.toEqual([]);
     await expect(storedIds(serviceConfig)).resolves.toEqual([]);
+  });
+});
+
+describe("managed worktree registration", () => {
+  const worktreeFor = (path: string): LocalWorkspaceWorktree => ({
+    parentWorkspaceId: "workspace-parent",
+    worktreePath: path,
+    branch: "agentroom/fix-abcdef12",
+    baseCommit: "a".repeat(40)
+  });
+
+  it("keeps the kind and worktree record when a client re-registers the path", async () => {
+    const serviceConfig = await config();
+    const registry = new LocalWorkspaceRegistry(serviceConfig);
+    const path = await realpath(await mkdtemp(join(tmpdir(), "agentroom-registry-worktree-")));
+    const worktree = worktreeFor(path);
+    const { workspace: registered } = await registry.register({ path, worktree });
+    expect(registered).toMatchObject({ kind: "managed_worktree", worktree });
+
+    // What the public route passes for a client that names a kind, and for one that does not.
+    const { workspace: renamed, created } = await registry.register({ path, name: "Renamed", kind: "user_selected" });
+    await registry.register({ path });
+
+    expect(created).toBe(false);
+    expect(renamed).toMatchObject({ id: registered.id, name: "Renamed", kind: "managed_worktree", worktree });
+    const reloaded = await new LocalWorkspaceRegistry(serviceConfig).findByIdWithoutGitRefresh(registered.id);
+    expect(reloaded).toMatchObject({ kind: "managed_worktree", worktree });
+  });
+
+  it("refuses the kind without a worktree record, and the public payload refuses it outright", async () => {
+    const registry = new LocalWorkspaceRegistry(await config());
+    const path = await mkdtemp(join(tmpdir(), "agentroom-registry-worktree-"));
+
+    await expect(registry.register({ path, kind: "managed_worktree" })).rejects.toMatchObject({ statusCode: 400 });
+    await expect(registry.listWithoutGitRefresh()).resolves.toEqual([]);
+    expect(registerWorkspacePayloadSchema.safeParse({ path, kind: "managed_worktree" }).success).toBe(false);
+    expect(registerWorkspacePayloadSchema.safeParse({ path, worktree: worktreeFor(path) }).data).toEqual({ path });
+  });
+});
+
+describe("an unreadable registry file", () => {
+  it("is moved aside instead of being overwritten by the next save", async () => {
+    const serviceConfig = await config();
+    await mkdir(serviceConfig.stateDir, { recursive: true });
+    // A newer build's record kind this build does not know.
+    const written = JSON.stringify({ workspaces: [{ id: "w1", kind: "future_kind" }] });
+    await writeFile(join(serviceConfig.stateDir, "workspaces.json"), written);
+    const registry = new LocalWorkspaceRegistry(serviceConfig);
+
+    expect(await registry.listWithoutGitRefresh()).toEqual([]);
+    const aside = (await readdir(serviceConfig.stateDir)).filter((name) => name.startsWith("workspaces.json.unreadable-"));
+    expect(aside).toHaveLength(1);
+    await expect(readFile(join(serviceConfig.stateDir, aside[0]!), "utf8")).resolves.toBe(written);
   });
 });

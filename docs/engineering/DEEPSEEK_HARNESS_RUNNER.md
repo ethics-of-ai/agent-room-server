@@ -194,10 +194,15 @@ replays it with a scripted model route
   turn owns is that turn, and the runner offers it to the service with the
   tasks that ended since a turn last took them. A notice that arrives during
   any turn, a person's or the agent's, is folded into it, so every turn takes
-  the held tasks when it settles. The runner drops a refused turn's events
-  through its `turn/end` and the idle status after it, or until the next root
-  `turn/start`. A person's turn that opens while a refused turn runs gets only
-  its own events and does not end on the refused turn's `turn/end`.
+  the held tasks when it settles. The service refuses the offer while a turn
+  it accepted holds the session. It reads that turn's stream only after the
+  settle-time Git baseline, so the runtime can start, and even finish, its
+  own turn in that gap. The runner keeps that refused turn's notifications,
+  up to 2,000, and replays them into the accepted turn when its stream
+  attaches. Otherwise the runner drops a refused turn's events through its
+  `turn/end` and the idle status after it, or until the next root
+  `turn/start`. A person's turn sent after the refusal gets only its own
+  events and does not end on the refused turn's `turn/end`.
 - **What a turn names.** Only endings the runtime reports to the session's own
   agent are held: its own background jobs and the subagents it started. A job
   the model killed with `job_kill` is left out, because that call's result
@@ -223,11 +228,14 @@ replays it with a scripted model route
 - **Lifetime.** Jobs and subagents live in the runtime process. The list
   empties when the child exits, and a cancelled turn kills the child.
 - **Known gap.** The wire does not say which prompt a protocol turn answers.
-  If a person's turn starts in the instant between a job settling and the
-  runtime's own `turn/start` reaching the backend, that runtime turn's events
-  land in the person's turn and the person's reply opens as an agent-started
-  turn. Nothing is lost, but the labels swap. Telling them apart would mean
-  modelling the runtime inbox's claims.
+  If AgentRoom accepts a turn, a person's or a child-report wake, in the
+  instant around a job settling, the runtime's own turn for that job lands in
+  the accepted turn, whether its `turn/start` arrives before or after the
+  accepted turn's stream attaches. The reply to the accepted turn's prompt
+  then opens as an agent-started turn. The labels swap. Nothing is lost
+  unless the runtime's turn passes 2,000 notifications before the stream
+  attaches, when the runner drops it as it drops any refused turn. Telling
+  the turns apart would mean modelling the runtime inbox's claims.
 
 ## Composition is the sandbox
 
@@ -375,7 +383,13 @@ tool-free provider check. A manual probe of the managed graph saw the tools
 `bash`, `edit`, `read`, and `write`; `bash` ran in the workspace although the
 child's cwd was the pinned home; and a write to `$HOME` failed with
 `Operation not permitted` under workspace-write. The same graph booted from a
-fresh `npm install` of `@deepseek-ai/dsh@0.2.1-alpha.4`.
+fresh `npm install` of `@deepseek-ai/dsh@0.2.1-alpha.4`. On 2026-11-01 the
+same managed graph, with the scripted model route from
+`deepseekBackgroundWork.integration.test.ts` driving `bash`, committed in a
+scratch checkout but not in a linked worktree of it, where `git commit`
+failed with `Operation not permitted` on
+`.git/worktrees/<name>/index.lock`. A write outside the workspace failed in
+both.
 
 Background work was probed on 2026-10-15 at the same commit with
 `deepseek-flash` and a live provider key, from a stdio driver and a probe

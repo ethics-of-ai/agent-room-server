@@ -28,7 +28,7 @@ export interface GitChangedEntry {
   worktreeStatus: string;
 }
 
-interface ParsedNumstatFile {
+export interface ParsedNumstatFile {
   path: string;
   oldPath?: string;
   additions?: number;
@@ -183,7 +183,7 @@ export function isRenamedEntry(entry: GitChangedEntry): boolean {
   return isRenameOrCopyStatus(entry.indexStatus) || isRenameOrCopyStatus(entry.worktreeStatus);
 }
 
-function parseNumstat(output: string): ParsedNumstatFile[] {
+export function parseNumstat(output: string): ParsedNumstatFile[] {
   const tokens = output.split("\0");
   const files: ParsedNumstatFile[] = [];
   for (let index = 0; index < tokens.length; index += 1) {

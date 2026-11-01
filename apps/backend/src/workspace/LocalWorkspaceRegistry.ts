@@ -9,6 +9,7 @@ import type {
   LocalWorkspaceRegistrySnapshot,
   ServiceConfig
 } from "../domain/models";
+import type { LocalWorkspaceWorktree } from "../domain/childThreads";
 import { localWorkspaceRegistrySnapshotSchema } from "../domain/schemas";
 import {
   defaultGitBlobExecutor,
@@ -22,6 +23,7 @@ import {
   type GitListFilesResult
 } from "./LocalWorkspaceGit";
 import { GitSnapshotCache } from "./git/snapshotCache";
+import { logger } from "../logging/logger";
 
 export class LocalWorkspaceRegistryError extends Error {
   constructor(
@@ -36,6 +38,8 @@ export interface RegisterLocalWorkspaceInput {
   path: string;
   name?: string;
   kind?: LocalWorkspaceKind;
+  /** Only the child-thread service passes this; it makes the workspace `managed_worktree`. */
+  worktree?: LocalWorkspaceWorktree;
 }
 
 export interface RegisterLocalWorkspaceResult {
@@ -187,7 +191,15 @@ export class LocalWorkspaceRegistry {
     return refreshed;
   }
 
+  /** Where the child worktrees of one parent workspace live, as minted from configuration. */
+  managedWorktreeRoot(parentWorkspaceId: string): string {
+    return join(this.config.workspaceRoot, "worktrees", parentWorkspaceId);
+  }
+
   async register(input: RegisterLocalWorkspaceInput): Promise<RegisterLocalWorkspaceResult> {
+    if (input.kind === "managed_worktree" && !input.worktree) {
+      throw new LocalWorkspaceRegistryError("A managed worktree workspace needs its worktree record");
+    }
     const workspacePath = await this.resolveExistingDirectory(input.path);
     const now = new Date().toISOString();
     const id = localWorkspaceId(workspacePath);
@@ -198,14 +210,18 @@ export class LocalWorkspaceRegistry {
     await this.commit((workspaces) => {
       const existingIndex = workspaces.findIndex((workspace) => workspace.id === id);
       const existing = existingIndex >= 0 ? workspaces[existingIndex] : undefined;
+      // A client re-registering a child's worktree path changes neither its
+      // kind nor its worktree record; only the child-thread service sets them.
+      const worktree = input.worktree ?? existing?.worktree;
       const workspace: LocalWorkspace = {
         id,
         name: displayName(input.name, workspacePath, existing?.name),
         path: workspacePath,
-        kind: input.kind ?? existing?.kind ?? "user_selected",
+        kind: worktree ? "managed_worktree" : input.kind ?? existing?.kind ?? "user_selected",
         trustedAt: existing?.trustedAt ?? now,
         lastOpenedAt: now,
-        git
+        git,
+        ...(worktree ? { worktree } : {})
       };
       if (existingIndex >= 0) {
         workspaces[existingIndex] = workspace;
@@ -352,10 +368,20 @@ export class LocalWorkspaceRegistry {
         workspaces: [...this.registryCache]
       };
     }
+    let text: string | undefined;
     try {
-      const parsed = localWorkspaceRegistrySnapshotSchema.parse(JSON.parse(await readFile(this.registryPath, "utf8")));
-      this.registryCache = parsed.workspaces;
+      text = await readFile(this.registryPath, "utf8");
     } catch {
+      text = undefined;
+    }
+    try {
+      this.registryCache = text === undefined ? [] : localWorkspaceRegistrySnapshotSchema.parse(JSON.parse(text)).workspaces;
+    } catch (error) {
+      // A file this build cannot read, such as one a newer build wrote, is
+      // moved aside instead of being overwritten by the next save.
+      const aside = `${this.registryPath}.unreadable-${Date.now()}`;
+      await rename(this.registryPath, aside).catch(() => undefined);
+      logger.warn({ err: error, aside }, "Workspace registry could not be read; moved it aside and started empty");
       this.registryCache = [];
     }
     return {

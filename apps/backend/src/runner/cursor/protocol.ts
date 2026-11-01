@@ -60,6 +60,8 @@ export const agentStartParamsSchema = z.object({
    * The AgentRoom tools this session's turns may call: serializable
    * definitions only. The host registers each one as a custom tool whose
    * `execute` relays `tools/invoke`; no tool has its own callback or flag.
+   * The cap is AgentRoom's own frame bound, not an SDK limit: the question,
+   * plan, sketch and child tools come to 19.
    */
   tools: z
     .array(
@@ -69,7 +71,7 @@ export const agentStartParamsSchema = z.object({
         inputSchema: z.record(z.string(), z.unknown())
       })
     )
-    .max(16)
+    .max(32)
     .default([])
 });
 

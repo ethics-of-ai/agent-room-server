@@ -1,8 +1,8 @@
-import type { AgentToolCapability } from "../../agentTools/catalog";
+import { allowedAgentToolLogicalIds, type AgentToolCapability } from "../../agentTools/catalog";
 import { unboundAgentToolResult, type AgentToolAdvertisement } from "../../agentTools/dispatch";
 import type { ServiceConfig } from "../../domain/models";
 import type { AgentRunnerToolSet } from "../AgentRunner";
-import { runnerDescriptor, type RegisteredRunnerKind } from "../registry";
+import { isRegisteredRunnerKind, runnerDescriptor, type RegisteredRunnerKind } from "../registry";
 
 /**
  * Transport-neutral handling of the tool set a session supplies to a turn.
@@ -23,6 +23,34 @@ export function runnerAgentToolCapabilities(
   if (policy.mode === "none") return [];
   if (policy.availableWhen && !(config && policy.availableWhen(config))) return [];
   return policy.capabilities;
+}
+
+/**
+ * The ids of one tool family (plan, sketch or child tools) that this runner's
+ * descriptor lets a session advertise under this configuration, in catalog
+ * order. Unknown runner ids advertise nothing.
+ */
+export function runnerAdvertisedToolIds(
+  runnerKind: string,
+  family: readonly string[],
+  config: ServiceConfig | undefined
+): string[] {
+  if (!isRegisteredRunnerKind(runnerKind)) return [];
+  const ids = new Set(family);
+  return allowedAgentToolLogicalIds({ gates: {}, capabilities: runnerAgentToolCapabilities(runnerKind, config) })
+    .filter((id) => ids.has(id));
+}
+
+/**
+ * Whether a runner's descriptor declares a tool capability at all, whatever
+ * this configuration gates. A child thread's runner must declare `children`,
+ * because a runner with no AgentRoom tool transport cannot take part in the
+ * child-thread contract. Unknown ids declare nothing.
+ */
+export function runnerDeclaresAgentToolCapability(runnerKind: string, capability: AgentToolCapability): boolean {
+  if (!isRegisteredRunnerKind(runnerKind)) return false;
+  const policy = runnerDescriptor(runnerKind).agentTools;
+  return policy.mode !== "none" && policy.capabilities.includes(capability);
 }
 
 /**

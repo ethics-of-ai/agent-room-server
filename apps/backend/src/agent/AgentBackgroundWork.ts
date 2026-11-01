@@ -1,4 +1,4 @@
-import { BACKGROUND_TASK_LIMITS, type AgentBackgroundTask, type AgentFinishedBackgroundTask, type AgentTurnTrigger } from "../domain/backgroundWork";
+import { BACKGROUND_TASK_LIMITS, type AgentBackgroundTask, type AgentBackgroundTaskTrigger, type AgentFinishedBackgroundTask } from "../domain/backgroundWork";
 import type { AgentSession, AgentSessionTurn } from "../domain/models";
 import type { EventBus } from "../events/EventBus";
 import type { AgentRunnerBackgroundListener, AgentRunnerEvent } from "../runner/AgentRunner";
@@ -81,7 +81,7 @@ export class AgentBackgroundWork {
     if (!session || this.waiting.has(session.id)) return;
     const settling = session.activeTurnId !== undefined && session.activeTurnId === input.afterRunId;
     if (session.activeTurnId && !settling) return;
-    const trigger: AgentTurnTrigger = { kind: "background_task", tasks: input.finished.slice(0, BACKGROUND_TASK_LIMITS.finishedPerTurn) };
+    const trigger: AgentBackgroundTaskTrigger = { kind: "background_task", tasks: input.finished.slice(0, BACKGROUND_TASK_LIMITS.finishedPerTurn) };
     const id = agentTurnId();
     // Started at once, so the runner routes the turn's events from here on.
     const events = input.start(id);
@@ -95,7 +95,7 @@ export class AgentBackgroundWork {
 }
 
 /** The transcript line that opens an agent-started turn. */
-export function backgroundTurnMessage(trigger: AgentTurnTrigger): string {
+export function backgroundTurnMessage(trigger: AgentBackgroundTaskTrigger): string {
   const [first, ...rest] = trigger.tasks;
   if (!first) return "Background work finished.";
   if (rest.length === 0) {

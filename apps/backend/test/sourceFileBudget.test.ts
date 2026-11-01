@@ -55,7 +55,7 @@ const allowlist: Readonly<Record<string, number>> = {
   "apps/macos/AgentRoomMac/Supervision/BackendSupervisor.swift": 1749,
   "apps/visionos/AgentRoom/State/Spatial/SpatialSceneStore.swift": 1277,
   "apps/visionos/AgentRoom/Views/SpatialScene/Rendering/SpatialSceneRealityView.swift": 1189,
-  "apps/backend/src/runner/deepseek/DeepSeekHarnessRunner.ts": 995,
+  "apps/backend/src/runner/deepseek/DeepSeekHarnessRunner.ts": 994,
   "apps/backend/src/config/settingsStore.ts": 1030,
   "apps/backend/src/runner/acp/AcpRunner.ts": 1028,
   "apps/backend/src/scene/diagram/mermaidImport.ts": 1006,
@@ -70,7 +70,7 @@ const allowlist: Readonly<Record<string, number>> = {
   // wide callback seam across the hydration path
   // `docs/safety/TRUST_AND_SAFETY.md` pins under *Session persistence*.
   // Recorded here rather than attempted.
-  "apps/backend/src/agent/AgentSessionService.ts": 810,
+  "apps/backend/src/agent/AgentSessionService.ts": 737,
   "apps/backend/src/scene/diagram/compose.ts": 866,
   "apps/backend/src/runner/codex/CodexAppServerRunner.ts": 731,
   "apps/shared/AgentRoomClient/Sources/AgentRoomClient/APIClient.swift": 816,
@@ -82,7 +82,7 @@ const allowlist: Readonly<Record<string, number>> = {
   "apps/visionos/AgentRoom/Views/Workspace/WorkspaceWindowView.swift": 802,
   "apps/backend/src/domain/models.ts": 680,
   "apps/backend/src/scene/diagram/humanEdits.ts": 639,
-  "apps/visionos/AgentRoom/State/AppStore/AppStore.swift": 623,
+  "apps/visionos/AgentRoom/State/AppStore/AppStore.swift": 617,
   "apps/backend/src/protocol/coding/events.ts": 603,
 
   "apps/backend/test/codexJsonRpcRunner.test.ts": 1480,

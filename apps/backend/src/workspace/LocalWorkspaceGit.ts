@@ -2,7 +2,9 @@ import type { LocalWorkspaceGitChangedFile, LocalWorkspaceGitStatus, LocalWorksp
 import { GitHistoryReader } from "./git/historyReads";
 import {
   gitCommandEnv,
+  gitExitCode,
   gitNetworkEnv,
+  gitReadEnv,
   literalPathspec,
   optionalGitValue,
   type GitBlobExecutor,
@@ -21,6 +23,7 @@ import {
   isStagedEntry,
   maxGitStatusFiles,
   parseNameStatus,
+  parseNumstat,
   parsePorcelainStatus,
   stripTrailingLineEnding,
   workspaceRelativeGitPath,
@@ -32,8 +35,9 @@ import {
 // `./git/execution.ts`, what its output means lives in `./git/statusParsing.ts`,
 // and what may be run at all lives here. Nothing below assembles a command from
 // caller text: a caller contributes pathspecs and a commit message, never a
-// flag, a refspec, or a ref. See `docs/safety/TRUST_AND_SAFETY.md`
-// (*Mutating Git operations*).
+// flag, a refspec, or a ref. The backend mints the branch, path and commit a
+// child worktree operation names. See
+// `docs/safety/TRUST_AND_SAFETY.md` (*Mutating Git operations*).
 
 export {
   defaultGitBlobExecutor,
@@ -73,7 +77,18 @@ export interface GitCommittedChanges {
   truncated: boolean;
 }
 
-const fullCommitIdPattern = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+/** Tracked changes from a base commit to the working tree, inside the registered subtree. */
+export interface GitDiffSinceCommit {
+  /** Per-file line counts, capped like `status()`; a binary file has none. */
+  files: Array<{ path: string; additions?: number; deletions?: number }>;
+  truncated: boolean;
+  /** Totals over every changed file, past the cap. */
+  fileCount: number;
+  insertions: number;
+  deletions: number;
+}
+
+export const fullCommitIdPattern = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 // Git knows the empty tree in every repository without storing it, under the
 // SHA-1 or SHA-256 id that matches the repository's object format.
 const emptyTreeIds = {
@@ -144,15 +159,62 @@ export class LocalWorkspaceGit {
   // revision. Renames split into a delete and an add so the two outputs pair
   // path for path. A failed read throws: the caller cannot treat it as empty.
   async committedChanges(workspacePath: string, fromCommit: string | undefined, toCommit: string): Promise<GitCommittedChanges> {
-    if (!fullCommitIdPattern.test(toCommit) || (fromCommit !== undefined && !fullCommitIdPattern.test(fromCommit))) {
-      throw new Error("Expected a full commit id");
-    }
+    assertFullCommitId(toCommit);
+    if (fromCommit !== undefined) assertFullCommitId(fromCommit);
     const from = fromCommit ?? emptyTreeIds[toCommit.length as keyof typeof emptyTreeIds];
     const range = ["--no-renames", "--no-ext-diff", "--no-textconv", "-z", "--relative", from, toCommit, "--"];
-    const nameStatus = await this.runGit(workspacePath, ["diff", "--name-status", ...range], gitCommandEnv());
-    const numstat = await this.runGit(workspacePath, ["diff", "--numstat", ...range], gitCommandEnv());
+    const nameStatus = await this.runGit(workspacePath, ["diff", "--name-status", ...range], gitReadEnv());
+    const numstat = await this.runGit(workspacePath, ["diff", "--numstat", ...range], gitReadEnv());
     const files = gitStatusFiles(parseNameStatus(nameStatus.stdout), "", numstat.stdout);
     return { files: files.slice(0, maxGitStatusFiles), truncated: files.length > maxGitStatusFiles };
+  }
+
+  // Fixed reads behind a child thread's summary. `baseCommit` is only ever an
+  // id `headCommit` returned, checked as such. Both throw on a failed read.
+  async commitsSince(workspacePath: string, baseCommit: string): Promise<number> {
+    assertFullCommitId(baseCommit);
+    const { stdout } = await this.runGit(workspacePath, ["rev-list", "--count", `${baseCommit}..HEAD`], gitReadEnv());
+    return Number.parseInt(stdout.trim(), 10) || 0;
+  }
+
+  // One commit and no second revision compares against the working tree, so a
+  // child's uncommitted tracked edits count too. Untracked files come from
+  // `status()`. Renames split into a delete and an add, as in `committedChanges`.
+  // Plumbing `diff-index`, because porcelain `git diff` against the working
+  // tree rewrites the index under `index.lock` even with optional locks off.
+  async diffSinceCommit(workspacePath: string, baseCommit: string): Promise<GitDiffSinceCommit> {
+    assertFullCommitId(baseCommit);
+    const { stdout } = await this.runGit(
+      workspacePath,
+      ["diff-index", "--numstat", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "--relative", baseCommit, "--"],
+      gitReadEnv()
+    );
+    const files = parseNumstat(stdout).map(({ path, additions, deletions }) => ({
+      path,
+      ...(additions === undefined ? {} : { additions }),
+      ...(deletions === undefined ? {} : { deletions })
+    }));
+    return {
+      files: files.slice(0, maxGitStatusFiles),
+      truncated: files.length > maxGitStatusFiles,
+      fileCount: files.length,
+      insertions: files.reduce((sum, file) => sum + (file.additions ?? 0), 0),
+      deletions: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0)
+    };
+  }
+
+  /**
+   * The repository's shared Git directory, which a linked worktree has in
+   * common with the checkout it was added from. Undefined outside a repository,
+   * including for a worktree whose folder is gone.
+   */
+  async gitCommonDir(workspacePath: string): Promise<string | undefined> {
+    return optionalGitValue(await this.tryGit(workspacePath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]));
+  }
+
+  /** Where the workspace sits inside its checkout: `""` at the root, else `sub/dir/`. Throws on a failed read. */
+  async checkoutPrefix(workspacePath: string): Promise<string> {
+    return stripTrailingLineEnding((await this.runGit(workspacePath, ["rev-parse", "--show-prefix"], gitReadEnv())).stdout);
   }
 
   /** One-subprocess repository check, so an operation can reject a non-repository cleanly. */
@@ -187,9 +249,9 @@ export class LocalWorkspaceGit {
       this.runGit(
         workspacePath,
         ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."],
-        gitCommandEnv()
+        gitReadEnv()
       ),
-      this.runGit(workspacePath, ["rev-parse", "--show-prefix"], gitCommandEnv())
+      this.runGit(workspacePath, ["rev-parse", "--show-prefix"], gitReadEnv())
     ]);
     const prefix = stripTrailingLineEnding(prefixOutput);
     return parsePorcelainStatus(porcelain).flatMap((entry) => {
@@ -212,9 +274,9 @@ export class LocalWorkspaceGit {
       this.runGit(
         workspacePath,
         ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        gitCommandEnv()
+        gitReadEnv()
       ),
-      this.runGit(workspacePath, ["rev-parse", "--show-prefix"], gitCommandEnv())
+      this.runGit(workspacePath, ["rev-parse", "--show-prefix"], gitReadEnv())
     ]);
     const prefix = stripTrailingLineEnding(prefixOutput);
     const paths: GitStagedPath[] = [];
@@ -274,6 +336,79 @@ export class LocalWorkspaceGit {
     return { commit: commit.trim(), subject: subject.trim() };
   }
 
+  // --- Child worktree operations ---------------------------------------------
+  // The child-thread service mints every branch, worktree path and base commit
+  // passed here; none is caller text, and WorkspaceGitService checks their
+  // shapes first. Each runs in the parent workspace except `mergeOrAbort`,
+  // which runs in the child's worktree. Merge hooks run, as commit hooks do.
+
+  async addWorktree(workspacePath: string, branch: string, worktreePath: string, baseCommit: string): Promise<void> {
+    await this.runGit(workspacePath, ["worktree", "add", "-b", branch, "--", worktreePath, baseCommit], gitCommandEnv());
+  }
+
+  // Never `--force`: Git refuses a worktree that holds modified or untracked
+  // files. It removes one holding only ignored files, and on a folder deleted
+  // outside Git it succeeds and clears its own record. A path Git no longer
+  // lists at all exits 128.
+  async removeWorktree(workspacePath: string, worktreePath: string): Promise<void> {
+    await this.runGit(workspacePath, ["worktree", "remove", "--", worktreePath], gitCommandEnv());
+  }
+
+  /** Every worktree path Git records for this repository, the main checkout included, as Git stores them. Throws on a failed read. */
+  async worktreePaths(workspacePath: string): Promise<string[]> {
+    const { stdout } = await this.runGit(workspacePath, ["worktree", "list", "--porcelain", "-z"], gitReadEnv());
+    return stdout.split("\0").filter((field) => field.startsWith("worktree ")).map((field) => field.slice("worktree ".length));
+  }
+
+  async branchExists(workspacePath: string, branch: string): Promise<boolean> {
+    return (await this.tryGit(workspacePath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) !== undefined;
+  }
+
+  /** Whether `HEAD` is an ancestor of the branch, so a fast-forward to it is possible. Throws when Git cannot tell. */
+  async headIsAncestorOf(workspacePath: string, branch: string): Promise<boolean> {
+    try {
+      await this.runGit(workspacePath, ["merge-base", "--is-ancestor", "HEAD", `refs/heads/${branch}`], gitReadEnv());
+      return true;
+    } catch (error) {
+      if (gitExitCode(error) === 1) return false;
+      throw error;
+    }
+  }
+
+  // `-d`, never `-D`: Git refuses a branch that HEAD does not contain, and one
+  // any worktree still has checked out.
+  async deleteMergedBranch(workspacePath: string, branch: string): Promise<void> {
+    await this.runGit(workspacePath, ["branch", "-d", "--", branch], gitCommandEnv());
+  }
+
+  async mergeFastForward(workspacePath: string, branch: string): Promise<void> {
+    await this.runGit(workspacePath, ["merge", "--ff-only", "--", branch], gitCommandEnv());
+  }
+
+  // A merge commit, never a conflicted tree: the abort puts the branch, index
+  // and files back as they were. Any failure can leave a merge in progress, a
+  // conflict or a merge hook's refusal (both exit 1), so every failure aborts
+  // one Git recorded. Only a conflict leaves unmerged paths, and it returns
+  // `aborted`; any other failure stands once aborted. A failure with no merge
+  // recorded leaves nothing to abort. `abort_failed` means the merge is still
+  // in progress.
+  async mergeOrAbort(workspacePath: string, branch: string): Promise<"merged" | "aborted" | "abort_failed"> {
+    try {
+      await this.runGit(workspacePath, ["merge", "--no-ff", "--no-edit", "--", branch], gitCommandEnv());
+      return "merged";
+    } catch (error) {
+      if ((await this.tryGit(workspacePath, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"])) === undefined) throw error;
+      const conflicted = Boolean((await this.tryGit(workspacePath, ["ls-files", "--unmerged"]))?.trim());
+      try {
+        await this.runGit(workspacePath, ["merge", "--abort"], gitCommandEnv());
+      } catch {
+        return "abort_failed";
+      }
+      if (!conflicted) throw error;
+      return "aborted";
+    }
+  }
+
   async fetch(workspacePath: string, remote: string | undefined): Promise<void> {
     // `--prune` drops remote-tracking refs whose upstream branch is gone, so the
     // ahead/behind counts the client renders do not stay pinned to a dead branch.
@@ -322,7 +457,10 @@ export class LocalWorkspaceGit {
 
       const branch = optionalGitValue(await this.tryGit(workspacePath, ["branch", "--show-current"]));
       const entries = await this.changedEntries(workspacePath);
-      const unstagedNumstat = await this.tryGit(workspacePath, ["diff", "--numstat", "-z", "--relative"]) ?? "";
+      // Plumbing `diff-files`: porcelain `git diff` rewrites the index under
+      // `index.lock` (see `gitReadEnv`). `--cached` compares no working tree
+      // and writes nothing.
+      const unstagedNumstat = await this.tryGit(workspacePath, ["diff-files", "--numstat", "-z", "--relative"]) ?? "";
       const stagedNumstat = await this.tryGit(workspacePath, ["diff", "--cached", "--numstat", "-z", "--relative"]) ?? "";
       const allFiles = gitStatusFiles(entries, unstagedNumstat, stagedNumstat);
       const files = allFiles.slice(0, maxGitStatusFiles);
@@ -346,7 +484,7 @@ export class LocalWorkspaceGit {
     if (!(await this.isInsideWorkTree(workspacePath))) return { isRepository: false, existsInHead: false };
     return readGitFileAtHead(
       (args) => this.tryGit(workspacePath, args),
-      (args) => this.runGitBlob(workspacePath, args),
+      (args) => this.runGitBlob(workspacePath, args, gitReadEnv()),
       relPath,
       maxBytes
     );
@@ -384,9 +522,13 @@ export class LocalWorkspaceGit {
 
   private async tryGit(workspacePath: string, args: string[]): Promise<string | undefined> {
     try {
-      return (await this.runGit(workspacePath, args)).stdout;
+      return (await this.runGit(workspacePath, args, gitReadEnv())).stdout;
     } catch {
       return undefined;
     }
   }
+}
+
+function assertFullCommitId(commit: string): void {
+  if (!fullCommitIdPattern.test(commit)) throw new Error("Expected a full commit id");
 }

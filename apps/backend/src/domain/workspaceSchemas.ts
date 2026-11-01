@@ -1,17 +1,19 @@
 import { z } from "zod";
 import { maxFileIndexResults, maxSearchMatches, maxWriteBytes } from "../workspace/WorkspaceExplorer";
 import { maxCommitMessageChars } from "../workspace/LocalWorkspaceGit";
-import { agentRunnerKindSchema } from "./schemas";
+import { agentRunnerKindSchema, localWorkspaceKindSchema } from "./schemas";
 
 // Every workspace request is validated here before it reaches the explorer or
 // the git service, so the bounds a route advertises and the bounds the backend
 // enforces are stated once. The explorer applies its own path bounding on top:
 // these schemas bound shape and size, never containment.
 
+// A `managed_worktree` workspace is registered only by the child-thread
+// service, which records its worktree block; a client cannot claim the kind.
 export const registerWorkspacePayloadSchema = z.object({
   path: z.string().min(1),
   name: z.string().min(1).optional(),
-  kind: z.enum(["managed_throwaway", "user_selected"]).optional()
+  kind: localWorkspaceKindSchema.exclude(["managed_worktree"]).optional()
 });
 
 export const workspaceParamsSchema = z.object({

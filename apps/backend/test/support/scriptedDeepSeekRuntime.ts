@@ -17,14 +17,17 @@ export type ScriptedStep =
  * Writes a fake `dsh` SDK runtime that answers `initialize`, and answers the
  * Nth `session/prompt` with a receipt followed by `prompts[N - 1]`, played in
  * order. A string inside any value equal to `"$root"` becomes the root session
- * id, so a script can name the owner of a job.
+ * id, so a script can name the owner of a job. With `promptLog`, the runtime
+ * appends each prompt's content blocks to that file as one JSON line, so a
+ * test can read what reached the agent.
  */
-export async function writeScriptedDeepSeekRuntime(prompts: ScriptedStep[][]): Promise<string> {
+export async function writeScriptedDeepSeekRuntime(prompts: ScriptedStep[][], options: { promptLog?: string } = {}): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "agentroom-scripted-dsh-"));
   const path = join(root, "scripted-dsh-runtime.cjs");
   await writeFile(path, `
 const readline = require("node:readline");
 const prompts = ${JSON.stringify(prompts)};
+const promptLog = ${JSON.stringify(options.promptLog ?? null)};
 let seq = 0;
 let promptNumber = 0;
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
@@ -62,6 +65,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method !== "session/prompt") return;
   promptNumber += 1;
+  if (promptLog) require("node:fs").appendFileSync(promptLog, JSON.stringify(message.params.contentBlocks) + "\\n");
   send({ jsonrpc: "2.0", id: message.id, result: { messageId: "message-" + promptNumber } });
   void play(prompts[promptNumber - 1] || [], message.params.sessionId);
 });

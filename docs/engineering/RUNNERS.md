@@ -40,10 +40,10 @@ downgrade guard and update its compatibility vocabulary with any new built-in.
 
 | Runner | Prompt | Turn diff | Questions | AgentRoom tools | Workspace skills | Restore | Configured when |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `codex` | Per turn | Native runner diff | Native request | App-server dynamic tools in JSON-RPC mode: plans, sketches | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
-| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | In-process SDK MCP server: plans, sketches | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
-| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay: questions, plans, sketches | None advertised | `unsupported` | Executable is configured, plus the patch file in custom setup |
-| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay: questions, plans, sketches | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
+| `codex` | Per turn | Native runner diff | Native request | App-server dynamic tools in JSON-RPC mode: plans, sketches, children | Always, from `.codex/skills` then `.agents/skills`; `$` invocation | `native_resume` | `CODEX_EXECUTABLE` exists in config |
+| `claude_code` | Stable SDK system prompt | Settlement Git delta | Native `AskUserQuestion` | In-process SDK MCP server: plans, sketches, children | Gated by the adapter's workspace-settings rule; `.claude/skills`; `/` invocation | `native_resume` | Always, because the SDK resolves its CLI |
+| `deepseek` | Per turn | Settlement Git delta | Native tool in managed mode; prompt contract in custom mode | Private Cordis-pipe relay: questions, plans, sketches, children | None advertised | `unsupported` | Executable is configured, plus the patch file in custom setup |
+| `cursor` | Per turn | Settlement Git delta | Native custom tool callback | Custom-tools relay: questions, plans, sketches, children | Gated by project settings; all four workspace skill directories; `/` invocation | `native_resume` | Always, because the SDK is bundled |
 | `acp_*` | Descriptor-owned | Descriptor-owned | None in the current external adapter | None | Descriptor-owned | A restore path is required at admission | Its admitted executable definition is present |
 
 The registry and `apps/backend/test/runnerRegistry.test.ts` are the executable
@@ -276,6 +276,20 @@ ended, and the runner offers it through `turnStarted`. Stops go through
 AgentRoom's Cordis plugin; a session without a ready plugin answers
 `unavailable`. The listing, naming, stop and wake-budget rules live in
 [DeepSeek Harness runner](DEEPSEEK_HARNESS_RUNNER.md#background-work).
+
+A child-report wake is not runner background work. The service opens it on
+a parent session through `startTurn` with a backend origin, so the runner
+sees an ordinary `run()` whose prompt is the report, with AgentRoom tools
+bound. The service tries a wake after `openWaitingTurn` on each runner event,
+so a turn the runner offered through `turnStarted` always opens first, and a
+wake never opens while one waits. Turns the runner starts neither count
+toward nor reset the three-wake budget. `deepseek` counts a wake as a
+person's turn: `run()` clears its subagent pause and its count of
+runtime-started turns. The DeepSeek turn-label race reaches wakes too. A wake
+that opens just after a job settles takes the events of the turn the runtime
+starts for that job, and the reply to the report then opens as a
+`background_task` turn. The report text still reaches the agent. Wire shapes
+and the budget live in [API](../api/API.md#report-back-wakes).
 
 ## Readiness and discovery
 
@@ -585,6 +599,57 @@ records why that gap is accepted. External ACP descriptors declare none, so
 changing tools refuse there until their posture is readable. Each transport's
 activity mapping calls `runner/shared/agentToolPrivacy.ts` to apply the
 [tool activity privacy rule](../safety/TRUST_AND_SAFETY.md#thread-plans).
+
+### Child thread tools
+
+`apps/backend/src/children/agent/` owns the parent agent's child tools. Every
+built-in descriptor declares the `children` capability, so a supporting
+runner's model sees five tools: `agentroom_child_start`, `_list`, `_read`,
+`_message` and `_stop`. External ACP descriptors declare no tool transport.
+The owners are:
+
+- `childToolContract.ts`: the strict input schemas, names, descriptions,
+  unavailable text, the JSON result envelope, the tool's own refusal codes, the
+  limits and the standing instruction.
+- `childTools.ts`: `ChildTurnTools`, the handlers. They close over the calling
+  session and resolve a target only when its `parent.sessionId` is that
+  session. Start calls `ChildThreadService.create`; message calls
+  `startTurn` with a `parent_task` origin; stop calls `cancelTurn`. They keep
+  the in-memory replay answers, 64 per session.
+- `childOffers.ts`: the worktree offer card an `offer` start asks before it
+  creates anything, and the mapping from the question's outcome to the
+  start's answers. It asks through `agent/SessionQuestionChannel.ts`, as the
+  sketch confirmations do, so the card behaves the same on every runner
+  whose turn binds the tools: no runner question channel is involved.
+
+`ChildThreadService` attaches itself to the session service once, through
+`AgentSessionService.attachChildren`, because the child service is built on
+top of it: the call installs the turn observer (`admitTurn`, `turnEvent`) and
+hands a `ChildTurnTools` to `SessionTurnTools`. A second attach throws. `SessionTurnTools` joins the child handlers and instruction to the
+plan and sketch ones in the same binding, hands them the same question
+channel `ask` it gives the sketch tools, and advertises no child tool to a
+session that has a `parent`, so a child's thread never registers them. A
+wake binds them as a person's turn does. The children list's
+`parentToolsAvailable` reads the thread's `threadAgentToolIds`, so a Codex
+thread started before the tools existed reports `false` and keeps reporting
+it. A session with no native thread yet reports what its runner would
+advertise now, as `sketchToolsAvailable` does. A resumed Claude Code thread registers the new catalog when its next SDK
+child starts, but the recorded ids, and so the flag, stay those of the turn
+that started the thread.
+
+The capability also admits a child runner. `ChildThreadService` refuses a
+runner whose descriptor does not declare `children`, whatever the
+configuration gates, so Codex in `exec` mode can still run a child, and an
+ACP adapter cannot. A stopped turn on a runner whose `restoreStrategy` is
+`unsupported` ends that conversation, because the adapter kills the runtime.
+The service records the stop from the turn observer, and the child's
+`continuable` is `false` from then on, so `agentroom_child_message` answers
+`child_cannot_continue` instead of starting a turn the adapter would fail.
+
+With the question, plan and sketch tools, the catalog is 19 tools. Cursor's
+host frame allows 32. Wire behavior is in the
+[API](../api/API.md#parent-agent-tools), and the trust rules are in
+[trust and safety](../safety/TRUST_AND_SAFETY.md#child-threads).
 
 ## Images and turn settings
 

@@ -24,6 +24,9 @@ import { registerHarnessRoutes } from "./routes/harnessRoutes";
 import { registerAuthRoutes } from "./routes/authRoutes";
 import { registerWorkspaceRoutes } from "./routes/workspaceRoutes";
 import { registerAgentSessionRoutes } from "./routes/agentSessionRoutes";
+import { registerChildThreadRoutes } from "./routes/childThreadRoutes";
+import { ChildThreadService } from "./children/ChildThreadService";
+import { WorkspaceGitService } from "./workspace/WorkspaceGitService";
 import { registerToolAppCallRoutes } from "./routes/toolAppCallRoutes";
 import { ToolAppCallService } from "./agent/toolAppCalls";
 import { registerCodingAgentRoutes } from "./routes/codingAgentRoutes";
@@ -77,6 +80,7 @@ export interface BuiltServer {
   agentSessions: AgentSessionService;
   /** Exposed so a caller (tests, shutdown) can await `flush()`. */
   durableSessions: DurableAgentSessionStore;
+  childThreads: ChildThreadService;
 }
 
 export async function buildServer(input: BuildServerInput): Promise<BuiltServer> {
@@ -187,7 +191,9 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     ...(sceneEngineEnabled ? { diagramInstruction: DIAGRAM_PROMPT_INSTRUCTION } : {}),
     ...(diagramHumanEdits ? { diagramHumanEdits } : {}),
     ...(diagramRenderFeedback ? { diagramRenderFeedback } : {}),
-    planPrompt: { promptForTurn: (session) => agentSessions.turnTools.promptForTurn(session) }
+    planPrompt: { promptForTurn: (session) => agentSessions.turnTools.promptForTurn(session) },
+    // Read at turn time, after the child service below exists.
+    childReports: { prepareSummaryForTurn: (session) => childThreads.reports.prepareSummaryForTurn(session) }
   });
   // Session records outlive the process. The store is write-through, so the
   // flush at close only drains what a mark left in flight; a crash loses at
@@ -222,6 +228,15 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     sketches: { service: repositorySketches, index: sketchIndex }
   });
   await agentSessions.initialize();
+  const childThreads = new ChildThreadService({
+    sessions: agentSessions,
+    registry: localWorkspaceRegistry,
+    git: new WorkspaceGitService(localWorkspaceRegistry),
+    eventBus,
+    runners,
+    invalidateFileIndex: (workspaceId) => workspaceExplorer.invalidateFileIndex(workspaceId)
+  });
+  app.addHook("onClose", async () => childThreads.close());
   const stopSketchIndex = sketchIndex.attach(eventBus, (sessionId) => agentSessions.getSession(sessionId)?.workspaceId);
   await registerRepositorySketchRoutes(app, { sketches: repositorySketches, config: input.config, index: sketchIndex });
   app.addHook("onClose", async () => {
@@ -259,9 +274,11 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
   await registerWorkspaceRoutes(app, localWorkspaceRegistry, {
     eventBus,
     config: input.config,
-    explorer: workspaceExplorer
+    explorer: workspaceExplorer,
+    children: childThreads
   });
-  await registerAgentSessionRoutes(app, agentSessions, agentAttachments, input.config);
+  await registerAgentSessionRoutes(app, agentSessions, agentAttachments, input.config, childThreads);
+  await registerChildThreadRoutes(app, { children: childThreads, config: input.config });
   await registerToolAppCallRoutes(app, new ToolAppCallService({
     getSession: (sessionId) => agentSessions.getSession(sessionId),
     ...(artifactStore ? { artifacts: artifactStore } : {}),
@@ -338,7 +355,7 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
     );
   }
 
-  return { app, eventBus, auditLogStore, agentSessions, durableSessions };
+  return { app, eventBus, auditLogStore, agentSessions, durableSessions, childThreads };
 }
 
 function isMutatingMethod(method: string): boolean {

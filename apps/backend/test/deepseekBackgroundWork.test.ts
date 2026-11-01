@@ -48,7 +48,7 @@ interface StartedTurn {
 }
 
 /** A service stand-in that records lists and, unless told to refuse, accepts every agent turn. */
-function watch(runner: DeepSeekHarnessRunner, options: { refuse?: boolean } = {}) {
+function watch(runner: DeepSeekHarnessRunner, options: { refuse?: boolean | ((turnNumber: number) => boolean) } = {}) {
   const lists: AgentBackgroundTask[][] = [];
   const turns: StartedTurn[] = [];
   runner.watchBackgroundWork({
@@ -59,7 +59,7 @@ function watch(runner: DeepSeekHarnessRunner, options: { refuse?: boolean } = {}
     turnStarted: (input) => {
       const turn: StartedTurn = { afterRunId: input.afterRunId, finished: input.finished, events: [], done: Promise.resolve() };
       turns.push(turn);
-      if (options.refuse) return;
+      if (typeof options.refuse === "function" ? options.refuse(turns.length) : options.refuse) return;
       const events = input.start(`agent-turn-${turns.length}`);
       turn.done = (async () => { for await (const event of events) turn.events.push(event); })();
     }
@@ -370,6 +370,39 @@ describe("DeepSeek background work", () => {
 
     expect(second.flatMap((event) => event.type === "agent_update" ? [event.message] : [])).toEqual(["answer to the person"]);
     expect(second.at(-1)).toEqual({ type: "run_succeeded" });
+  });
+
+  it("folds a runtime turn the service refused into the turn it had already admitted, even when that turn attaches after it ended", async () => {
+    const notice = { kind: "tool-jobs", form: "notice", summary: "bash sleep 1 [status: completed]" };
+    // The service admits turn-2 and reads a Git baseline before it reads the
+    // stream. The runtime's own turn starts and ends in that gap, and the
+    // service refuses it, because turn-2 holds the session.
+    const { runner, workspace } = await runnerFor([
+      [
+        ...rootTurn(1, [backgroundBash("call-1", "sleep 1"), jobRegistered("bash-1", "sleep 1", "call-1"), toolResult("call-1", "started"), say("started")]),
+        { wait: 100 },
+        jobSettled("bash-1", "sleep 1", "call-1", "completed"),
+        ...rootTurn(2, [say("The job finished.")], notice)
+      ],
+      [{ wait: 100 }, ...rootTurn(3, [say("answer to the person")])]
+    ]);
+    const { turns } = watch(runner, { refuse: (turnNumber) => turnNumber === 1 });
+
+    await run(runner, workspace, "turn-1");
+    const admitted = runner.run({ runId: "turn-2", sessionId: "session-1", workspacePath: workspace, prompt: "next" });
+    await until(() => turns.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const second: AgentRunnerEvent[] = [];
+    for await (const event of admitted) second.push(event);
+
+    // The labels swap as the guide records, and nothing is lost: turn-2 shows
+    // the runtime's reply, and the answer to turn-2 opens as the runtime's turn.
+    expect(second.flatMap((event) => event.type === "agent_update" ? [event.message] : [])).toEqual(["The job finished."]);
+    expect(second.at(-1)).toEqual({ type: "run_succeeded" });
+    await until(() => turns.length === 2);
+    await turns[1]!.done;
+    expect(turns[1]!.afterRunId).toBe("turn-2");
+    expect(turns[1]!.events.flatMap((event) => event.type === "agent_update" ? [event.message] : [])).toEqual(["answer to the person"]);
   });
 
   it("answers unknown_task for work it does not list, and unavailable when the graph has no AgentRoom plugin to stop it", async () => {

@@ -550,7 +550,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(composerField).toContain("ComposerPromptText(");
     expect(composerActions).toContain("Send Turn");
     expect(composerRunProfile).toContain("CodingAgentSettingsSelection");
-    expect(composerRunProfile).toContain("select: store.selectCodingAgentSetting");
+    expect(composerRunProfile).toContain("store.selectCodingAgentSetting(kind, id: id, for: session)");
     expect(composerRunProfile).not.toContain("CodingAgentSettingsControlsView");
 
     // The per-turn diff summary card, the turn-scoped change review entry,

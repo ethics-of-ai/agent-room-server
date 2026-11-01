@@ -64,6 +64,7 @@ import {
   deepseekCommandAudit,
   deepseekContentBlocks,
   deepseekInitializeParams,
+  deepseekRunnerMetadata,
   deepseekSessionRoot,
   effectiveDeepSeekSettings,
   type DeepSeekEffectiveSettings
@@ -180,6 +181,8 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   private readonly terminations = new Set<Promise<void>>();
   private capabilitiesCache?: { promise: Promise<CodingAgentCapabilities>; expiresAtMs: number };
   private backgroundListener?: AgentRunnerBackgroundListener;
+  /** The run the service admitted on each session whose stream has not attached yet. */
+  private readonly admittedRuns = new Map<string, string>();
 
   constructor(
     private readonly config: ServiceConfig,
@@ -288,11 +291,15 @@ export class DeepSeekHarnessRunner implements AgentRunner {
    * render beats a guess this adapter would have to keep in step with a
    * developer preview.
    */
-  validateInputParts(_inputParts: AgentRunnerInputPart[] | undefined): void {
-    return;
+  validateInputParts(_inputParts: AgentRunnerInputPart[] | undefined): void {}
+
+  /** Called when the service admits the turn, which may read its stream only later. */
+  run(input: AgentRunnerInput): AsyncIterable<AgentRunnerEvent> {
+    this.admittedRuns.set(sessionKey(input), input.runId);
+    return this.stream(input);
   }
 
-  async *run(input: AgentRunnerInput): AsyncIterable<AgentRunnerEvent> {
+  private async *stream(input: AgentRunnerInput): AsyncIterable<AgentRunnerEvent> {
     const missingBootstrap = this.missingBootstrap();
     if (missingBootstrap) throw new Error(missingBootstrap);
 
@@ -337,6 +344,8 @@ export class DeepSeekHarnessRunner implements AgentRunner {
       session.latestRunId = input.runId;
       session.background.personTurnStarted();
       this.activeTurns.set(input.runId, { session, turn: activeTurn });
+      this.admittedRuns.delete(session.key);
+      for (const held of session.background.takeFolded(input.runId)) this.handleNotification(session, held, { replayed: true });
       if (input.tools) session.toolRelay?.bind(input.tools.binding);
       const prompt = promptWithRegisteredTools(input, session.toolRelay?.registeredNames() ?? new Set(), "deepseek");
       const contentBlocks = await deepseekContentBlocks(prompt, input.inputParts);
@@ -373,6 +382,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     } finally {
       nativeTools?.dispose();
       this.activeTurns.delete(input.runId);
+      if (this.admittedRuns.get(sessionKey(input)) === input.runId) this.admittedRuns.delete(sessionKey(input));
       if (session) {
         session.toolRelay?.unbind(input.runId);
         this.sessions.touch(session);
@@ -477,7 +487,7 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     activeTurn: DeepSeekActiveTurn,
     settings: DeepSeekEffectiveSettings
   ): Promise<DeepSeekRunnerSession> {
-    const key = input.sessionId ?? input.runId;
+    const key = sessionKey(input);
     if (this.uncontinuableSessionIds.has(key)) {
       throw new Error(
         "DeepSeek Harness cannot continue this session because its runtime stopped and no restore path is verified; create a new AgentRoom session"
@@ -636,15 +646,13 @@ export class DeepSeekHarnessRunner implements AgentRunner {
     return session;
   }
 
-  private handleNotification(
-    session: DeepSeekRunnerSession,
-    notification: JsonRpcNotification
-  ): void {
+  /** A `replayed` notification is a folded turn's, already observed when it arrived. */
+  private handleNotification(session: DeepSeekRunnerSession, notification: JsonRpcNotification, options: { replayed?: boolean } = {}): void {
     const parsed = notification.method === "session.event" ? sessionEventNotificationSchema.safeParse(notification.params) : undefined;
     const sessionEvent = parsed?.success ? parsed.data : undefined;
-    session.background.observe(notification, sessionEvent);
+    if (!options.replayed) session.background.observe(notification, sessionEvent);
     if (session.background.holdsRefusedTurn(notification, sessionEvent)) return;
-    const active = session.activeTurn ?? this.openAgentTurn(session, sessionEvent);
+    const active = session.activeTurn ?? this.openAgentTurn(session, notification, sessionEvent);
     if (!active) return;
 
     if (notification.method === "session.status") {
@@ -687,10 +695,10 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   /**
    * A root `turn/start` no AgentRoom turn owns is one the runtime started to
    * tell the agent that background work ended. The service decides whether it
-   * becomes an AgentRoom turn; a refused turn's events reach no turn, through
-   * its end, even when a person's turn opens before that turn finishes.
+   * becomes an AgentRoom turn. A refused turn's events, through its end, go
+   * to the turn the service had admitted when it refused, or else to none.
    */
-  private openAgentTurn(session: DeepSeekRunnerSession, sessionEvent: DeepSeekSessionEventNotification | undefined): DeepSeekActiveTurn | undefined {
+  private openAgentTurn(session: DeepSeekRunnerSession, notification: JsonRpcNotification, sessionEvent: DeepSeekSessionEventNotification | undefined): DeepSeekActiveTurn | undefined {
     if (sessionEvent?.sessionId !== session.sdkSessionId || sessionEvent.event.type !== "turn/start") return undefined;
     session.background.agentTurnStarted();
     let opened: DeepSeekActiveTurn | undefined;
@@ -710,7 +718,9 @@ export class DeepSeekHarnessRunner implements AgentRunner {
         return this.streamAgentTurn(session, turn);
       }
     });
-    if (!opened) session.background.agentTurnRefused();
+    // A turn the service admitted but whose stream has not attached takes a refused turn's events.
+    const admitted = this.admittedRuns.get(session.key);
+    if (!opened) session.background.agentTurnRefused(admitted ? { runId: admitted, turnStart: notification } : undefined);
     return opened;
   }
 
@@ -977,17 +987,8 @@ export class DeepSeekHarnessRunner implements AgentRunner {
   }
 
   private runnerMetadata(session: DeepSeekRunnerSession): RunnerMetadata {
-    return {
-      nativeSessionId: session.sdkSessionId,
-      ...(session.model ? { model: session.model } : {}),
-      // The harness's own posture, deliberately not flattened into a shared
-      // permission enum with the Codex approval policy or the Claude Code
-      // permission mode. Absent when the operator has configured none, because
-      // the effective posture is then the composed profile's and this backend
-      // does not know it.
-      ...(this.config.deepseekPermissionMode
-        ? { posture: { label: "permissionMode", value: this.config.deepseekPermissionMode } }
-        : {})
-    };
+    return deepseekRunnerMetadata(this.config, session);
   }
 }
+// The AgentRoom session a run's runtime lives under, or the run itself without one.
+function sessionKey(input: Pick<AgentRunnerInput, "sessionId" | "runId">): string { return input.sessionId ?? input.runId; }

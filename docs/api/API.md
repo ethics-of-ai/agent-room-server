@@ -252,7 +252,8 @@ WebSocket below). A patch that changes nothing publishes none.
       "displayName": "Codex",
       "registered": true,
       "configured": false,
-      "enabled": true
+      "enabled": true,
+      "childThreads": true
     },
     {
       "runnerKind": "claude_code",
@@ -260,7 +261,8 @@ WebSocket below). A patch that changes nothing publishes none.
       "registered": true,
       "configured": true,
       "enabled": true,
-      "ready": true
+      "ready": true,
+      "childThreads": true
     }
   ]
 }
@@ -290,6 +292,12 @@ read of this route reports what it proved — for that runner alone. The state i
 per backend process, so a restart returns it to unknown. A failed probe reports
 `ready: false` and nothing else: the child's own diagnostic text stays on the
 bounded `error` of the capabilities response and never joins this projection.
+
+`childThreads` says whether the runner's descriptor declares the AgentRoom
+tool capability a [worktree child thread](#child-threads) needs, so the
+backend would admit it as a child's runner. A client's New child picker offers
+the runners that report `true`. The offline catalog file carries no such
+field, and a client offers no other runner than the parent's without it.
 
 The other authority is the Mac's, and it is deliberately not here: whether the
 local prerequisite is satisfied (an installed CLI, a `claude login` credential)
@@ -892,6 +900,32 @@ the branch list, so the snapshot costs no extra Git invocation.
 The path must be an existing absolute directory. Registration stores metadata
 under `STATE_DIR` and does not write files inside the selected workspace.
 
+A workspace's `kind` is `user_selected`, `managed_throwaway` or
+`managed_worktree`. The register payload refuses `managed_worktree` with `400`:
+only the backend registers one, when it creates a
+[child thread](#child-threads). A `managed_worktree` workspace also carries
+its `worktree` record:
+
+```json
+{
+  "kind": "managed_worktree",
+  "worktree": {
+    "parentWorkspaceId": "workspace-abc123def456",
+    "worktreePath": "/Users/me/Developer/AgentRoom/Workspaces/worktrees/workspace-abc123def456/add-a-json-flag-3f9a1c2e",
+    "branch": "agentroom/add-a-json-flag-3f9a1c2e",
+    "baseCommit": "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+  }
+}
+```
+
+`worktreePath` is the linked worktree's root, under
+`WORKSPACE_ROOT/worktrees/<parentWorkspaceId>/`. The workspace's own `path`
+differs from it when the parent workspace is a repository subdirectory: the
+child is registered at the same subdirectory of its worktree. `baseCommit` is
+the parent's HEAD when the child was created. Registering the same path again
+keeps the kind and the record, so a client cannot turn a child's workspace
+back into a selected folder.
+
 ### Tree, file preview, and media
 
 `GET /api/workspaces/:workspaceId/tree?path=&depth=3` returns a bounded,
@@ -1447,7 +1481,11 @@ file target, symlink, protected subtree, or unsupported entry type.
 
 `GET /api/workspaces/:workspaceId/git/status` returns canonical file-level Git
 dirty status for a registered workspace. The route uses fixed read-only Git
-invocations, not a shell or client-supplied command arguments. When
+invocations, not a shell or client-supplied command arguments. Every read-only
+Git command runs with `GIT_OPTIONAL_LOCKS=0`, and reads the working tree
+through the plumbing `diff-files` and `diff-index`, so a status or diff read
+never rewrites the index or holds `index.lock` while a commit in the same
+checkout runs. When
 `AUTH_TOKEN` is configured, this route requires bearer auth because changed file
 paths and line counts expose project metadata.
 
@@ -1706,9 +1744,20 @@ branch publishes `workspace_branch_changed`. The same event reports a switch
 made outside AgentRoom; [Broadcast WebSocket](#broadcast-websocket) describes
 both.
 
+This route and `POST …/git/branch/create` refuse an open
+[child thread](#child-threads)'s own workspace with
+`{ error, code: "child_workspace" }` and `409`. Land and Update need the
+child's worktree on its minted `agentroom/...` branch. A switch made outside
+AgentRoom is not stopped, and Land then refuses with `child_not_linked`. A
+parent workspace switches freely; Land lands on whatever branch it is on.
+
 `DELETE /api/workspaces/:workspaceId` unregisters a workspace from AgentRoom.
 It removes only registry metadata under `STATE_DIR`; it does not delete or
-modify the selected folder.
+modify the selected folder. It refuses a workspace an open
+[child thread](#child-threads) needs, with `{ error, code }`:
+`409 child_workspace` for an open child's own workspace and
+`409 has_open_children` for the workspace an open child branched from. Closing
+the child is the only way to remove its workspace.
 
 ## Spatial Scene And Solution Diagram
 
@@ -2298,6 +2347,14 @@ set's header or ordinal, its prompt, the chosen labels, and the person's own
 free text where the set invited it — so the decision survives a reconnect the
 way the turn message does. A `sensitive` set's text renders as `[redacted]`.
 
+A `role: "system"` message that opens a turn the child-thread layer started
+carries `origin`, so a client can label the row without reading its text:
+`parent_task` for a child's first turn, `parent_message` for a later turn its
+parent sent, and `child_report` for a parent wake (see
+[Child threads](#child-threads)). Every other message omits it, including a
+background-task notice. A client must treat an unknown `origin` as a plain
+system message.
+
 `GET /api/agent-sessions/:sessionId/artifacts` returns the session's accumulated
 live artifacts for reconnect/late-join, since the WebSocket stream carries only
 deltas:
@@ -2401,6 +2458,12 @@ runner's persistent per-session resources, including the spawned Codex
 app-server or Claude Code child process kept alive for the thread. The route
 deletes only backend session state; it does not delete or modify the
 registered workspace.
+
+The route refuses to remove an open [child thread](#child-threads) or orphan
+one, with `{ error, code }`: `409 child_open` for an open child and
+`409 has_open_children` for a parent with an open child. Close the child
+first. A closed child deletes as any session does. An unknown session is
+`404 { error }`, as before.
 
 `POST /api/agent-sessions`
 
@@ -2895,6 +2958,463 @@ reconnect and when a turn settles, since a client can miss the event. The event
 is not written to the durable audit log. `coding_plan_updated` is unrelated:
 it reports a runner's own native checklist, which cannot change the stored
 plan.
+
+### Child threads
+
+A child thread is a session that works in a linked Git worktree on its own
+branch, cut from its parent thread's checkout. The child's worktree is
+registered as its own `managed_worktree` workspace (see
+[Registration and listing](#registration-and-listing)), so the Git routes,
+file routes and HEAD watch work on it as on any workspace. A child is one level
+deep: it cannot have children.
+
+A child session carries `parent`:
+
+```json
+{
+  "parent": {
+    "sessionId": "agent-session-parent123",
+    "workspaceId": "workspace-abc123def456"
+  }
+}
+```
+
+`parent.operationId` is set when the parent's agent created the child. A
+closed child also carries `closedAt`, and its turns answer
+`409 { "error": "This child thread is closed", "code": "child_closed" }`. Both
+fields persist with the session record.
+
+`POST /api/agent-sessions/:sessionId/children` creates a child of the session:
+
+```json
+{
+  "title": "Add a --json flag",
+  "task": "Add a `--json` flag to the status command.",
+  "runnerKind": "codex",
+  "settings": { "model": "gpt-example", "reasoningEffort": "high" }
+}
+```
+
+`title` is 1 to 120 characters and `task` 1 to 16 KiB of UTF-8. `settings`
+holds only `model`, `reasoningEffort` and `serviceTier`. No other field is
+accepted, at either level, so a caller cannot set the child's permission mode,
+sandbox or any other posture. `runnerKind` defaults to the parent's runner.
+`settings` becomes the child's model settings from its first turn. Without it,
+a child on the parent's runner takes the parent's settings, and a child on
+another runner gets that runner's defaults. The route is a mutation and
+requires the bearer token when `AUTH_TOKEN` is set.
+
+Before any Git work, the backend reads the runner's capabilities and refuses
+settings its models do not offer: an unknown model, or an effort or speed the
+model does not list. A model that lists no efforts or speeds leaves those to
+the runner. When discovery fails or lists no models, nothing is checked and
+the child's first turn reports the runner's own error.
+
+The backend branches from the parent workspace's HEAD commit. Uncommitted
+parent changes and ignored files such as `.env` do not travel, and a dirty
+parent is allowed. It mints the branch `agentroom/<slug>-<hex>` from the title
+and adds the worktree at `WORKSPACE_ROOT/worktrees/<parentWorkspaceId>/<slug>-<hex>`.
+Then it registers the worktree, creates the child session and starts its first
+turn. That turn opens with a `role: "system"` message holding the task, a note
+that uncommitted parent changes and ignored files are absent, and an
+instruction to commit if the agent's tools allow and otherwise to leave the
+changes in place. The message's `origin` is `parent_task`. The same text is
+the runner's input, and the turn carries a `trigger`:
+
+```json
+{ "trigger": { "kind": "parent_task", "parentSessionId": "agent-session-parent123", "tasks": [] } }
+```
+
+Every trigger kind carries `tasks`; it is empty outside `background_task`.
+The response is `201 { "session", "workspace" }`, with the child's session
+already `running`.
+
+If a step fails after the worktree is added, the backend undoes the finished
+steps in reverse order: it deletes the session, unregisters the workspace,
+removes the worktree and deletes the branch. Refusals send `{ error, code }`:
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| `400` | `invalid_request` | Body is not `{ title, task, runnerKind?, settings? }` within its limits, or names an unknown runner |
+| `400` | `runner_unavailable` | The runner is not configured |
+| `400` | `unsupported_settings` | `settings` names a model, effort or speed the runner's discovered models do not offer |
+| `404` | `unknown_session` | No such parent session |
+| `404` | `workspace_missing` | The parent's workspace is not registered |
+| `409` | `parent_is_child` | The parent is itself a child, or works in a child's workspace |
+| `409` | `runner_unsupported` | The runner's descriptor lacks the `children` tool capability, as an external ACP adapter's does |
+| `409` | `child_limit_reached` | The parent has 4 open children, or the backend has 8 |
+| `409` | `not_a_repository` | The parent's workspace is not a Git repository |
+| `409` | `unborn_head` | The parent's branch has no commit to branch from |
+| `409` | `worktree_add_failed` | `git worktree add` refused; `error` is Git's redacted text |
+
+Creates run one at a time, so concurrent requests cannot pass the caps
+together. A turn-start refusal from the session itself, such as a plan-state
+`503`, passes through with its own status.
+
+`GET /api/agent-sessions/:sessionId/children` lists the session's open
+children, or every child with `?include=closed`:
+
+```json
+{
+  "children": [
+    {
+      "sessionId": "agent-session-child456",
+      "title": "Add a --json flag",
+      "runnerKind": "codex",
+      "status": "idle",
+      "workspaceId": "workspace-0f1e2d3c4b5a",
+      "branch": "agentroom/add-a-json-flag-3f9a1c2e",
+      "baseCommit": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "commitsAhead": 1,
+      "uncommitted": true,
+      "untrackedCount": 0,
+      "missing": false,
+      "continuable": true,
+      "diff": { "files": 3, "insertions": 42, "deletions": 7 },
+      "lastTurn": {
+        "turnId": "agent-turn-789",
+        "status": "succeeded",
+        "lastMessage": "Added the flag and a test."
+      },
+      "updatedAt": "2026-10-31T10:00:00.000Z"
+    }
+  ],
+  "parentToolsAvailable": false,
+  "waitingReports": 0
+}
+```
+
+The Git fields describe the whole worktree from `baseCommit`, which is what a
+fast-forward of the child's branch would carry, even when the child is
+registered at a subdirectory. `commitsAhead` counts the commits on the
+child's branch that the parent checkout's current commit does not have, so it
+is 0 once a Land carried them; it counts from `baseCommit` when the parent's
+commit cannot be read. `uncommitted` is true when the worktree has tracked changes or
+untracked files, and `untrackedCount` counts the untracked ones. `diff` counts
+tracked files and lines changed from `baseCommit`, working tree included. The
+summary names no path. `missing` is true when the worktree folder or the
+child's workspace record is gone; the counts are then zero. `continuable` is
+false for a closed child and for one whose next turn would refuse because its
+runner cannot restore the conversation. `waitingOn` is `permission` while the
+child's running turn holds a permission request nobody has answered, or
+`question` while it holds an open clarifying question. It is absent
+otherwise. `lastTurn` is the child's latest turn, with its last message or
+error, secret-redacted and capped at 2,000 characters. `activeTurnId` is set
+while a turn runs.
+
+`parentToolsAvailable` is true when the parent's thread holds the AgentRoom
+[child tools](#parent-agent-tools), so its agent can see its children. A
+thread that has not run a turn yet reports what its runner would register
+now. A thread on a runner without them, or one started before they existed,
+reports `false`; the create route works either way. The list is a
+session-content read and requires the bearer token when `AUTH_TOKEN` is set.
+It answers `404 unknown_session` for an unknown session. `waitingReports`
+counts the child reports held back from the parent, which its next person's
+turn carries (see [Report-back wakes](#report-back-wakes)).
+
+Creating a child publishes `workspace_git_operation` (`worktree_add`, on the
+parent workspace), `workspace_registered` for the child's workspace,
+`agent_session_created` and then `agent_child_changed`:
+
+```json
+{
+  "parentSessionId": "agent-session-parent123",
+  "childSessionId": "agent-session-child456",
+  "change": "created",
+  "initiation": "button",
+  "audit": {
+    "parentSessionId": "agent-session-parent123",
+    "childSessionId": "agent-session-child456",
+    "change": "created",
+    "initiation": "button"
+  }
+}
+```
+
+`change` is `created`, `landed`, `updated` or `closed`. `initiation` is set on
+`created`: `button` for the create route, `offer` and `person_asked` for a
+child the parent's agent starts. The event carries ids only and is written to
+the durable audit log. A child's status changes arrive as ordinary turn
+events with the child's `sessionId`. A rollback publishes the matching
+`workspace_removed` and `agent_session_deleted`.
+
+A closed child, listed with `?include=closed`, carries `closedAt`, reports
+`missing: true` because its worktree and workspace record are gone, and has
+`continuable: false`. Its `branch` is the one its session last ran on and its
+`baseCommit` is empty. Its transcript stays readable through the session
+routes. Any other `include` value is `400 invalid_request`.
+
+#### Land, Update from parent and Close
+
+Three person actions act on one open child, named by its session id. Each is a
+mutation and requires the bearer token when `AUTH_TOKEN` is set. No AgentRoom
+tool reaches them, so a parent's agent cannot land, update or close a child.
+They run one at a time with creates, the guarded deletes and the guarded
+branch changes of the same parent workspace and its children's worktrees.
+Calls on an unrelated workspace do not wait for them.
+
+`POST /api/agent-sessions/:sessionId/land` runs `git merge --ff-only` of the
+child's branch in the parent workspace, on whatever branch the parent checkout
+is on. It never makes a merge commit. `POST /api/agent-sessions/:sessionId/update-from-parent`
+runs `git merge --no-ff --no-edit` of the parent checkout's current branch into
+the child's branch, in the child's worktree. A conflict runs `git merge --abort`
+at once, so the child's branch and tree stay as they were. Any other failure
+that leaves a merge in progress, a merge hook's refusal among them, is aborted
+too and refuses with Git's text and no `code`. Both need the child's worktree
+on its own branch and the parent checkout on a branch. Land asks Git first
+whether the parent's commit is an ancestor of the child's branch, and refuses
+with `not_fast_forward` when it is not. While either runs, a turn sent to the
+child refuses with `409 child_merging`, so no turn starts mid-merge. Both
+answer `200`:
+
+```json
+{
+  "git": {
+    "workspaceId": "workspace-abc123def456",
+    "operation": "merge_ff",
+    "workspace": { "id": "workspace-abc123def456" },
+    "status": { "counts": { "total": 0 } },
+    "branch": "agentroom/add-a-json-flag-3f9a1c2e",
+    "commit": "9fceb02d0ae598e95dc970b74767f19372d61af8"
+  },
+  "child": { "sessionId": "agent-session-child456", "commitsAhead": 0 }
+}
+```
+
+`git` is the Git operation result the [Git routes](#mutating-git-operations)
+return (shortened above), for the parent's workspace after a Land and the
+child's after an Update. `operation` is `merge_ff` or `update_from_parent`, and
+`commit` is the new HEAD of the branch that moved. `child` is the child's
+summary as the list returns it. Land publishes `workspace_git_operation` on the
+parent workspace and `agent_child_changed` with `change: "landed"`, and drops
+the parent's cached file index. HEAD keeps its branch name, so no
+`workspace_branch_changed` fires. Update publishes `workspace_git_operation` on
+the child workspace and `agent_child_changed` with `change: "updated"`, and
+drops the child's file index. Merge hooks run.
+
+`POST /api/agent-sessions/:sessionId/close` closes the child in a fixed order.
+It removes the worktree with `git worktree remove` (never `--force`), then
+unregisters the child's workspace and publishes `workspace_removed`. Then it
+deletes the branch with `git branch -d`, sets `closedAt` and publishes
+`agent_child_changed` with `change: "closed"`. Git refuses to delete a branch a
+worktree still has checked out, which is why the branch goes last. The
+response is `200 { "branchKept": false }`. `branchKept` is true when
+`branch -d` kept the branch because the parent checkout's HEAD does not
+contain it: unlanded commits, or a parent that has moved to another branch.
+A kept branch is not an error, and its commits stay in the parent repository.
+A child whose worktree folder was deleted outside AgentRoom closes the same
+way, because `git worktree remove` clears Git's record of a missing path. A
+worktree Git no longer records at all, removed with Git outside AgentRoom or
+by a Close that stopped part way, counts as removed, and Close finishes the
+remaining steps. Close also refuses a child whose runner still runs background
+work, with `child_running`: the runner starts its own turn when that work
+ends, and AgentRoom cannot refuse that turn.
+Close releases the runner's per-session resources and keeps the session record
+and transcript. The child's later turns refuse with `409 child_closed`. While
+Close runs its Git calls, a turn sent to the child refuses with
+`409 { "error": "This child thread is closing", "code": "child_closing" }`, so
+no turn starts in a worktree being removed. A Close that fails clears the mark,
+and the child takes turns again.
+
+Refusals send `{ error, code }`:
+
+| Status | `code` | Routes | Meaning |
+| --- | --- | --- | --- |
+| `404` | `unknown_session` | all | No such session |
+| `404` | `workspace_missing` | Land, Update | The child's or the parent's workspace record is gone |
+| `409` | `not_a_child` | all | The session is not a child thread |
+| `409` | `child_closed` | all | The child is already closed |
+| `409` | `child_running` | all | The child has a running turn, or for Close, live background work; stop it or wait for it |
+| `409` | `child_dirty` | all | The child's worktree has tracked changes or untracked files; commit or discard them first |
+| `409` | `child_not_linked` | Land, Update | The worktree is missing, is not on its branch, or no longer shares the parent's repository |
+| `409` | `not_fast_forward` | Land | The parent branch has commits the child's branch does not; Update from parent first |
+| `409` | `parent_changes_in_the_way` | Land | A changed or untracked parent file is one the fast-forward would write; `error` carries Git's redacted text |
+| `409` | `parent_detached` | Land, Update | The parent checkout is not on a branch |
+| `409` | `update_conflicted` | Update | The merge conflicted and was aborted; nothing changed |
+| `409` | `update_interrupted` | Update | The merge stopped part way, for example on a timeout, and left changes in the child's worktree; discard them, then update again |
+| `409` | `worktree_remove_failed` | Close | `git worktree remove` refused; `error` carries Git's redacted text |
+
+Any other Git failure, such as a held `index.lock`, refuses `409` with Git's
+redacted text and no `code`.
+
+Only ignored files, such as `node_modules`, may remain in a worktree that
+Close removes. A refused action changes nothing and publishes nothing.
+
+#### Report-back wakes
+
+When a child's turn settles as `succeeded`, `failed` or `cancelled`, a stop
+included, the backend tells the parent by opening a turn on it. A
+`role: "system"` message with `origin: "child_report"` opens the turn with one
+block per child, and the same text is the runner's input:
+
+```text
+A child thread finished a turn. Landing, updating and closing children are the person's actions.
+
+Child "Add a --json flag" (agent-session-child456): succeeded
+Branch: agentroom/add-a-json-flag-3f9a1c2e, 1 commit the parent checkout does not have
+Changes from the base: 3 files, +42 -7; uncommitted changes in the worktree
+Last message:
+Added the flag and a test.
+```
+
+The turn carries a `trigger`, and `agent_turn_started` carries the same:
+
+```json
+{
+  "trigger": {
+    "kind": "child_report",
+    "reports": [
+      { "childSessionId": "agent-session-child456", "turnId": "agent-turn-789", "status": "succeeded" }
+    ],
+    "tasks": []
+  }
+}
+```
+
+`reports` holds 1 to 16 entries, one per child. The Git counts are read when
+the wake opens, as the list reads them. The last message is the settled
+turn's last message or error, secret-redacted and capped at 2,000 characters.
+AgentRoom tools bind in a wake as in a person's turn.
+
+A wake opens only on a parent that is idle and can continue, with no turn of
+the runner's own waiting to open. A runner's waiting turn always goes first.
+Otherwise the report waits, and every report waiting when the parent next
+frees goes into one wake. A newer report from a child replaces its older one.
+A person's `POST …/turns` that lands while a wake is opening can take the
+parent first; the wake then waits for that turn to settle.
+
+Three `child_report` turns may run in a row. After that, reports wait for
+the person. A person's turn on the parent resets the count. Creating a child
+does not, and turns the runner starts itself neither count nor reset it. A
+parent that cannot continue gets no wake. Reports held back by the count or
+by a parent that cannot continue are added to the prompt of the person's next
+turn on the parent, ahead of the person's message, and stop waiting once that
+turn is accepted. The transcript keeps only the person's message. The
+children list's `waitingReports` counts the held reports.
+
+Waiting reports and the count live in memory, so a backend restart loses them.
+The children list still shows every child's state.
+
+On a `deepseek` parent, a wake that opens just after a background job settles
+can swap labels with the turn the runtime starts for that job. The job's reply
+then lands in the `child_report` turn, and the reply to the report arrives in a
+`background_task` turn. Nothing is lost. See
+[Runner architecture](../engineering/RUNNERS.md#background-tasks).
+
+#### Parent agent tools
+
+A parent whose runner declares the `children` tool capability offers its
+model five tools on every turn, a wake included: `agentroom_child_start`,
+`agentroom_child_list`, `agentroom_child_read`, `agentroom_child_message` and
+`agentroom_child_stop`. A child's turns bind none of them. No route dispatches
+them; they run only through a live turn's tool binding
+([Runners](../engineering/RUNNERS.md#child-thread-tools)). A tool finds a
+child only when the child's `parent.sessionId` is the calling session. Any
+other id answers `unknown_child`.
+
+Every result is one JSON object with `schemaVersion: 1` and `ok`. A refusal is
+`{ "ok": false, "error": { "code", "message" } }`, and the whole result stays
+under the 64 Ki-character dispatch cap.
+
+`agentroom_child_start` takes 1 to 4 `tasks`, each
+`{ title, task, runnerKind?, reason }` with the create route's title and task
+limits and a reason of up to 500 characters, plus `initiation` and an
+`operationId`. There is no posture field. `initiation` is `offer` by default.
+`person_asked` creates the children at once, and only in a turn the person
+started; in a wake or any other turn with a `trigger` it answers
+`offer_required`. A call that names more tasks than the free slots under both
+caps answers `child_limit_reached` with `freeSlots` before creating any and
+before any question.
+
+An `offer` first asks the person with one clarifying-question batch on the
+calling turn, published as an ordinary `coding_question_requested` and
+answered through the question route. It holds one set per task, `setId`
+`task-<index>` for the task's position in the call, each with `header`
+`Worktree?`, `selection: "single"`, `discussion: "none"`, and the options
+`worktree` (**New worktree thread**) then `here` (**Do it here**). The prompt
+names the task's title, the agent's `reason` and the short commit the child
+would branch from. Nothing is created before the answer. Then:
+
+- A set answered `worktree` creates that child, and `agent_child_changed`
+  records `initiation: "offer"`. A set answered `here` returns
+  `{ "title", "outcome": "do_here" }`. A set the person left blank returns a
+  refused task with `code: "unanswered"`.
+- No answer within ten minutes answers `unanswered` for the call and creates
+  nothing.
+- A withdrawn question, or a calling turn that ends or stops being live,
+  answers `unavailable` and creates nothing. A result that arrives after the
+  turn ended is replaced by the tool's unavailable text, as for any AgentRoom
+  tool.
+- With `clarifyingQuestionsEnabled` off, no question is asked and the call
+  answers `offer_unavailable`.
+- A parent workspace that is no longer registered, is not a repository or
+  has no commit answers `workspace_missing`, `not_a_repository` or
+  `unborn_head` without a question.
+
+Each task to create is created in order, and the result lists one entry per
+task:
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "operationId": "op-7",
+  "tasks": [
+    { "title": "Add a --json flag", "outcome": "created", "child": { "sessionId": "agent-session-child456" } },
+    { "title": "Fix the docs", "outcome": "refused", "code": "runner_unsupported", "message": "This runner cannot run a child thread" }
+  ]
+}
+```
+
+`child` is the same summary the list route returns. A refused task carries the
+create route's `code`. A created child records `<operationId>:<task index>` as
+`parent.operationId`, and `agent_child_changed` records the call's
+`initiation`. Repeating a start with the same `operationId` returns the
+children it created, with `replayed: true`, and creates nothing again, after
+a restart too. Every other task answer (`do_here`, a refusal, and the
+`unanswered` of a card that timed out) is kept in memory for the newest 64
+calls per session, so a replay asks nothing again; after a restart it asks,
+or tries, those tasks again. `unavailable` and `offer_unavailable` are not
+kept. The same `operationId` with different tasks answers
+`operation_conflict`.
+
+`agentroom_child_list` takes no input and returns
+`{ children, waitingReports }` for the caller's open children.
+
+`agentroom_child_read` takes `childSessionId` and an optional `include` of
+`transcript`, `diff` or both. It returns `{ child }`, the summary, plus:
+
+- `transcript`: `{ messages, omittedMessages }`, the newest messages that fit
+  in 32 Ki serialized characters, oldest kept first, each
+  `{ role, at, turnId?, content }` and secret-redacted. When the newest
+  message alone is too long, its end is kept and it carries `truncated: true`.
+- `files`: `{ files, hidden, truncated }`, the tracked files changed since
+  `baseCommit` with `insertions` and `deletions`, working tree included, then
+  untracked files with `untracked: true`. A path with a secret or generated
+  segment, which the file tree hides, is left out and counted in `hidden`. The
+  list holds at most 200 entries and 16 Ki serialized characters.
+
+`agentroom_child_message` takes `childSessionId`, a `message` of up to 16 KiB
+and an `operationId`. It starts the child's next turn with a `parent_task`
+trigger, opened by a `role: "system"` message with `origin: "parent_message"`
+that quotes the parent's text, and returns `{ outcome: "started", turnId, operationId }`. A child with a
+running turn, or with a runner's own turn waiting, answers `child_busy`;
+nothing queues. A closed or closing child answers `child_closed` or
+`child_closing`, one the person is landing or updating answers
+`child_merging`, and one that cannot take another turn answers
+`child_cannot_continue`. Repeating a message with the same `operationId`
+returns the same `turnId` with `replayed: true` while the backend runs.
+
+`agentroom_child_stop` takes `childSessionId` and cancels the child's running
+turn, as the cancel route does. It returns
+`{ outcome: "stopped", turnId, continuable }`, `not_running`, or
+`stop_failed` with the cancel's error. The child
+still reports to its parent, as `cancelled`. On a runner with no restore path,
+a stop ends the conversation, so `continuable` is `false` from then on, in the
+tool result and in the child's summary.
+
+No child tool answers a child's permission or question, and none lands,
+updates or closes a child.
 
 ## Sketches
 
@@ -3439,6 +3959,7 @@ authenticated, workspace-scoped protocols. The server sends an initial
 - `agent_question_resolved`
 - `agent_plan_changed` (metadata only; see [Thread plans](#thread-plans))
 - `agent_background_tasks_changed` (live only; see [Background tasks](#background-tasks))
+- `agent_child_changed` (ids only, durable; see [Child threads](#child-threads))
 - `agent_tool_app_called` carries `{sessionId, workspaceId, artifactId, serverName, toolName, outcome, durationMs, audit}` for each tool view call (see [Session reads](#session-reads)). `outcome` is `called`, `unavailable`, `unknown_tool`, `failed` or `result_too_large`. `audit` repeats the names, outcome and duration with `argumentsSha256`, a digest of the arguments. Neither carries the arguments, the result or a failed call's error text; the view gets that text in its `502` response. The durable audit log keeps it.
 - `runner_audit`
 - `coding_session_started`

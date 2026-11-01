@@ -5,11 +5,14 @@ import { SessionQuestionChannel } from "./SessionQuestionChannel";
 import type { PlanTurnOutcome } from "../plans/ThreadPlanService";
 import type { ThreadPlanTurnTools } from "../plans/planTurnTools";
 import type { AgentRunnerToolSet } from "../runner/AgentRunner";
+import type { QuestionRequestSet } from "../runner/shared/PendingQuestionRequests";
 import { SketchTurnTools, type SessionSketches } from "../sketch/agent/SketchTurnTools";
+import type { ChildTurnTools } from "../children/agent/childTools";
+import { CHILD_TOOL_IDS } from "../domain/childThreads";
 
 /**
- * The one place a session's tool families become a turn's tool set. Plan and
- * sketch handlers join one `prepareAgentRunnerToolSet` binding, so a runner
+ * The one place a session's tool families become a turn's tool set. Plan,
+ * sketch and child handlers join one `prepareAgentRunnerToolSet` binding, so a runner
  * sees one catalog and one dispatcher, and the binding dies the moment the
  * turn settles. This is a composer, not a plugin seam: a new family is a new
  * field here.
@@ -22,6 +25,10 @@ import { SketchTurnTools, type SessionSketches } from "../sketch/agent/SketchTur
  * session from before the fields existed reports false. A session whose
  * runner offers no sketch tools now has no field, since a new thread would
  * not have them either.
+ *
+ * The child tools arrive through the session service's `attachChildren`,
+ * because the child-thread service is built on top of it. Until then, and for a
+ * session that is itself a child, no child tool is advertised.
  */
 export type { SessionSketches } from "../sketch/agent/SketchTurnTools";
 
@@ -30,8 +37,9 @@ export class SessionTurnTools {
   readonly sketches: SketchTurnTools;
   /** Questions asked by backend-owned tools; the session service answers here before the runner. */
   readonly questions: SessionQuestionChannel;
+  private children?: ChildTurnTools;
 
-  constructor(private readonly plans: ThreadPlanTurnTools, deps: {
+  constructor(private readonly plans: ThreadPlanTurnTools, private readonly deps: {
     sketches?: SessionSketches;
     runnerConfig?: ServiceConfig;
     sessions: ReadonlyMap<string, AgentSession>;
@@ -66,6 +74,26 @@ export class SessionTurnTools {
       ? this.sketches.advertised(session.runnerKind) : session.threadAgentToolIds ?? []);
   }
 
+  /** Install the parent agent's child tools, once. */
+  attachChildren(children: ChildTurnTools): void {
+    if (this.children) throw new Error("Child tools are already attached");
+    this.children = children;
+  }
+
+  /**
+   * Whether the session's thread holds every child tool: what the runner
+   * offers now for a session with no thread yet, otherwise what the thread
+   * recorded when it started.
+   */
+  childToolsAvailable(session: AgentSession): boolean {
+    const ids = session.runner?.nativeSessionId === undefined ? this.childIds(session) : session.threadAgentToolIds ?? [];
+    return CHILD_TOOL_IDS.every((id) => ids.includes(id));
+  }
+
+  private childIds(session: Pick<AgentSession, "runnerKind" | "parent">): string[] {
+    return this.children?.advertised(session, this.deps.runnerConfig) ?? [];
+  }
+
   /** A fresh binding for one turn, or undefined when the runner advertises no tools. */
   bind(input: {
     session: AgentSession;
@@ -76,7 +104,8 @@ export class SessionTurnTools {
     const { session } = input;
     const planIds = this.plans.advertised(session.runnerKind);
     const sketchIds = this.sketches.advertised(session.runnerKind);
-    const allowed = [...planIds, ...sketchIds];
+    const childIds = this.childIds(session);
+    const allowed = [...planIds, ...sketchIds, ...childIds];
     if (session.runner?.nativeSessionId === undefined) {
       // This turn starts the thread, so its catalog is the one the thread keeps.
       session.threadAgentToolIds = allowed;
@@ -84,6 +113,8 @@ export class SessionTurnTools {
       else session.sketchToolsAvailable = this.sketches.covers(allowed);
     }
     if (allowed.length === 0) return undefined;
+    const ask = (sets: readonly QuestionRequestSet[], signal?: AbortSignal) =>
+      this.questions.ask({ sessionId: session.id, turnId: input.turnId, sets, isLive: input.isLive, ...(signal ? { signal } : {}) });
     const prepared = prepareAgentRunnerToolSet({
       runId: input.turnId,
       sessionKey: session.id,
@@ -92,14 +123,14 @@ export class SessionTurnTools {
       required: input.context?.planToolsRequired === true && planIds.length > 0,
       handlers: {
         ...(planIds.length > 0 ? this.plans.handlers(session.id) : {}),
-        ...(sketchIds.length > 0 ? this.sketches.handlers(session, input.turnId, (sets, signal) =>
-          this.questions.ask({ sessionId: session.id, turnId: input.turnId, sets, isLive: input.isLive, ...(signal ? { signal } : {}) })) : {})
+        ...(sketchIds.length > 0 ? this.sketches.handlers(session, input.turnId, ask) : {}),
+        ...(childIds.length > 0 && this.children ? this.children.handlers(session, () => this.deps.turns.get(input.turnId)?.trigger, ask) : {})
       },
       isLive: input.isLive
     });
     this.bindings.set(input.turnId, { prepared, sessionId: session.id });
-    const instructions = [planIds.length > 0 ? this.plans.instruction : undefined, sketchIds.length > 0 ? this.sketches.instruction : undefined]
-      .filter((text): text is string => text !== undefined);
+    const instructions = [planIds.length > 0 ? this.plans.instruction : undefined, sketchIds.length > 0 ? this.sketches.instruction : undefined,
+      childIds.length > 0 ? this.children?.instruction : undefined].filter((text): text is string => text !== undefined);
     return { ...prepared.tools, instructions: instructions.join("\n\n") };
   }
 
@@ -115,11 +146,12 @@ export class SessionTurnTools {
     this.bindings.delete(turnId);
   }
 
-  /** Release everything a deleted session holds: its turn bindings, open questions, and remembered sketch versions. */
+  /** Release everything a deleted session holds: its turn bindings, open questions, and remembered sketch versions and child answers. */
   closeSession(sessionId: string): void {
     for (const [turnId, binding] of this.bindings) if (binding.sessionId === sessionId) this.release(turnId);
     this.questions.release(sessionId);
     this.sketches.forgetSession(sessionId);
+    this.children?.forgetSession(sessionId);
   }
 
   /** Release the turn's binding first, then queue the plan's turn-end transition. */
@@ -129,10 +161,11 @@ export class SessionTurnTools {
   }
 
   /** The standing instructions and the plan context for a runner that takes them in the prompt. */
-  async promptForTurn(session: Pick<AgentSession, "id" | "runnerKind">): Promise<{ standing?: string; context?: string }> {
+  async promptForTurn(session: Pick<AgentSession, "id" | "runnerKind" | "parent">): Promise<{ standing?: string; context?: string }> {
     const plan = await this.plans.promptForTurn(session);
     const sketch = this.sketches.advertised(session.runnerKind).length > 0 ? this.sketches.instruction : undefined;
-    const standing = [plan.standing, sketch].filter((text): text is string => text !== undefined).join("\n\n");
+    const children = this.childIds(session).length > 0 ? this.children?.instruction : undefined;
+    const standing = [plan.standing, sketch, children].filter((text): text is string => text !== undefined).join("\n\n");
     return { ...(standing ? { standing } : {}), ...(plan.context ? { context: plan.context } : {}) };
   }
 }

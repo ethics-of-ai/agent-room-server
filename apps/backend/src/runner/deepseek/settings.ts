@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { CodingAgentTurnSettings, ServiceConfig } from "../../domain/models";
-import type { AgentRunnerInputPart } from "../AgentRunner";
+import type { AgentRunnerInputPart, RunnerMetadata } from "../AgentRunner";
 import { commandAudit } from "../shared/commandAudit";
 
 /** The provider route the runtime mounts when the operator names none. */
@@ -199,4 +199,20 @@ export function deepseekChildEnv(config: ServiceConfig, agentCwd: string): NodeJ
 
 export function deepseekCommandAudit(config: ServiceConfig): { executableName: string; argsCount: number } {
   return commandAudit(config.deepseekExecutable ?? DEEPSEEK_RUNTIME_BINARY, config.deepseekArgs);
+}
+
+/** The runner metadata every DeepSeek activity carries. */
+export function deepseekRunnerMetadata(config: ServiceConfig, session: { sdkSessionId: string; model?: string }): RunnerMetadata {
+  return {
+    nativeSessionId: session.sdkSessionId,
+    ...(session.model ? { model: session.model } : {}),
+    // The harness's own posture, deliberately not flattened into a shared
+    // permission enum with the Codex approval policy or the Claude Code
+    // permission mode. Absent when the operator has configured none, because
+    // the effective posture is then the composed profile's and this backend
+    // does not know it.
+    ...(config.deepseekPermissionMode
+      ? { posture: { label: "permissionMode", value: config.deepseekPermissionMode } }
+      : {})
+  };
 }

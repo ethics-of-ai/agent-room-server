@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { publishWorkspaceRegistered, publishWorkspaceRemoved } from "../../events/workspaceEvents";
 import type { RegisterLocalWorkspaceInput } from "../../workspace/LocalWorkspaceRegistry";
 import { replyWorkspaceError, type WorkspaceRouteDeps } from "./deps";
 import { registerWorkspacePayloadSchema, workspaceParamsSchema } from "../../domain/workspaceSchemas";
@@ -7,6 +8,8 @@ import { registerWorkspacePayloadSchema, workspaceParamsSchema } from "../../dom
  * Registration is metadata-only: it records an existing absolute directory
  * under `STATE_DIR` and never writes inside the selected folder, and
  * unregistering forgets that metadata without touching the folder either.
+ * Unregistering refuses an open child's workspace and a parent workspace with
+ * open children; Close is the only way to remove a child (decision 9).
  */
 export async function registerWorkspaceRegistrationRoutes(
   app: FastifyInstance,
@@ -23,12 +26,7 @@ export async function registerWorkspaceRegistrationRoutes(
     try {
       const input: RegisterLocalWorkspaceInput = parsed.data;
       const result = await deps.registry.register(input);
-      deps.eventBus.publish("workspace_registered", {
-        workspaceId: result.workspace.id,
-        path: result.workspace.path,
-        kind: result.workspace.kind,
-        created: result.created
-      });
+      publishWorkspaceRegistered(deps.eventBus, result.workspace, result.created);
       return reply.code(result.created ? 201 : 200).send({ workspace: result.workspace });
     } catch (error) {
       return replyWorkspaceError(reply, error);
@@ -38,15 +36,12 @@ export async function registerWorkspaceRegistrationRoutes(
   app.delete("/api/workspaces/:workspaceId", async (request, reply) => {
     const { workspaceId } = workspaceParamsSchema.parse(request.params);
     try {
-      const result = await deps.registry.unregister(workspaceId);
+      const remove = () => deps.registry.unregister(workspaceId);
+      const result = await (deps.children ? deps.children.guardWorkspaceRemoval(workspaceId, remove) : remove());
       // Release the unregistered workspace's cached file index (and detach any
       // in-flight build) so the explorer holds no state for a forgotten workspace.
       deps.explorer.invalidateFileIndex(workspaceId);
-      deps.eventBus.publish("workspace_removed", {
-        workspaceId: result.workspace.id,
-        path: result.workspace.path,
-        kind: result.workspace.kind
-      });
+      publishWorkspaceRemoved(deps.eventBus, result.workspace);
       return reply.code(204).send();
     } catch (error) {
       return replyWorkspaceError(reply, error);

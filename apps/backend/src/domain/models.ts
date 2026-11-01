@@ -2,6 +2,7 @@ import type { RegisteredRunnerKind } from "../runner/registry";
 import type { LanguageServiceExecutableConfig } from "./languageService";
 import type { PlanPersistedState } from "../plans/planModel";
 import type { AgentBackgroundTask, AgentTurnTrigger } from "./backgroundWork";
+import type { AgentSessionMessageOrigin, AgentSessionParent, LocalWorkspaceWorktree } from "./childThreads";
 export interface ServiceConfig extends LanguageServiceExecutableConfig {
   runnerKind: AgentRunnerKind;
   agentRoomHome?: string;
@@ -178,7 +179,7 @@ export interface HarnessProfile {
   safetyPosture: HarnessSafetyPosture;
 }
 
-export type LocalWorkspaceKind = "managed_throwaway" | "user_selected";
+export type LocalWorkspaceKind = "managed_throwaway" | "managed_worktree" | "user_selected";
 
 export interface LocalWorkspaceGitSnapshot {
   isRepository: boolean;
@@ -207,17 +208,10 @@ export interface LocalWorkspaceGitBranch {
   behind?: number;
 }
 
-/** The fixed set of git operations the workspace routes expose. */
+/** The fixed git operations: the nine the workspace routes expose, then the five child worktrees use. */
 export type LocalWorkspaceGitOperation =
-  | "stage"
-  | "unstage"
-  | "discard"
-  | "commit"
-  | "fetch"
-  | "pull"
-  | "push"
-  | "create_branch"
-  | "switch_branch";
+  | "stage" | "unstage" | "discard" | "commit" | "fetch" | "pull" | "push" | "create_branch" | "switch_branch"
+  | "worktree_add" | "worktree_remove" | "branch_delete" | "merge_ff" | "update_from_parent";
 
 export interface LocalWorkspaceGitOperationResult {
   workspaceId: string;
@@ -279,6 +273,8 @@ export interface LocalWorkspace {
   trustedAt: string;
   lastOpenedAt: string;
   git: LocalWorkspaceGitSnapshot;
+  /** Set only on a `managed_worktree` workspace. */
+  worktree?: LocalWorkspaceWorktree;
 }
 
 export interface LocalWorkspaceRegistrySnapshot {
@@ -580,6 +576,9 @@ export interface AgentSession {
   /** The AgentRoom tool logical ids the session's thread registered when it started. */
   threadAgentToolIds?: string[];
   backgroundTasks?: AgentBackgroundTask[];
+  /** Set on a child thread; see `domain/childThreads.ts`. */
+  parent?: AgentSessionParent;
+  closedAt?: string;
 }
 
 export interface AgentSessionTurn {
@@ -605,6 +604,7 @@ export interface AgentSessionMessage {
   role: AgentSessionMessageRole;
   content: string;
   context?: AgentSessionMessageContext;
+  origin?: AgentSessionMessageOrigin;
   status: AgentSessionMessageStatus;
   at: string;
 }

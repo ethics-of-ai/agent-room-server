@@ -14,6 +14,18 @@ final class ThreadCheckoutBranchTests: XCTestCase {
         XCTAssertEqual(ThreadCheckoutBranch.label(for: session(recorded: "main"), in: nil), "Branch unknown")
     }
 
+    func testAClosedChildNamesItsLastBranchBecauseItsWorkspaceIsGone() {
+        let parent = AgentSessionParent(sessionId: "parent", workspaceId: "workspace-1")
+        var closed = session(recorded: "agentroom/fix-1a2b3c4d")
+        closed.parent = parent
+        closed.closedAt = "2026-10-31T00:00:00Z"
+        XCTAssertEqual(ThreadCheckoutBranch.label(for: closed, in: nil), "agentroom/fix-1a2b3c4d")
+
+        var open = session(recorded: "agentroom/fix-1a2b3c4d")
+        open.parent = parent
+        XCTAssertEqual(ThreadCheckoutBranch.label(for: open, in: nil), "Branch unknown")
+    }
+
     private func workspace(branch: String?, isRepository: Bool = true) -> LocalWorkspace {
         LocalWorkspace(
             id: "workspace-1", name: "repo", path: "/repo", kind: "user_selected",

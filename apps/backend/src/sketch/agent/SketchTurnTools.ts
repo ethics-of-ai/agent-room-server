@@ -1,9 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { allowedAgentToolLogicalIds } from "../../agentTools/catalog";
 import type { AgentToolHandler, AgentToolInvocationContext } from "../../agentTools/dispatch";
 import type { AgentSession, ServiceConfig } from "../../domain/models";
 import { isRegisteredRunnerKind, runnerDescriptor } from "../../runner/registry";
-import { runnerAgentToolCapabilities } from "../../runner/shared/agentToolSets";
+import { runnerAdvertisedToolIds } from "../../runner/shared/agentToolSets";
 import type { RepositorySketchService } from "../RepositorySketchService";
 import { SketchServiceError } from "../sketchErrors";
 import type { SketchOperation } from "../core";
@@ -50,10 +49,7 @@ export class SketchTurnTools {
 
   /** The sketch logical ids this runner's descriptor lets a session advertise. */
   advertised(runnerKind: string): string[] {
-    if (!this.deps.sketches || !isRegisteredRunnerKind(runnerKind)) return [];
-    const ids = new Set<string>(this.offered);
-    return allowedAgentToolLogicalIds({ gates: {}, capabilities: runnerAgentToolCapabilities(runnerKind, this.deps.runnerConfig) })
-      .filter((id) => ids.has(id));
+    return this.deps.sketches ? runnerAdvertisedToolIds(runnerKind, this.offered, this.deps.runnerConfig) : [];
   }
 
   /** Whether a thread whose catalog holds `ids` has every sketch tool this backend offers. */

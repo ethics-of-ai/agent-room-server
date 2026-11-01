@@ -17,9 +17,11 @@ import {
  * and `question_resolved` activities on the session's running turn, so a
  * client answers it through the ordinary answer route. The session service
  * checks this channel before the runner, and turn end and session close
- * release what it holds as cancelled.
+ * release what it holds as cancelled. An ask with the setting off is
+ * `unavailable` with `reason: "questions_off"`, so a tool can tell it from a
+ * turn that is no longer live.
  */
-export type SessionQuestionOutcome = QuestionWaitOutcome | { status: "unavailable" };
+export type SessionQuestionOutcome = QuestionWaitOutcome | { status: "unavailable"; reason?: "questions_off" };
 
 export class SessionQuestionChannel {
   private readonly questions: PendingQuestionRequests;
@@ -41,7 +43,8 @@ export class SessionQuestionChannel {
     isLive(): boolean;
     signal?: AbortSignal;
   }): Promise<SessionQuestionOutcome> {
-    if (!this.deps.enabled() || !input.isLive() || input.signal?.aborted) return { status: "unavailable" };
+    if (!this.deps.enabled()) return { status: "unavailable", reason: "questions_off" };
+    if (!input.isLive() || input.signal?.aborted) return { status: "unavailable" };
     const requestId = `question-${randomUUID()}`;
     const wait = this.questions.wait({ sessionKey: input.sessionId, requestId, sets: input.sets });
     if (!wait) return { status: "unavailable" };

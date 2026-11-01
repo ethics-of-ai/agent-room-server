@@ -3,6 +3,8 @@ import SwiftUI
 struct WorkspaceSettingsRow: View {
     @Environment(BackendSupervisor.self) private var supervisor
     var workspace: LocalWorkspace
+    /// Why Remove is off; see `WorkspaceSettingsRules.removalBlock`.
+    var removalBlock: String?
 
     private var branches: [LocalWorkspaceGitBranch] {
         workspace.git.branches ?? []
@@ -14,11 +16,12 @@ struct WorkspaceSettingsRow: View {
                 Label(workspace.name, systemImage: workspace.git.isRepository ? "chevron.left.forwardslash.chevron.right" : "folder")
                     .font(.callout.weight(.medium))
                 Spacer()
-                Text(workspace.kind == "managed_throwaway" ? "Managed" : "Selected")
+                Text(WorkspaceSettingsRules.kindLabel(for: workspace))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Remove", systemImage: "trash", role: .destructive, action: unregisterWorkspace)
                     .buttonStyle(.bordered)
+                    .disabled(removalBlock != nil)
             }
             Text(workspace.path)
                 .font(.caption.monospaced())
@@ -27,7 +30,7 @@ struct WorkspaceSettingsRow: View {
                 .truncationMode(.middle)
                 .textSelection(.enabled)
             HStack(spacing: 8) {
-                if workspace.git.isRepository, !branches.isEmpty {
+                if workspace.git.isRepository, !branches.isEmpty, WorkspaceSettingsRules.offersBranchSwitch(for: workspace) {
                     Menu {
                         ForEach(branches) { branch in
                             Button {
@@ -53,6 +56,9 @@ struct WorkspaceSettingsRow: View {
                 }
             }
             .font(.caption)
+            if let removalBlock {
+                SettingsCaption(text: removalBlock, systemImage: "arrow.triangle.branch")
+            }
         }
     }
 

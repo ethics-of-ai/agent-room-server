@@ -281,6 +281,39 @@ describe("durable agent sessions", () => {
     expect(list.json().sessions).toEqual([]);
     await second.app.close();
   });
+
+  it("keeps a child's parent, closedAt, parent_task trigger and message origin through a restart and its rewrite", async () => {
+    const serviceConfig = await config();
+    const workspace = await registerWorkspaceOffline(serviceConfig);
+    const sessionId = "agent-session-closed-child";
+    const parent = { sessionId: "agent-session-parent", workspaceId: "workspace-parent", operationId: "operation-1" };
+    const closedAt = "2026-10-31T00:00:00.000Z";
+    const trigger = { kind: "parent_task", parentSessionId: parent.sessionId, tasks: [] };
+    const document = sessionDocument(sessionId, workspace, { runnerKind: "codex", running: true });
+    Object.assign(document.session as object, { parent, closedAt });
+    Object.assign((document.turns as object[])[0], { trigger });
+    Object.assign((document.messages as object[])[0], { role: "system", origin: "parent_task" });
+    await writeSessionDocument(serviceConfig, document);
+
+    const { app, durableSessions } = await buildServer({ config: serviceConfig });
+    const read = await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}` });
+    expect(read.json().session).toMatchObject({ parent, closedAt });
+    const messages = (await app.inject({ method: "GET", url: `/api/agent-sessions/${sessionId}/messages` })).json().messages;
+    expect(messages[0]).toMatchObject({ role: "system", origin: "parent_task" });
+
+    // Hydration failed the interrupted turn, so the record was rewritten.
+    await durableSessions.flush();
+    const stored = JSON.parse(await readFile(join(serviceConfig.stateDir, "sessions", `${sessionId}.json`), "utf8"));
+    expect(stored.schemaVersion).toBe(2);
+    expect(stored.session).toMatchObject({ parent, closedAt, status: "failed" });
+    expect(stored.turns[0]).toMatchObject({ status: "failed", trigger });
+    expect(stored.messages[0]).toMatchObject({ role: "system", origin: "parent_task" });
+
+    const turn = await app.inject({ method: "POST", url: `/api/agent-sessions/${sessionId}/turns`, payload: { message: "more" } });
+    expect(turn.statusCode).toBe(409);
+    expect(turn.json().code).toBe("child_closed");
+    await app.close();
+  });
 });
 
 describe("durable agent sessions: resume that did not take", () => {

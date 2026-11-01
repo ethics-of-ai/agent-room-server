@@ -136,6 +136,17 @@ SQLite store, and separate host processes:
    suppresses only that recognized rejection; every other unhandled rejection
    fails loudly.
 
+In a linked worktree the SDK widens the sandbox itself. When the
+workspace's `.git` is a file, it runs `git rev-parse --git-common-dir`, adds
+that directory to `additionalReadwritePaths`, and write-protects its
+`hooks/**`, `config`, `config.worktree`, `info/attributes` and `commondir`.
+On 2026-11-01 `cursorsandbox` from SDK 1.0.28, given that policy for a
+scratch linked worktree, let `git commit` through and refused `git config
+--local` and a new hook. With the workspace alone it refused the commit at
+`.git/worktrees/<name>/index.lock`. The policy was built by hand from the
+SDK source, so a live sandboxed turn in a worktree is still the proof. See
+[Trust and safety](../safety/TRUST_AND_SAFETY.md#child-threads).
+
 The unsandboxed shell used the host process cwd rather than `local.cwd`, so the
 backend starts the host in the registered workspace. `run.stream()` was already
 token-granular for text and reasoning; delta hooks remain useful for shell

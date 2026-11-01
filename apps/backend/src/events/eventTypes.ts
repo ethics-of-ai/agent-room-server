@@ -1,4 +1,5 @@
 import type { ManagedSettingKey } from "../config/settingsStore";
+import type { ChildThreadChange, ChildThreadInitiation } from "../domain/childThreads";
 import type { AgentSession, LocalWorkspaceGitOperation, StatusSnapshot } from "../domain/models";
 import type { CodingAgentEventType } from "../protocol/coding/events";
 
@@ -19,6 +20,7 @@ export type AgentRoomEventType =
   | "agent_plan_changed"
   | "agent_background_tasks_changed"
   | "agent_tool_app_called"
+  | "agent_child_changed"
   | "workspace_registered"
   | "workspace_removed"
   | "workspace_branch_changed"
@@ -65,6 +67,20 @@ export interface AgentToolAppCalledPayload {
     durationMs: number;
     argumentsSha256: string;
   };
+}
+
+// Emitted when a child thread is created, and in later batches landed, updated
+// or closed. Ids and the change only: a child's title, task and transcript
+// stay behind the authenticated reads. Status changes ride the ordinary turn
+// events, which carry the child's own `sessionId`. `audit` repeats the fields
+// because `FileAuditLogStore` keeps only `payload.audit`.
+export interface AgentChildChangedPayload {
+  parentSessionId: string;
+  childSessionId: string;
+  change: ChildThreadChange;
+  /** Set on `created`. */
+  initiation?: ChildThreadInitiation;
+  audit: { parentSessionId: string; childSessionId: string; change: ChildThreadChange; initiation?: ChildThreadInitiation };
 }
 
 export interface StatusSnapshotPayload {

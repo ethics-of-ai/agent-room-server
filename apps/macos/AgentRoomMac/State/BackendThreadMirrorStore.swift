@@ -41,6 +41,12 @@ final class BackendThreadMirrorStore {
         return status?.recentEvents.filter { $0.sessionId == selectedSessionID } ?? []
     }
 
+    /// The Threads list rows for the sessions a search and filter leave, each
+    /// child under its parent; see `ThreadListRow`.
+    func listRows(showing visible: [AgentSession]) -> [ThreadListRow] {
+        ThreadListRow.rows(visible: visible, all: sessions)
+    }
+
     var runningCount: Int {
         sessions.filter(\.threadIsRunning).count
     }

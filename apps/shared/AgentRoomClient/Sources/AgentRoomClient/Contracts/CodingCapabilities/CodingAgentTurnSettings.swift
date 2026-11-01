@@ -1,6 +1,6 @@
 import Foundation
 
-public struct CodingAgentTurnSettings: Codable, Hashable {
+public struct CodingAgentTurnSettings: Codable, Hashable, Sendable {
     public var model: String?
     public var reasoningEffort: String?
     public var serviceTier: String?

@@ -12,6 +12,10 @@ import { CodexAppServerRunner } from "../src/runner/codex/CodexAppServerRunner";
 import { CursorSdkRunner } from "../src/runner/cursor/CursorSdkRunner";
 import { DeepSeekHarnessRunner } from "../src/runner/deepseek/DeepSeekHarnessRunner";
 import { PLAN_TOOLS_INSTRUCTION, PLAN_TOOL_IDS, planToolDefinitions, planToolHandlers } from "../src/plans/planTools";
+import { ChildTurnTools } from "../src/children/agent/childTools";
+import { childToolDefinitions } from "../src/children/agent/childToolContract";
+import { CHILD_TOOL_IDS } from "../src/domain/childThreads";
+import type { AgentSession } from "../src/domain/models";
 import { memoryPlanWriter, planService } from "./support/planServiceHarness";
 import { PROBE_TOOL_LOGICAL_ID, PROBE_TOOL_NAME } from "./support/probeAgentTool";
 import {
@@ -195,6 +199,40 @@ describe.each(fixtures)("AgentRoom tool conformance: $name", (fixture) => {
     expect(envelopes[6].plan).toMatchObject({ status: "completed", summary: "Both steps are done." });
     expect(report!.results[7]).toBe("probe answered turn-a");
     if (systemPrompts) expect(systemPrompts()[0]).toContain(PLAN_TOOLS_INSTRUCTION);
+  });
+
+  it("registers the child tools beside the plan tools and dispatches them through native calls", async () => {
+    const { runner, workspacePath } = await start(fixture);
+    // Real child handlers over a parent with no children: what crosses the
+    // transport is the generic catalog, never a child-specific branch.
+    const caller = { id: "s-children", runnerKind: "claude_code" } as AgentSession;
+    const children = new ChildTurnTools({
+      service: { list: async () => ({ children: [], parentToolsAvailable: true, waitingReports: 0 }) } as never,
+      sessions: { getSession: () => undefined, listSessions: () => [] } as never,
+      registry: {} as never
+    });
+    const catalog = [...PLAN_TOOL_IDS, ...CHILD_TOOL_IDS];
+    const prepared = prepareAgentRunnerToolSet({
+      runId: "turn-children", sessionKey: caller.id, catalog, allowed: catalog, required: true,
+      handlers: { ...planToolHandlers(planService(memoryPlanWriter().writer), caller.id), ...children.handlers(caller, () => undefined) },
+      isLive: () => true
+    });
+    const names = childToolDefinitions.map((definition) => definition.name);
+    const { report, final } = await runTurn(runner, {
+      runId: "turn-children", sessionId: caller.id, workspacePath, tools: prepared,
+      script: { calls: [
+        { name: "agentroom_child_list", arguments: {} },
+        { name: "agentroom_child_read", arguments: { childSessionId: "agent-session-elsewhere" } },
+        { name: "agentroom_child_start", arguments: { tasks: [], operationId: "op-1" } }
+      ] }
+    });
+
+    expect(final, JSON.stringify(final)).toMatchObject({ type: "run_succeeded" });
+    expect(report?.tools).toEqual(expect.arrayContaining(names));
+    const [listed, read, refused] = report!.results.map((text) => JSON.parse(text));
+    expect(listed).toEqual({ schemaVersion: 1, ok: true, children: [], waitingReports: 0 });
+    expect(read.error.code).toBe("unknown_child");
+    expect(refused.error.code).toBe("invalid_input");
   });
 
   it("binds each turn afresh and refuses a delayed call stamped with the previous turn", async () => {

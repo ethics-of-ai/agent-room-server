@@ -18,59 +18,20 @@ public protocol SketchSending {
 extension APIClient {
     // MARK: - Plumbing
 
-    /// Same URL, bearer, and JSON conventions as the generic request path,
-    /// kept here because `APIClient.swift` sits at its recorded size ceiling
-    /// and the sketch routes need the error body's `code`/`currentRevision`
-    /// before the generic path would surface them. URL construction still
-    /// goes through the shared helper, so endpoint spelling stays single-source.
+    /// The sketch routes' requests. Their refusals keep `code` and
+    /// `currentRevision`, which the generic path would not surface.
     func sketchRequest<T: Decodable>(
         _ pathSegments: [String],
         method: String = "GET",
         body: Data? = nil,
         queryItems: [URLQueryItem] = []
     ) async throws -> T {
-        try await sketchRequestData(pathSegments, method: method, body: body, queryItems: queryItems) { data in
-            do {
-                return try JSONDecoder().decode(T.self, from: data)
-            } catch {
-                throw APIClientError.invalidResponse("Backend response did not match the expected shape.")
-            }
+        try await codedRefusalRequest(pathSegments, method: method, body: body, queryItems: queryItems) { statusCode, body in
+            Self.sketchError(statusCode: statusCode, body: body)
         }
     }
 
-    private func sketchRequestData<T>(
-        _ pathSegments: [String],
-        method: String,
-        body: Data?,
-        queryItems: [URLQueryItem],
-        decode: (Data) throws -> T
-    ) async throws -> T {
-        var request = URLRequest(url: try url(pathSegments: pathSegments, queryItems: queryItems))
-        request.httpMethod = method
-        if !authToken.isEmpty {
-            request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
-        }
-        if let body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = body
-        }
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw sketchError(statusCode: http.statusCode, body: data)
-        }
-        return try decode(data)
-    }
-
-    private func sketchError(statusCode: Int, body: Data) -> SketchEndpointError {
-        struct ErrorBody: Decodable {
-            var error: String?
-            var code: String?
-            var currentRevision: Int?
-        }
-        let decoded = try? JSONDecoder().decode(ErrorBody.self, from: body)
+    private static func sketchError(statusCode: Int, body decoded: CodedRefusalBody?) -> SketchEndpointError {
         if statusCode == 401 {
             // Keep the shared unauthorized meaning for expired or wrong tokens.
             return SketchEndpointError(

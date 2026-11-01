@@ -12,6 +12,9 @@ import {
 } from "../runner/shared/PendingQuestionRequests";
 import { AgentAttachmentError, AgentAttachmentStore, maxAgentAttachmentBytes } from "../agent/AgentAttachmentStore";
 import { AgentSessionError, AgentSessionService } from "../agent/AgentSessionService";
+import { ChildThreadError } from "../children/ChildThreadError";
+import { sendRefusal } from "./refusals";
+import type { ChildThreadService } from "../children/ChildThreadService";
 import { BACKGROUND_TASK_LIMITS } from "../domain/backgroundWork";
 import { agentRunnerKindSchema, agentTurnContextSchema, codingAgentTurnSettingsSchema } from "../domain/schemas";
 import type { ServiceConfig } from "../domain/models";
@@ -80,7 +83,9 @@ export async function registerAgentSessionRoutes(
   app: FastifyInstance,
   agentSessions: AgentSessionService,
   attachments: AgentAttachmentStore,
-  config: ServiceConfig
+  config: ServiceConfig,
+  /** Refuses deleting an open child or a parent with open children; absent deletes unguarded. */
+  children?: Pick<ChildThreadService, "guardSessionDelete">
 ): Promise<void> {
   app.get("/api/agent-sessions", async (request, reply) => {
     // Session summaries carry lastMessage, which can contain user or model
@@ -146,13 +151,12 @@ export async function registerAgentSessionRoutes(
 
   app.delete("/api/agent-sessions/:sessionId", async (request, reply) => {
     const { sessionId } = sessionParamsSchema.parse(request.params);
+    const remove = () => agentSessions.deleteSession(sessionId);
     try {
-      await agentSessions.deleteSession(sessionId);
+      await (children ? children.guardSessionDelete(sessionId, remove) : remove());
       return reply.code(204).send();
     } catch (error) {
-      if (error instanceof AgentSessionError) {
-        return reply.code(error.statusCode).send({ error: error.message });
-      }
+      if (error instanceof AgentSessionError || error instanceof ChildThreadError) return sendRefusal(reply, error);
       throw error;
     }
   });
@@ -198,9 +202,7 @@ export async function registerAgentSessionRoutes(
       }, "Agent turn HTTP request accepted");
       return reply.code(202).send({ turn });
     } catch (error) {
-      if (error instanceof AgentSessionError) {
-        return reply.code(error.statusCode).send({ error: error.message });
-      }
+      if (error instanceof AgentSessionError) return sendRefusal(reply, error);
       if (error instanceof AgentAttachmentError) {
         return reply.code(error.statusCode).send({ error: error.message });
       }

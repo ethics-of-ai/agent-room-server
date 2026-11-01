@@ -32,6 +32,11 @@ public struct AgentSession: Codable, Hashable, Identifiable {
     /// reports it. Absent when nothing runs and from older backends. The
     /// session stays `idle` while tasks run.
     public var backgroundTasks: [AgentBackgroundTask]?
+    /// Set only on a child thread: the thread that started it.
+    public var parent: AgentSessionParent?
+    /// When a child thread was closed. A closed child keeps its transcript and
+    /// refuses new turns with `409 child_closed`.
+    public var closedAt: String?
 
     public init(
         id: String,
@@ -52,7 +57,9 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         createdAt: String,
         updatedAt: String,
         sketchToolsAvailable: Bool? = nil,
-        backgroundTasks: [AgentBackgroundTask]? = nil
+        backgroundTasks: [AgentBackgroundTask]? = nil,
+        parent: AgentSessionParent? = nil,
+        closedAt: String? = nil
     ) {
         self.id = id
         self.workspaceId = workspaceId
@@ -73,5 +80,7 @@ public struct AgentSession: Codable, Hashable, Identifiable {
         self.updatedAt = updatedAt
         self.sketchToolsAvailable = sketchToolsAvailable
         self.backgroundTasks = backgroundTasks
+        self.parent = parent
+        self.closedAt = closedAt
     }
 }

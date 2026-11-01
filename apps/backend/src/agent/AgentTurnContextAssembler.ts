@@ -65,6 +65,13 @@ export class AgentTurnContextAssembler {
       planPrompt?: {
         promptForTurn(session: AgentSession): Promise<{ standing?: string; context?: string }>;
       };
+      // Child reports that the wake budget, or a parent that could not
+      // continue, held back. Volatile like the diagram summaries: per turn,
+      // for any runner, dropped only when the turn is accepted. A wake takes
+      // its reports out before it starts, so only a person's turn gets any.
+      childReports?: {
+        prepareSummaryForTurn(session: AgentSession): Promise<{ summary?: string; acknowledge(): void } | undefined>;
+      };
     }
   ) {}
 
@@ -85,6 +92,7 @@ export class AgentTurnContextAssembler {
       // changed since.
       const renderFeedback = await this.deps.diagramRenderFeedback?.prepareSummaryForTurn(input.session);
       const planPrompt = await this.deps.planPrompt?.promptForTurn(input.session);
+      const childReports = await this.deps.childReports?.prepareSummaryForTurn(input.session);
       // The standing diagram contract is constant, so a runner whose descriptor
       // says `system` has already had it installed once by its own adapter
       // (Claude Code appends it to the cached SDK system prompt); repeating it
@@ -105,7 +113,8 @@ export class AgentTurnContextAssembler {
         standingInstructionsRideTheTurn ? planPrompt?.standing : undefined,
         renderFeedback?.summary,
         humanEditSummary?.summary,
-        planPrompt?.context
+        planPrompt?.context,
+        childReports?.summary
       ].filter((value): value is string => value !== undefined);
       const prompt = instructions.length > 0
         ? `${instructions.join("\n\n")}\n\n${contextPrompt}`
@@ -116,7 +125,7 @@ export class AgentTurnContextAssembler {
         input.context?.attachments
       );
       const messageContext = messageContextFromTurnContext(input.context, contextAttachments);
-      const acknowledgements = [humanEditSummary?.acknowledge, renderFeedback?.acknowledge]
+      const acknowledgements = [humanEditSummary?.acknowledge, renderFeedback?.acknowledge, childReports?.acknowledge]
         .filter((value): value is () => void => value !== undefined);
       return {
         prompt,

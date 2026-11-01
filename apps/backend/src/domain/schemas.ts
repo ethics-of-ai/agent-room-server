@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { WorkspaceTreeEntry } from "./models";
 import { agentRunnerKindSchema } from "../runner/registry";
 import { agentBackgroundTaskSchema, agentTurnTriggerSchema, BACKGROUND_TASK_LIMITS } from "./backgroundWork";
+import { agentSessionMessageOriginSchema, agentSessionParentSchema, localWorkspaceWorktreeSchema } from "./childThreads";
 import { PLAN_LIMITS, planMutationReceiptSchema, threadPlanSchema } from "../plans/planModel";
 import {
   defaultClaudeCodeLoadWorkspaceSkills,
@@ -184,7 +185,7 @@ export const harnessProfileSchema = z.object({
   })
 });
 
-export const localWorkspaceKindSchema = z.enum(["managed_throwaway", "user_selected"]);
+export const localWorkspaceKindSchema = z.enum(["managed_throwaway", "managed_worktree", "user_selected"]);
 
 export const localWorkspaceGitBranchSchema = z.object({
   name: z.string().min(1),
@@ -255,7 +256,8 @@ export const localWorkspaceSchema = z.object({
   kind: localWorkspaceKindSchema,
   trustedAt: z.string().min(1),
   lastOpenedAt: z.string().min(1),
-  git: localWorkspaceGitSnapshotSchema
+  git: localWorkspaceGitSnapshotSchema,
+  worktree: localWorkspaceWorktreeSchema.optional()
 });
 
 export const localWorkspaceRegistrySnapshotSchema = z.object({
@@ -429,7 +431,9 @@ export const agentSessionSchema = z.object({
   updatedAt: z.string().min(1),
   sketchToolsAvailable: z.boolean().optional(),
   threadAgentToolIds: z.array(z.string().min(1)).max(64).optional(),
-  backgroundTasks: z.array(agentBackgroundTaskSchema).max(BACKGROUND_TASK_LIMITS.listed).optional()
+  backgroundTasks: z.array(agentBackgroundTaskSchema).max(BACKGROUND_TASK_LIMITS.listed).optional(),
+  parent: agentSessionParentSchema.optional(),
+  closedAt: z.string().min(1).optional()
 });
 
 export const agentSessionTurnSchema = z.object({
@@ -455,6 +459,7 @@ export const agentSessionMessageSchema = z.object({
   role: agentSessionMessageRoleSchema,
   content: z.string(),
   context: agentSessionMessageContextSchema.optional(),
+  origin: agentSessionMessageOriginSchema.optional(),
   status: agentSessionMessageStatusSchema,
   at: z.string().min(1)
 });

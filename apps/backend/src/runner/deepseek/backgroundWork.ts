@@ -20,6 +20,9 @@ import {
 
 type FinishedStatus = AgentFinishedBackgroundTask["status"];
 
+/** Notifications kept for an admitted turn a refused runtime turn folds into; past this the turn is dropped. */
+const FOLDED_TURN_NOTIFICATION_LIMIT = 2_000;
+
 interface ListedSubagent {
   /** The row without `parentId`, which `list` derives from what is still listed. */
   task: AgentBackgroundTask;
@@ -77,6 +80,8 @@ export class DeepSeekBackgroundWork {
   private agentTurns = 0;
   /** The service refused the turn the runtime is running, so its events reach no AgentRoom turn. */
   private refusedTurnRunning = false;
+  /** A refused turn's notifications, kept for the turn the service admitted before the runtime started its own. */
+  private folded?: { runId: string; notifications: JsonRpcNotification[] };
 
   constructor(
     private readonly deps: {
@@ -110,6 +115,7 @@ export class DeepSeekBackgroundWork {
     this.finished = [];
     this.agentTurns = 0;
     this.refusedTurnRunning = false;
+    this.folded = undefined;
     this.changed();
   }
 
@@ -139,9 +145,32 @@ export class DeepSeekBackgroundWork {
     if (this.agentTurns === DEEPSEEK_WAKE_BUDGET) this.deps.pauseSubagents(true);
   }
 
-  /** The service refused the turn the runtime just started. */
-  agentTurnRefused(): void {
+  /**
+   * The service refused the turn the runtime just started. With `foldInto`,
+   * the service had already admitted a turn whose stream has not attached, so
+   * the refused turn's notifications are kept for it, from its `turn/start`.
+   */
+  agentTurnRefused(foldInto?: { runId: string; turnStart: JsonRpcNotification }): void {
     this.refusedTurnRunning = true;
+    if (!foldInto) {
+      this.folded = undefined;
+      return;
+    }
+    const kept = this.folded?.runId === foldInto.runId ? this.folded.notifications : [];
+    this.folded = { runId: foldInto.runId, notifications: [...kept, foldInto.turnStart] };
+  }
+
+  /**
+   * The refused turns' notifications that fold into this admitted turn, which
+   * now attaches and takes them as its own. The hold ends here, so the rest
+   * of a refused turn still running reaches that turn too.
+   */
+  takeFolded(runId: string): JsonRpcNotification[] {
+    const folded = this.folded;
+    this.folded = undefined;
+    if (folded?.runId !== runId) return [];
+    this.refusedTurnRunning = false;
+    return folded.notifications;
   }
 
   /**
@@ -158,6 +187,7 @@ export class DeepSeekBackgroundWork {
       this.refusedTurnRunning = false;
       return false;
     }
+    if (this.folded?.notifications.push(notification) === FOLDED_TURN_NOTIFICATION_LIMIT) this.folded = undefined;
     const status = notification.method === "session.status" ? sessionStatusNotificationSchema.safeParse(notification.params) : undefined;
     if (status?.success && status.data.sessionId === this.deps.sessionId && status.data.status === "idle") {
       this.refusedTurnRunning = false;

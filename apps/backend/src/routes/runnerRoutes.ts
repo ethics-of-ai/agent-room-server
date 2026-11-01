@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { ServiceConfig } from "../domain/models";
 import { publicRunnerDescriptors } from "../runner/registry";
+import { runnerDeclaresAgentToolCapability } from "../runner/shared/agentToolSets";
 import type { RunnerRuntimeReadiness } from "../runner/runtimeReadiness";
 
 /**
@@ -27,12 +28,20 @@ import type { RunnerRuntimeReadiness } from "../runner/runtimeReadiness";
  * observation and **never triggers one** — the route stays a cheap read a client
  * can poll, and a runner nothing has probed simply carries no `ready` field.
  * Asking for a runner's capabilities is the probe.
+ *
+ * `childThreads` says whether the descriptor declares the `children` tool
+ * capability, which a child thread's runner needs, so a client's New child
+ * picker offers what the backend would admit instead of guessing from runner
+ * ids. The offline catalog file carries no such field.
  */
 export async function registerRunnerRoutes(
   app: FastifyInstance,
   deps: { config: ServiceConfig; readiness: RunnerRuntimeReadiness }
 ): Promise<void> {
   app.get("/api/runners", async () => ({
-    runners: publicRunnerDescriptors(deps.config, (runnerKind) => deps.readiness.isReady(runnerKind))
+    runners: publicRunnerDescriptors(deps.config, (runnerKind) => deps.readiness.isReady(runnerKind)).map((descriptor) => ({
+      ...descriptor,
+      childThreads: runnerDeclaresAgentToolCapability(descriptor.runnerKind, "children")
+    }))
   }));
 }

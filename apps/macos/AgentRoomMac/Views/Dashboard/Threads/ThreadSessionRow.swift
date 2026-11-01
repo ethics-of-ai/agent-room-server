@@ -1,9 +1,12 @@
 import SwiftUI
 
 struct ThreadSessionRow: View {
-    var session: AgentSession
+    var row: ThreadListRow
     /// The branch the workspace's checkout is on now; see `ThreadCheckoutBranch`.
+    /// For a child that is its worktree's branch.
     var branch: String
+
+    private var session: AgentSession { row.session }
 
     private var style: ThreadStatusStyle {
         ThreadStatusStyle.style(for: session)
@@ -21,7 +24,7 @@ struct ThreadSessionRow: View {
                     .font(.callout.weight(.semibold))
                     .lineLimit(2)
 
-                Text(session.threadWorkspaceName)
+                Text(row.parentLine ?? session.threadWorkspaceName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -30,7 +33,14 @@ struct ThreadSessionRow: View {
                 HStack(spacing: 8) {
                     Text(style.label)
                         .foregroundStyle(style.tint)
-                    Text(branch)
+                    if row.isChild {
+                        Label(branch, systemImage: "arrow.triangle.branch")
+                            .labelStyle(.titleAndIcon)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    } else {
+                        Text(branch)
+                    }
                     Text("\(session.turnCount.formatted()) turns")
                 }
                 .font(.caption.weight(.semibold))
@@ -45,6 +55,7 @@ struct ThreadSessionRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 5)
+        .padding(.leading, row.isIndented ? 20 : 0)
         .accessibilityElement(children: .combine)
     }
 }

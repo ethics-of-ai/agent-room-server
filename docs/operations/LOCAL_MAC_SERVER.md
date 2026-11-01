@@ -156,6 +156,17 @@ untouched, and the sessions come back when a newer build runs again. There is
 no conversion step. Copy `STATE_DIR/sessions/` before upgrading if you might
 downgrade and need those threads on the older build.
 
+### Downgrading after child threads
+
+`STATE_DIR/workspaces.json` records a child thread's worktree as a workspace
+of kind `managed_worktree`. A build from before child threads cannot read a
+registry that holds one. It drops the whole file and starts with no workspaces,
+and its next registration overwrites the file, so every registration is lost.
+Close every child thread before running such a build, or copy
+`workspaces.json` first. A build that knows child threads but meets a registry
+it cannot read moves the file aside as `workspaces.json.unreadable-<time>`,
+logs a warning and starts empty, so the old records stay on disk.
+
 ## Workspaces
 
 ```bash

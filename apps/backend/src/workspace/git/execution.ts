@@ -77,6 +77,12 @@ function redactUrlCredentials(value: string): string {
   return value.replace(URL_USERINFO_PATTERN, "$1[REDACTED]@");
 }
 
+/** Git's exit status for a command that ran and failed; undefined when it never ran or timed out. */
+export function gitExitCode(error: unknown): number | undefined {
+  const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+  return typeof code === "number" ? code : undefined;
+}
+
 export function optionalGitValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed || undefined;
@@ -92,6 +98,19 @@ export function gitCommandEnv(): NodeJS.ProcessEnv {
   return {
     GIT_TERMINAL_PROMPT: "0"
   };
+}
+
+// `git status` refreshes the index's cached file stats and writes them back
+// when it can take `index.lock`. The write is optional, but while a read holds
+// the lock, a commit or merge in the same checkout fails with "index.lock
+// exists". A child summary reads its worktree the moment a turn settles, which
+// is when the child or the person commits there. `GIT_OPTIONAL_LOCKS=0` skips
+// the write and leaves the output unchanged, so every read-only command runs
+// with it; mutations keep `gitCommandEnv()`. Porcelain `git diff` against the
+// working tree writes the index regardless of this variable, so those reads
+// use the plumbing `diff-files` and `diff-index`, which never write it.
+export function gitReadEnv(): NodeJS.ProcessEnv {
+  return { ...gitCommandEnv(), GIT_OPTIONAL_LOCKS: "0" };
 }
 
 // Remote operations must never block on an interactive prompt: the backend is a

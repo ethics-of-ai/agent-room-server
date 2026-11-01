@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ThreadSessionListCard: View {
-    var sessions: [AgentSession]
+    var rows: [ThreadListRow]
     /// The registry each row reads its workspace's live branch from.
     var workspaceSnapshot: LocalWorkspaceRegistrySnapshot?
     var hasSessions: Bool
@@ -18,7 +18,7 @@ struct ThreadSessionListCard: View {
                     Text(filter.title).tag(filter)
                 }
             }
-            if sessions.isEmpty {
+            if rows.isEmpty {
                 ContentUnavailableView(
                     hasSessions ? "No matching threads" : "No threads",
                     systemImage: "text.bubble",
@@ -27,12 +27,12 @@ struct ThreadSessionListCard: View {
                 .frame(maxHeight: .infinity)
             } else {
                 List(selection: $selectedSessionID) {
-                    ForEach(sessions) { session in
+                    ForEach(rows) { row in
                         ThreadSessionRow(
-                            session: session,
-                            branch: ThreadCheckoutBranch.label(for: session, in: workspaceSnapshot)
+                            row: row,
+                            branch: ThreadCheckoutBranch.label(for: row.session, in: workspaceSnapshot)
                         )
-                        .tag(session.id)
+                        .tag(row.id)
                     }
                 }
                 .listStyle(.inset)

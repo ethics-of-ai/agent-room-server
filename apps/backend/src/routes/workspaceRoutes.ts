@@ -18,13 +18,14 @@ import type { WorkspaceRouteDeps } from "./workspace/deps";
 export async function registerWorkspaceRoutes(
   app: FastifyInstance,
   registry: LocalWorkspaceRegistry,
-  deps: { eventBus: EventBus; config: ServiceConfig; explorer: WorkspaceExplorer }
+  deps: { eventBus: EventBus; config: ServiceConfig; explorer: WorkspaceExplorer; children?: WorkspaceRouteDeps["children"] }
 ): Promise<void> {
   const routeDeps: WorkspaceRouteDeps = {
     registry,
     explorer: deps.explorer,
     eventBus: deps.eventBus,
-    config: deps.config
+    config: deps.config,
+    ...(deps.children ? { children: deps.children } : {})
   };
 
   await registerWorkspaceRegistrationRoutes(app, routeDeps);

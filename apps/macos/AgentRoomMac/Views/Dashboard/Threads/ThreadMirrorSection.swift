@@ -32,7 +32,7 @@ struct ThreadMirrorSection: View {
             )
             HSplitView {
                 ThreadSessionListCard(
-                    sessions: visibleSessions,
+                    rows: threadMirrorStore.listRows(showing: visibleSessions),
                     workspaceSnapshot: supervisor.workspaceSnapshot,
                     hasSessions: !threadMirrorStore.sessions.isEmpty,
                     selectedSessionID: $threadMirrorStore.selectedSessionID,

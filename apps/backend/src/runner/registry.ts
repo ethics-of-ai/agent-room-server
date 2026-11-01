@@ -283,7 +283,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // workspace is the trust decision (docs/safety/TRUST_AND_SAFETY.md).
     workspaceSkills: { mode: "native" },
     // Questions stay native (`request_user_input`); exec mode has no tool channel.
-    agentTools: { mode: "dynamic_tools", capabilities: ["plans", "sketches"], availableWhen: (config) => (config.codexRunnerProtocol ?? "jsonrpc") === "jsonrpc" },
+    agentTools: { mode: "dynamic_tools", capabilities: ["plans", "sketches", "children"], availableWhen: (config) => (config.codexRunnerProtocol ?? "jsonrpc") === "jsonrpc" },
     workspaceWritePosture: (config) => config.codexSandboxMode === "read-only" ? "read_only" : "writable",
     skillSourceDirs: [".codex/skills", ".agents/skills"],
     skillInvocationPrefix: "$",
@@ -342,7 +342,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
       gate: (config) => loadsWorkspaceSettings(config)
     },
     // Questions stay on the native `AskUserQuestion` callback.
-    agentTools: { mode: "sdk_mcp", capabilities: ["plans", "sketches"] },
+    agentTools: { mode: "sdk_mcp", capabilities: ["plans", "sketches", "children"] },
     workspaceWritePosture: () => "writable", // AgentRoom offers no read-only permission mode.
     skillSourceDirs: [".claude/skills"],
     skillInvocationPrefix: "/",
@@ -418,7 +418,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // until that is verified against a real runtime: advertising invocations a
     // session would ignore is the failure the skills read exists to avoid.
     workspaceSkills: { mode: "none" },
-    agentTools: { mode: "cordis_pipe", capabilities: ["questions", "plans", "sketches"] },
+    agentTools: { mode: "cordis_pipe", capabilities: ["questions", "plans", "sketches", "children"] },
     // Managed graphs pin `sandbox-policy` to `workspace-write`; a custom graph
     // is `bypassPermissions`-class and can already write sketches itself.
     workspaceWritePosture: () => "writable",
@@ -498,7 +498,7 @@ const builtInRunnerDescriptors: Record<RegisteredRunnerKind, RunnerDescriptor> =
     // precedence.
     // The one custom-tools transport: the host relays every advertised
     // AgentRoom tool through its single `tools/invoke` request.
-    agentTools: { mode: "custom_tools", capabilities: ["questions", "plans", "sketches"] },
+    agentTools: { mode: "custom_tools", capabilities: ["questions", "plans", "sketches", "children"] },
     workspaceWritePosture: () => "writable", // The sandbox bounds where writes land, not whether.
     skillSourceDirs: [".cursor/skills", ".agents/skills", ".claude/skills", ".codex/skills"],
     skillInvocationPrefix: "/",

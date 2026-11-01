@@ -275,6 +275,30 @@ is on now, read from the workspace list, because every thread runs on the Mac's
 branch. The details also show `gitBranch` as the branch the latest turn started
 on. A workspace the app hasn't loaded shows "Branch unknown".
 
+A child thread works in its own worktree workspace, so its row shows that
+worktree's branch with a branch symbol and says "Child of <parent title>"
+where other rows name the workspace. When the search and status filter leave
+both the parent and the child visible, the child's row comes right after its
+parent's, indented, newest child first. A child whose parent is filtered out
+keeps its own place in the newest-first order, unindented. A closed child stays
+in the list as "Closed child of <parent title>" and shows the branch its last
+turn ran on, because Close removed its worktree. The Mac only mirrors children:
+creating, landing, updating and closing them happen in the visionOS app.
+
+The transcript labels a `system` message by its `origin`, as visionOS does:
+`parent_task` is "Task from parent thread", `parent_message` "Message from
+parent thread" and `child_report` "Child report". A `system` message with no
+origin or an unknown one stays "System".
+
+The Setup pane labels a child's worktree workspace "Worktree". Close is what
+unregisters it, so a registered worktree always belongs to an open child.
+**Remove** is off for that worktree and for the workspace it was added from,
+with a caption saying to close the child first. The backend refuses both
+removals anyway (`409 child_workspace` and `409 has_open_children`). A
+worktree row shows its branch without the switch menu, because Land needs
+the worktree on the child's own branch and the backend refuses a switch there
+with `409 child_workspace`.
+
 The store initially selects the first available session. Refresh and sorting
 preserve that id. Filtering out the selected session shows a Clear filters
 placeholder and hides its controls; removing it shows an unavailable placeholder

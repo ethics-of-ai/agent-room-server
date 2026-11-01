@@ -48,7 +48,10 @@ struct SetupSettingsPane: View {
                 SettingsCaption(text: "Register multiple local folders here. Removing one only deletes AgentRoom registry metadata, not the folder.", systemImage: "folder.badge.plus")
                 if let snapshot = supervisor.workspaceSnapshot, !snapshot.workspaces.isEmpty {
                     ForEach(snapshot.workspaces) { workspace in
-                        WorkspaceSettingsRow(workspace: workspace)
+                        WorkspaceSettingsRow(
+                            workspace: workspace,
+                            removalBlock: WorkspaceSettingsRules.removalBlock(for: workspace, among: snapshot.workspaces)
+                        )
                     }
                 } else {
                     SettingsCaption(text: "Start the backend, then add one or more folders for coding-agent sessions.", systemImage: "folder")

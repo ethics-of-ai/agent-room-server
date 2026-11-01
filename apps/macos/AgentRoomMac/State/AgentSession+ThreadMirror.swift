@@ -102,7 +102,7 @@ extension AgentSessionMessage {
         case "user":
             return "User"
         case "system":
-            return "System"
+            return AgentSessionMessageOrigin(message: self)?.label ?? "System"
         case "tool":
             return "Tool"
         default:
@@ -117,7 +117,7 @@ extension AgentSessionMessage {
         case "user":
             return "person"
         case "system":
-            return "gearshape"
+            return AgentSessionMessageOrigin(message: self)?.systemImage ?? "gearshape"
         case "tool":
             return "terminal"
         default:

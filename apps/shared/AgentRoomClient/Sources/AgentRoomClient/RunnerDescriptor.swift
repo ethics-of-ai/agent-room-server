@@ -41,6 +41,11 @@ public struct RunnerDescriptor: Codable, Hashable, Sendable, Identifiable {
     /// `claude login` credential) is a third authority again, answered on the Mac
     /// because it has to work while the backend is stopped.
     public var ready: Bool?
+    /// The descriptor declares the AgentRoom tool capability a worktree child
+    /// thread needs, so the backend admits this runner for one. `nil` on the
+    /// offline floor and from a backend that predates child threads, where a
+    /// client offers no other runner for a child than the parent's.
+    public var childThreads: Bool?
 
     public var id: String { runnerKind }
 
@@ -75,7 +80,8 @@ public struct RunnerDescriptor: Codable, Hashable, Sendable, Identifiable {
         registered: Bool? = nil,
         configured: Bool? = nil,
         enabled: Bool? = nil,
-        ready: Bool? = nil
+        ready: Bool? = nil,
+        childThreads: Bool? = nil
     ) {
         self.runnerKind = runnerKind
         self.displayName = displayName
@@ -83,6 +89,7 @@ public struct RunnerDescriptor: Codable, Hashable, Sendable, Identifiable {
         self.configured = configured
         self.enabled = enabled
         self.ready = ready
+        self.childThreads = childThreads
     }
 
     /// A stand-in for a runner id no catalog describes — a session created

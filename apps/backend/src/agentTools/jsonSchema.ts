@@ -14,6 +14,13 @@ import { z } from "zod";
  * `maxLength` in JSON Schema counts code points while zod counts UTF-16 code
  * units, so the advertised bound is never tighter than the enforced one.
  */
+/** The first validation issue of a tool's input, as `path: message`, for the refusal a model reads. */
+export function inputIssueText(error: z.ZodError): string {
+  const issue = error.issues[0];
+  const path = issue?.path.length ? `${issue.path.join(".")}: ` : "";
+  return `${path}${issue?.message ?? "invalid input"}`;
+}
+
 export function advertisedJsonSchema(schema: z.ZodTypeAny): Record<string, unknown> {
   const def = schema._def as { typeName: z.ZodFirstPartyTypeKind };
   const described = (json: Record<string, unknown>) =>

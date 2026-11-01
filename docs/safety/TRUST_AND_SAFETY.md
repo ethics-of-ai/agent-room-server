@@ -692,11 +692,31 @@ workspace is unregistered or its git dir disappears. A 60-second pass also
 closes a watch whose git dir was replaced, as by a re-clone, and retries
 workspaces that have no watch.
 
-The only mutating Git operations are stage, unstage, discard, commit, fetch,
-fast-forward-only pull, push, and branch create. They are bearer-gated fixed argv
+The only mutating Git operations the workspace routes run are stage, unstage,
+discard, commit, fetch, fast-forward-only pull, push, and branch create. They are bearer-gated fixed argv
 calls through `execFile`, never a shell. Callers cannot supply flags, remotes,
 refs, or refspecs. Amend, reset, rebase, cherry-pick, tag, remote mutation, and
 forced push are not exposed.
+
+Child threads add five more, which only the backend's child-thread service
+runs: worktree add, worktree remove, branch delete, fast-forward merge, and
+update from parent. The backend mints every branch (`agentroom/<slug>-<hex>`),
+worktree path (under `WORKSPACE_ROOT/worktrees/<parentWorkspaceId>`)
+and base commit (a full id read from the parent's HEAD). It checks those
+shapes again before each command, so none is caller text. Worktree add takes
+`-b` with a new branch. Worktree remove never passes `--force`, so Git
+refuses a worktree holding modified or untracked files. Branch delete uses
+`-d` only, so Git keeps a branch HEAD does not contain and reports it kept.
+The fast-forward runs `merge --ff-only` in the parent checkout, on whatever
+branch it is on, and merges only the branch recorded on a registered child of
+that workspace. Update runs `merge --no-ff --no-edit` of the parent's current
+branch in the child's worktree, refuses a detached parent, and runs
+`merge --abort` at once on a conflict, so it never leaves a conflicted tree.
+Both merges refuse a child with uncommitted changes, and a child whose
+`git rev-parse --git-common-dir` no longer matches the parent's. Merge hooks
+run, as commit hooks do. The `managed_worktree` workspace kind that marks a
+child's workspace cannot be claimed through the public register route, and a
+client re-registering the path keeps the kind and its worktree record.
 
 Every client path passes the workspace secret/generated filter. Explicit unsafe
 paths return `415`; stage-all enumerates the uncapped changed set, filters it,
@@ -716,6 +736,179 @@ Operation events and audit contain operation, ids, counts, result branch, and
 commit only. They contain no file content, path list, remote URL, or credential.
 Git index locking prevents corruption but cannot prevent a commit interleaving
 with a running unsandboxed agent turn.
+
+## Child threads
+
+A child thread is a session with a `parent`, working in a linked worktree on a
+branch the backend minted. The person creates, lands, updates and closes one
+from the parent thread through the routes described in
+[Child threads](../api/API.md#child-threads). The parent's agent can start,
+read, message and stop its own children through the
+[parent agent tools](../api/API.md#parent-agent-tools).
+
+- **Separation, not containment.** A worktree keeps one agent's files apart
+  from another's. It does not contain the agent. A child runs with its
+  runner's full authority on the Mac, the same as any thread, and its
+  sandbox, where the runner has one, is rooted at the child's workspace.
+- **Where the files go.** Worktrees live under
+  `WORKSPACE_ROOT/worktrees/<parentWorkspaceId>/`, AgentRoom's own folder.
+  In the person's selected folder AgentRoom writes only what Git itself
+  records in `.git`: the worktree's metadata under `.git/worktrees/` and the
+  new branch ref. The child's workspace is registered with the
+  `managed_worktree` kind, which the public register route refuses, and gets
+  its own HEAD watch because the service publishes `workspace_registered`
+  itself.
+- **Git operations.** Create runs only `worktree add -b` with the minted
+  branch, path and base commit (see [Git operations](#git-operations)). A
+  create that fails after that undoes its own steps: it deletes the session,
+  unregisters the workspace, runs `worktree remove` without `--force`, and
+  deletes the branch with `-d`. A rollback step that fails is logged and the
+  rest still run.
+- **Landing is a person's fast-forward.** Land runs `merge --ff-only` of the
+  child's minted branch in the parent checkout, so it adds the child's
+  commits and never writes a merge commit on the parent. Update from parent
+  runs `merge --no-ff --no-edit` of the parent's current branch in the child
+  worktree, outside any runner sandbox, and runs `merge --abort` on a
+  conflict, so AgentRoom never leaves a conflicted tree. Both take only the
+  branch from the child's worktree record, after checking that the worktree
+  still shares the parent's Git common dir. Both refuse a running or dirty
+  child. Merge hooks run, as commit hooks do. Land, Update and Close are
+  routes only: no AgentRoom tool reaches them. A parent's agent could still
+  run `git merge` with its own shell authority in the parent checkout; the
+  rule keeps the person's view of landing in one place and protects nothing
+  beyond that.
+- **Closing never destroys work.** Close refuses a running child, a child
+  whose runner still runs background work, and a worktree with tracked
+  changes or untracked files. It runs `worktree remove` without `--force`,
+  unregisters the workspace, and deletes the branch only with `branch -d`,
+  which keeps an unmerged branch and its commits. A kept branch is reported
+  to the person, not removed. A worktree Git no longer records counts as
+  removed, so a Close that stopped part way finishes; AgentRoom never deletes
+  a folder itself. Close keeps the session record and transcript, so a closed
+  child stays readable from its parent.
+- **Land never moves a detached HEAD.** Land refuses a parent checkout that
+  is not on a branch. Fast-forwarding a detached HEAD would leave it the only
+  holder of the child's commits, and Close's `branch -d` would then delete the
+  child's branch, so a later switch would strand those commits in the reflog.
+- **Merges never leave a half-done tree.** Update aborts any merge Git
+  recorded, whether a conflict or a merge hook stopped it. A merge stopped
+  before Git recorded it, such as by a timeout, can leave changes in the
+  worktree, which was clean before; Update then refuses with
+  `update_interrupted`, and the person discards them in the change review.
+  AgentRoom resets nothing itself.
+- **Nothing else removes a child.** Deleting an open child's session or
+  unregistering its workspace refuses with `409`, and so do deleting a parent
+  session or unregistering a parent workspace while an open child depends on
+  it. Every child stays reachable from a parent until someone closes it.
+- **A child's worktree keeps its branch.** The branch switch and branch
+  create routes refuse an open child's workspace with `409 child_workspace`.
+  Land and Update work only while the worktree is on the child's minted
+  branch, so a switch would strand the child until someone switched it back.
+  The guard covers AgentRoom's routes only: an agent or a person running
+  `git switch` in the worktree is not stopped, and Land then refuses with
+  `child_not_linked`.
+- **No posture from the request.** The create route and the start tool
+  accept a title, a task and a runner, nothing else; the tool adds a reason.
+  A child on the parent's runner takes the parent's model settings. A child
+  on another runner gets that runner's defaults. A runner whose descriptor
+  lacks the `children` tool capability, such as an external ACP adapter,
+  cannot run a child. A child cannot have children, and its turns bind no
+  child tools.
+- **Parent agent tools.** A tool finds a child only when the child's
+  `parent.sessionId` is the calling session, so one thread's agent cannot
+  read, message or stop another thread's children. The tools can start a
+  child, list and read children, send an idle child a follow-up and stop a
+  running turn. None answers a child's permission or question, and none
+  lands, updates or closes a child. Each start and each message is a model
+  call nobody typed, and so is the wake the child's report then opens. The
+  caps bound starts, and a busy child refuses a message rather than queueing
+  it.
+- **Whose idea a child is.** By default the start tool makes an `offer`:
+  before anything exists, AgentRoom asks the person one clarifying question
+  with a set per task. Each set's header is `Worktree?`, and its prompt is
+  `The agent wants to hand "<title>" to a new child thread. It would work in
+  its own worktree, on a new branch from commit <short commit>, without this
+  thread's uncommitted changes. The agent's reason: <reason>`. The person
+  picks **New worktree thread** or **Do it here**. Only the first creates a
+  child. A timeout, a withdrawn question, a turn that ended, or questions
+  turned off create nothing. The card is direction, not authorization: it is
+  an ordinary clarifying question, its answer changes no posture, and
+  answering it grants the agent nothing beyond the child it names. The title
+  and reason are the agent's own words, so the card shows what the agent
+  claims, not what the task will do. `initiation: "person_asked"` skips the
+  card on the agent's own reading of the person's message. A wrong reading
+  costs one unwanted child, which the caps bound and Close removes; it gains
+  the agent no authority it lacked. `person_asked` is refused in any turn
+  the person did not start, such as a report-back wake, so a child's report
+  cannot make its parent start children without a person. An `offer` from a
+  wake still asks the person.
+- **Spend.** Every child starts a turn at once, a model call with the
+  child's runner, and every settled child turn can wake the parent, a model
+  call with the parent's runner. Nobody typed either. At most 4 children are
+  open per parent and 8 across the backend. Creates run one at a time, so
+  concurrent requests cannot pass the caps together. At most three
+  `child_report` wakes run in a row before reports wait for a person's turn
+  on the parent, and a parent that cannot continue gets none. Turns a runner
+  starts itself are outside that count, because AgentRoom cannot hold them
+  back. Nothing bounds a single child's turn length beyond what its runner
+  does.
+- **Report-back wakes.** A wake binds AgentRoom tools as a person's turn does,
+  unlike a turn the runner starts after background work. Its system message
+  carries the child's title, branch, Git counts and last message. That last
+  message is model-authored, passes through `util/redactSecrets` and is capped
+  at 2,000 characters. A child that read hostile repository content can pass
+  instructions to its parent this way. A wake gives the parent no authority
+  it lacked: it runs with the parent's own posture, and no tool answers a
+  child's permission or lands, updates or closes a child. Reports held back
+  by the wake budget enter the person's next prompt on the parent the same
+  way. Waiting reports live in memory only.
+- **Close, Land, Update and late turns.** While Close runs its Git calls, a
+  turn sent to the child refuses with `child_closing`, so no agent starts work
+  in a worktree being removed; while Land or Update runs, with
+  `child_merging`. A turn whose start was already under way when Close
+  finished refuses with `child_closed`, because the check runs again after the
+  start's awaits.
+- **What the parent sees.** The list route is a session-content read behind
+  the bearer token. A summary carries counts, never a path or file content:
+  the diff read returns raw paths that have not passed the
+  secret/generated filter, so the summary keeps only the totals. The child's
+  last message passes through `util/redactSecrets` and is capped at 2,000
+  characters. `agent_child_changed` carries ids, the change and how the
+  child was started, and is written to durable audit. The read tool's file
+  list drops every path with a segment the file tree hides, secret names and
+  generated folders alike, and shows no content. Its transcript tail is
+  secret-redacted and capped at 32 Ki characters. Like a report, it is
+  model-authored text that can carry instructions a child picked up from
+  hostile repository content; the standing instruction tells the parent to
+  treat it as work output.
+- **Git metadata outside the workspace.** A linked worktree's index, HEAD and
+  objects live in the parent repository's `.git`, and a commit in the child
+  writes there. AgentRoom widens no runner's write roots to reach it: for
+  Codex it would not lift the refusal, and for the others it would open the
+  parent's whole Git directory, hooks included. A child whose runner cannot
+  commit is told to leave its changes in place, and the person commits them
+  through the existing commit route. One runner widens its own: Cursor SDK
+  1.0.28, sandbox on, adds a linked worktree's Git common dir to its
+  writable paths and write-protects that directory's hooks, `config` and
+  `commondir`. A Cursor child can therefore commit, including into the
+  parent repository's object store and refs, but cannot add a hook or change
+  the repository config. Checked on 2026-11-01 against the SDK's sandbox
+  helper with the policy its source builds, not in a live turn. The managed
+  DeepSeek graph refuses a commit from a linked worktree, as Codex does.
+- **Codex trust entries.** Every Codex `thread/start` durably trusts its cwd
+  in `~/.codex/config.toml` (see
+  [Codex workspace configuration](#codex-workspace-configuration-and-network)).
+  Each child worktree on Codex adds one entry. AgentRoom does not remove it,
+  since editing the person's Codex config is out of scope.
+- **Workspace configuration.** A worktree holds the committed `.claude`,
+  `.codex` and `.agents` files, so the same registration trust applies as for
+  the parent. Ignored files such as `.claude/settings.local.json` and `.env`
+  are absent. Claude Code's `CLAUDE.md` ancestor walk starts from the
+  worktree, so it climbs through `WORKSPACE_ROOT` rather than the folders
+  above the person's checkout.
+- **Broadcast volume.** `/api/events` is unfiltered, so every child's deltas
+  reach every client. The caps keep that bounded, and backpressure already
+  drops deltas first.
 
 ## Terminal
 

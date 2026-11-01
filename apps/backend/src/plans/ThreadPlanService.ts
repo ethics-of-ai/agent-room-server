@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ZodError } from "zod";
+import { inputIssueText } from "../agentTools/jsonSchema";
 import type { DurableAgentSessionDocument } from "../domain/models";
 import type { DurableAgentSessionStore, DurableCommitOutcome } from "../state/DurableAgentSessionStore";
 import {
@@ -386,7 +387,5 @@ function inputErrorCode(error: ZodError): "limit_exceeded" | "invalid_input" {
 }
 
 function inputErrorMessage(error: ZodError): string {
-  const issue = error.issues[0];
-  const path = issue?.path.length ? `${issue.path.join(".")}: ` : "";
-  return `Invalid arguments. ${path}${issue?.message ?? "invalid"}`.slice(0, 512);
+  return `Invalid arguments. ${inputIssueText(error)}`.slice(0, 512);
 }

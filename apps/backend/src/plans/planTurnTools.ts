@@ -1,10 +1,9 @@
-import { allowedAgentToolLogicalIds } from "../agentTools/catalog";
 import type { AgentToolHandler } from "../agentTools/dispatch";
 import type { AgentSession, AgentTurnContext, ServiceConfig } from "../domain/models";
 import type { EventBus } from "../events/EventBus";
 import type { AgentPlanChangedPayload } from "../events/eventTypes";
 import { isRegisteredRunnerKind, runnerDescriptor } from "../runner/registry";
-import { runnerAgentToolCapabilities } from "../runner/shared/agentToolSets";
+import { runnerAdvertisedToolIds } from "../runner/shared/agentToolSets";
 import {
   PLAN_SNAPSHOT_SCHEMA_VERSION,
   PLAN_TOOLS_INSTRUCTION,
@@ -38,10 +37,7 @@ export class ThreadPlanTurnTools {
    * acknowledged storage, where every call would report tools_unavailable.
    */
   advertised(runnerKind: string): string[] {
-    if (!isRegisteredRunnerKind(runnerKind) || !this.plans.storageAvailable) return [];
-    const planIds = new Set<string>(PLAN_TOOL_IDS);
-    return allowedAgentToolLogicalIds({ gates: {}, capabilities: runnerAgentToolCapabilities(runnerKind, this.runnerConfig) })
-      .filter((id) => planIds.has(id));
+    return this.plans.storageAvailable ? runnerAdvertisedToolIds(runnerKind, PLAN_TOOL_IDS, this.runnerConfig) : [];
   }
 
   /** Why a turn that requires plan tools cannot start on this runner, or undefined when it can. */

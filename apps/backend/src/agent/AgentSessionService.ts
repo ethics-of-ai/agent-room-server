@@ -4,7 +4,6 @@ import {
   type AssembledAgentTurnInput
 } from "./AgentTurnContextAssembler";
 import type {
-  AgentBridgeMetrics,
   AgentSession,
   AgentSessionMessage,
   AgentSessionTurn,
@@ -19,7 +18,6 @@ import type { ArtifactSnapshot, ArtifactStore } from "../artifact/ArtifactStore"
 import type { EventBus } from "../events/EventBus";
 import { logger } from "../logging/logger";
 import type { AgentRunner, AgentRunnerEvent, CanonicalQuestionAnswer } from "../runner/AgentRunner";
-import { questionAnswerRefusal, type QuestionAnswerResult } from "../runner/shared/PendingQuestionRequests";
 import { isRegisteredRunnerKind, runnerDescriptor } from "../runner/registry";
 import type { DurableAgentSessionStore } from "../state/DurableAgentSessionStore";
 import {
@@ -36,12 +34,15 @@ import { AgentSessionMessageStore } from "./AgentSessionMessageStore";
 import { AgentTurnEventApplier, type OutstandingQuestionRequest } from "./AgentTurnEventApplier";
 import { AgentTurnGitDiffTracker } from "./AgentTurnGitDiffTracker";
 import { AgentTurnTelemetryStore } from "./AgentTurnTelemetryStore";
+import { AgentSessionMetrics } from "./AgentSessionMetrics";
+import { answerPermission, answerQuestion } from "./sessionAnswers";
 import {
   agentSessionId,
   AgentSessionError,
   agentTurnId,
   BACKEND_RESTARTED_TURN_ERROR,
   hasSettings,
+  type AgentSessionTurnObserver,
   type AgentTurnOpening,
   type CreateAgentSessionInput,
   type StartAgentTurnInput
@@ -80,12 +81,8 @@ export class AgentSessionService {
   private readonly uncontinuableSessionIds = new Set<string>();
   /** Native ids awaiting their one-time post-hydration resume check. */
   private readonly hydratedSeeds = new Map<string, string>();
-  private completedTurns = 0;
-  private failedTurns = 0;
-  private cancelledTurns = 0;
-  private inputTokens = 0;
-  private outputTokens = 0;
-  private totalTokens = 0;
+  private readonly metrics = new AgentSessionMetrics((sessionId) => this.persist(sessionId));
+  private turnObserver?: AgentSessionTurnObserver;
   constructor(
     private readonly deps: {
       registry: LocalWorkspaceRegistry;
@@ -119,7 +116,7 @@ export class AgentSessionService {
       isSessionLive: (sessionId) => this.sessions.has(sessionId),
       isTurnCancelled: (turnId) => this.cancelledTurnIds.has(turnId),
       completeCancelledTurn: (session, turn) => this.completeCancelledTurn(session, turn),
-      recordTokenUsage: (session, turn, event) => this.recordTokenUsage(session, turn, event),
+      recordTokenUsage: (session, turn, event) => this.metrics.recordTokenUsage(session, turn, event),
       succeedTurn: (session, turn, event) => this.succeedTurn(session, turn, event),
       failTurn: (session, turn, error) => this.failTurn(session, turn, error),
       sessionChanged: (sessionId) => this.persist(sessionId),
@@ -222,6 +219,29 @@ export class AgentSessionService {
     return this.sessions.get(sessionId);
   }
 
+  /** False when the session's next turn would refuse for lost conversation state. */
+  canContinue(sessionId: string): boolean { return !this.uncontinuableSessionIds.has(sessionId); }
+  /** The session's most recently opened turn. */
+  latestTurn(sessionId: string): AgentSessionTurn | undefined { return [...this.turns.values()].filter((turn) => turn.sessionId === sessionId).at(-1); }
+  /** A runner's own turn is waiting for this session's settling turn. */
+  hasWaitingAgentTurn(sessionId: string): boolean { return this.background.isWaiting(sessionId); }
+  /** Installs the child-thread layer, built on top of this service: its turn observer and the parent agent's tools. Once only. */
+  attachChildren(layer: { observer: AgentSessionTurnObserver; tools: Parameters<SessionTurnTools["attachChildren"]>[0] }): void { this.turnTools.attachChildren(layer.tools); this.turnObserver = layer.observer; }
+
+  /**
+   * Records a child's Close and releases its runner's per-session resources.
+   * The record and its transcript stay, and `startTurn` refuses from here on.
+   */
+  async markChildClosed(sessionId: string): Promise<AgentSession> {
+    const session = this.requireSession(sessionId);
+    if (!session.parent) throw new AgentSessionError("Only a child thread can be closed", 409);
+    session.closedAt = session.closedAt ?? new Date().toISOString();
+    session.updatedAt = session.closedAt;
+    this.persist(session.id);
+    await this.deps.runners[session.runnerKind]?.closeSession?.(sessionId);
+    return session;
+  }
+
   /** The thread's plan, or undefined for an unknown session. */
   readPlan(sessionId: string): Promise<PlanReadResult> | undefined {
     return this.sessions.has(sessionId) ? this.plans.read(sessionId) : undefined;
@@ -248,7 +268,7 @@ export class AgentSessionService {
       sessions,
       activeSessionIds: sessions.filter((session) => session.status === "running").map((session) => session.id),
       recentEvents,
-      metrics: this.metrics()
+      metrics: this.metrics.snapshot(this.sessions.values())
     };
   }
 
@@ -273,6 +293,7 @@ export class AgentSessionService {
       runnerKind,
       ...(hasSettings(input.settings) ? { settings: input.settings } : {}),
       ...(input.title?.trim() ? { title: input.title.trim() } : {}),
+      ...(input.parent ? { parent: input.parent } : {}),
       status: "idle",
       turnCount: 0,
       createdAt: now,
@@ -320,8 +341,9 @@ export class AgentSessionService {
     const branch = await this.deps.registry.gitCurrentBranch(session.workspaceId).catch(() => undefined);
 
     const runner = this.requireRunner(session.runnerKind);
-    const runnerInput = await this.assembleRunnerInput(session, input.message, input.context);
-    // The awaits above let a second start on this session interleave.
+    const message = input.origin ? input.origin.message : input.message;
+    const runnerInput = await this.assembleRunnerInput(session, message, input.context);
+    // The awaits above let a second start, or a Close, on this session interleave.
     this.refuseWhileRunning(session);
     validateRunnerInputParts(runner, runnerInput.inputParts);
     // A volatile prompt addition (currently human diagram edits) may only mark
@@ -334,13 +356,14 @@ export class AgentSessionService {
     if (branch) session.gitBranch = branch;
 
     const turn = this.openTurn(session, {
-      role: "user",
-      content: input.message,
+      role: input.origin ? "system" : "user",
+      content: message,
+      ...(input.origin ? { trigger: input.origin.trigger, origin: input.origin.kind } : {}),
       ...(runnerInput.messageContext ? { context: runnerInput.messageContext } : {})
     });
     this.telemetry.logAccepted(session, turn, {
       requestStartedAtMs,
-      promptBytes: Buffer.byteLength(input.message, "utf8"),
+      promptBytes: Buffer.byteLength(message, "utf8"),
       contextPathCount: input.context?.paths?.length ?? 0,
       attachmentCount: input.context?.attachments?.length ?? 0,
       runnerInputPartCount: runnerInput.inputParts.length
@@ -357,9 +380,11 @@ export class AgentSessionService {
     return turn;
   }
 
-  /** A person's turn waits for the running turn, and for an agent turn queued behind it. */
+  /** A turn waits for the running turn and an agent turn queued behind it, and the observer may refuse it. */
   private refuseWhileRunning(session: AgentSession): void {
     if (session.activeTurnId || this.background.isWaiting(session.id)) throw new AgentSessionError("Agent session already has a running turn", 409);
+    if (session.closedAt) throw new AgentSessionError("This child thread is closed", 409, "child_closed");
+    this.turnObserver?.admitTurn(session);
   }
 
   /** Record a turn and its opening message on an idle session, mark the session running, and announce it. */
@@ -415,56 +440,17 @@ export class AgentSessionService {
     return session;
   }
 
-  /**
-   * Answer an outstanding permission request with an option the runner is
-   * holding for it.
-   *
-   * The runner decides whether the request is still outstanding and whether the
-   * option was one the agent offered; this only maps those answers onto status
-   * codes. A runner with no approval channel has no outstanding request either,
-   * which is the same 404 — the route never reads which runner this is.
-   */
+  /** Answer an outstanding permission request; `answerPermission` maps the runner's answer. */
   answerPermissionRequest(input: { sessionId: string; requestId: string; optionId: string }): AgentSession {
     const session = this.requireSession(input.sessionId);
-    const answer = this.requireRunner(session.runnerKind).answerPermissionRequest?.({
-      sessionId: session.id,
-      requestId: input.requestId,
-      optionId: input.optionId
-    }) ?? "unknown_request";
-    if (answer === "unknown_request") {
-      throw new AgentSessionError("Permission request is not outstanding for this session", 404);
-    }
-    if (answer === "unknown_option") {
-      // The agent decides what it is willing to be told; an option it did not
-      // offer is refused rather than forwarded.
-      throw new AgentSessionError("Permission option was not offered for this request", 400);
-    }
+    answerPermission(this.requireRunner(session.runnerKind), input);
     return session;
   }
 
-  /**
-   * Answer an outstanding clarifying-question batch. A batch a backend tool
-   * asked is answered in the session's own channel; any other goes to the
-   * runner, which decides whether it is outstanding and every set and option
-   * was offered. A batch nobody holds is a 404.
-   */
-  answerQuestionRequest(input: {
-    sessionId: string;
-    requestId: string;
-    answers: CanonicalQuestionAnswer[];
-  }): AgentSession {
+  /** Answer an outstanding clarifying-question batch, in the session's channel or the runner's. */
+  answerQuestionRequest(input: { sessionId: string; requestId: string; answers: CanonicalQuestionAnswer[] }): AgentSession {
     const session = this.requireSession(input.sessionId);
-    const answer = this.turnTools.questions.answer(session.id, input.requestId, input.answers) ?? this.requireRunner(session.runnerKind).answerQuestionRequest?.({
-      sessionId: session.id,
-      requestId: input.requestId,
-      answers: input.answers
-    }) ?? "unknown_request";
-    if (answer === "unknown_request") {
-      throw new AgentSessionError("Question request is not outstanding for this session", 404);
-    }
-    if (answer !== "answered") {
-      throw new AgentSessionError(questionAnswerRefusal[answer], 400);
-    }
+    answerQuestion(input, this.turnTools.questions, () => this.requireRunner(session.runnerKind));
     return session;
   }
 
@@ -567,7 +553,7 @@ export class AgentSessionService {
         }
         this.runnerEvents.apply(session, turn, event);
         // A settle frees the session in this same tick, so no person's turn can take it first.
-        this.background.openWaitingTurn(session);
+        this.afterTurnEvent(session, turn);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -596,8 +582,14 @@ export class AgentSessionService {
       if (turn.status !== "running") {
         this.cancelledTurnIds.delete(turn.id);
       }
-      this.background.openWaitingTurn(session);
+      this.afterTurnEvent(session, turn);
     }
+  }
+
+  /** A runner's own waiting turn opens first; the observer may then open a child-report wake. */
+  private afterTurnEvent(session: AgentSession, turn: AgentSessionTurn): void {
+    this.background.openWaitingTurn(session);
+    this.turnObserver?.turnEvent(session, turn);
   }
 
   private async assembleRunnerInput(
@@ -633,7 +625,7 @@ export class AgentSessionService {
       turn.lastMessage = content;
       session.lastMessage = content;
       this.messages.upsertAssistantMessage(session.id, turn.id, content, "running");
-      this.recordTokenUsage(session, turn, event);
+      this.metrics.recordTokenUsage(session, turn, event);
       session.updatedAt = new Date().toISOString();
       this.deps.eventBus.publish("agent_turn_update", {
         sessionId: session.id,
@@ -641,7 +633,7 @@ export class AgentSessionService {
         message: finalMessage
       });
     }
-    this.recordTokenUsage(session, turn, event);
+    this.metrics.recordTokenUsage(session, turn, event);
     const now = new Date().toISOString();
     turn.status = "succeeded";
     turn.completedAt = now;
@@ -649,55 +641,12 @@ export class AgentSessionService {
     session.status = "idle";
     session.activeTurnId = undefined;
     session.turnCount += 1;
-    this.completedTurns += 1;
+    this.metrics.turnSucceeded();
     session.updatedAt = now;
     this.persist(session.id);
     this.deps.eventBus.publish("agent_turn_succeeded", { sessionId: session.id, turnId: turn.id });
     this.publishCodingEvent(codingTurnCompletedEvent({ sessionId: session.id, turnId: turn.id, runnerKind: session.runnerKind }));
     this.telemetry.logTurnTiming(session, turn, "succeeded");
-  }
-
-  private recordTokenUsage(
-    session: AgentSession,
-    turn: AgentSessionTurn,
-    event: {
-      inputTokens?: number;
-      outputTokens?: number;
-      totalTokens?: number;
-      contextWindowUsedTokens?: number;
-      modelContextWindowTokens?: number;
-      contextCompactionThresholdTokens?: number | null;
-    }
-  ): void {
-    const previousInputTokens = turn.inputTokens;
-    const previousOutputTokens = turn.outputTokens;
-    const previousTotalTokens = turn.totalTokens;
-    if (typeof event.inputTokens === "number") turn.inputTokens = event.inputTokens;
-    if (typeof event.outputTokens === "number") turn.outputTokens = event.outputTokens;
-    if (typeof event.totalTokens === "number") turn.totalTokens = event.totalTokens;
-    this.inputTokens += turn.inputTokens - previousInputTokens;
-    this.outputTokens += turn.outputTokens - previousOutputTokens;
-    this.totalTokens += turn.totalTokens - previousTotalTokens;
-    // Occupancy is the latest request's footprint, never the cumulative
-    // billed totals — those re-count cached context per tool round-trip.
-    if (typeof event.contextWindowUsedTokens === "number") {
-      session.contextWindowUsedTokens = event.contextWindowUsedTokens;
-    }
-    if (typeof event.modelContextWindowTokens === "number") {
-      turn.modelContextWindowTokens = event.modelContextWindowTokens;
-      session.modelContextWindowTokens = event.modelContextWindowTokens;
-    }
-    // Undefined carries no new knowledge and preserves the cache. Null is an
-    // authoritative clear from a runner that previously supplied a value.
-    if (event.contextCompactionThresholdTokens === null) {
-      delete turn.contextCompactionThresholdTokens;
-      delete session.contextCompactionThresholdTokens;
-    } else if (typeof event.contextCompactionThresholdTokens === "number") {
-      turn.contextCompactionThresholdTokens = event.contextCompactionThresholdTokens;
-      session.contextCompactionThresholdTokens = event.contextCompactionThresholdTokens;
-    }
-    session.updatedAt = new Date().toISOString();
-    this.persist(session.id);
   }
 
   private failTurn(
@@ -722,7 +671,7 @@ export class AgentSessionService {
     session.lastMessage = error;
     session.activeTurnId = undefined;
     session.updatedAt = now;
-    if (options.countMetric !== false) this.failedTurns += 1;
+    if (options.countMetric !== false) this.metrics.turnFailed();
     this.persist(session.id);
     this.deps.eventBus.publish("agent_turn_failed", { sessionId: session.id, turnId: turn.id, error });
     this.publishCodingEvent(codingTurnFailedEvent({
@@ -758,7 +707,7 @@ export class AgentSessionService {
     session.updatedAt = now;
     this.persist(session.id);
     if (firstCompletion) {
-      this.cancelledTurns += 1;
+      this.metrics.turnCancelled();
       this.telemetry.logTurnTiming(session, turn, "cancelled");
     }
     if (options.publishEvents) {
@@ -784,18 +733,5 @@ export class AgentSessionService {
   private publishCodingEvent(candidate: CodingAgentEventCandidate | undefined): void {
     if (!candidate) return;
     this.deps.eventBus.publish(candidate.type, candidate.payload);
-  }
-
-  private metrics(): AgentBridgeMetrics {
-    return {
-      totalSessions: this.sessions.size,
-      runningSessions: [...this.sessions.values()].filter((session) => session.status === "running").length,
-      completedTurns: this.completedTurns,
-      failedTurns: this.failedTurns,
-      cancelledTurns: this.cancelledTurns,
-      inputTokens: this.inputTokens,
-      outputTokens: this.outputTokens,
-      totalTokens: this.totalTokens
-    };
   }
 }

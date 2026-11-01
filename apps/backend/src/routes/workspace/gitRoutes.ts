@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { LocalWorkspaceGitOperationResult } from "../../domain/models";
 import { publishWorkspaceBranchChanged } from "../../events/workspaceBranchChanged";
+import { publishWorkspaceGitOperation } from "../../events/workspaceEvents";
 import { WorkspaceGitService, type WorkspaceGitPathsInput } from "../../workspace/WorkspaceGitService";
 import { replyWorkspaceError, type WorkspaceRouteDeps } from "./deps";
 import {
@@ -30,6 +31,10 @@ const invalidatesFileIndex = new Set(["pull", "discard", "create_branch"]);
  */
 export async function registerWorkspaceGitRoutes(app: FastifyInstance, deps: WorkspaceRouteDeps): Promise<void> {
   const gitService = new WorkspaceGitService(deps.registry);
+  // An open child's worktree must stay on its `agentroom/...` branch, so both
+  // branch routes go through the child service's guard when it is wired.
+  const guardBranchChange = <T>(workspaceId: string, change: () => Promise<T>): Promise<T> =>
+    deps.children ? deps.children.guardWorkspaceBranchChange(workspaceId, change) : change();
 
   const runGitOperation = async (reply: FastifyReply, run: () => Promise<LocalWorkspaceGitOperationResult>) => {
     try {
@@ -37,20 +42,7 @@ export async function registerWorkspaceGitRoutes(app: FastifyInstance, deps: Wor
       if (invalidatesFileIndex.has(result.operation)) {
         deps.explorer.invalidateFileIndex(result.workspaceId);
       }
-      // Sanitized: identifiers, the operation, and counts only. Never file
-      // content, never a path list, and never a remote URL (which can carry
-      // credentials in its userinfo).
-      deps.eventBus.publish("workspace_git_operation", {
-        workspaceId: result.workspaceId,
-        workspacePath: result.workspace.path,
-        operation: result.operation,
-        ...(result.branch ? { branch: result.branch } : {}),
-        ...(result.previousBranch ? { previousBranch: result.previousBranch } : {}),
-        ...(result.commit ? { commit: result.commit } : {}),
-        ...(result.remote ? { remote: result.remote } : {}),
-        fileCount: result.paths?.length ?? 0,
-        changedFileCount: result.status.counts.total
-      });
+      publishWorkspaceGitOperation(deps.eventBus, result);
       if (result.operation === "create_branch" && result.branch) {
         publishWorkspaceBranchChanged(deps.eventBus, {
           workspace: result.workspace,
@@ -77,7 +69,7 @@ export async function registerWorkspaceGitRoutes(app: FastifyInstance, deps: Wor
     }
 
     try {
-      const result = await deps.registry.checkoutBranch(workspaceId, parsed.data.branch);
+      const result = await guardBranchChange(workspaceId, () => deps.registry.checkoutBranch(workspaceId, parsed.data.branch));
       if (result.changed) {
         // A checkout can add, remove, or rename tracked files wholesale.
         deps.explorer.invalidateFileIndex(workspaceId);
@@ -155,6 +147,6 @@ export async function registerWorkspaceGitRoutes(app: FastifyInstance, deps: Wor
     if (!parsed.success) {
       return reply.code(400).send({ error: "Invalid workspace Git branch payload" });
     }
-    return runGitOperation(reply, () => gitService.createBranch(workspaceId, parsed.data));
+    return runGitOperation(reply, () => guardBranchChange(workspaceId, () => gitService.createBranch(workspaceId, parsed.data)));
   });
 }

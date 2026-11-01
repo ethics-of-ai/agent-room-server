@@ -41,10 +41,10 @@ describe("GET /api/runners", () => {
         expect(response.json().runners.map((runner: { runnerKind: string }) => runner.runnerKind))
           .toEqual([...registeredRunnerKinds]);
         expect(response.json().runners).toEqual([
-          { runnerKind: "codex", displayName: "Codex", registered: true, configured: false, enabled: true },
-          { runnerKind: "claude_code", displayName: "Claude Code", registered: true, configured: true, enabled: true },
-          { runnerKind: "deepseek", displayName: "DeepSeek Harness", registered: true, configured: false, enabled: true },
-          { runnerKind: "cursor", displayName: "Cursor", registered: true, configured: true, enabled: true }
+          { runnerKind: "codex", displayName: "Codex", registered: true, configured: false, enabled: true, childThreads: true },
+          { runnerKind: "claude_code", displayName: "Claude Code", registered: true, configured: true, enabled: true, childThreads: true },
+          { runnerKind: "deepseek", displayName: "DeepSeek Harness", registered: true, configured: false, enabled: true, childThreads: true },
+          { runnerKind: "cursor", displayName: "Cursor", registered: true, configured: true, enabled: true, childThreads: true }
         ]);
       });
     });
@@ -80,7 +80,7 @@ describe("GET /api/runners", () => {
           // and `restoreStrategy` decide backend behavior and are nobody's
           // business on the wire.
           expect(Object.keys(runner).sort())
-            .toEqual(["configured", "displayName", "enabled", "registered", "runnerKind"]);
+            .toEqual(["childThreads", "configured", "displayName", "enabled", "registered", "runnerKind"]);
         }
         expect(body).not.toContain("/usr/local/bin/codex");
         expect(body).not.toContain("/opt/homebrew/bin/claude");
@@ -168,7 +168,7 @@ describe("GET /api/runners", () => {
           // Still four separate states: an unreadable runtime probe does not
           // rewrite what the operator did or did not supply.
           expect(Object.keys(codexRunner).sort())
-            .toEqual(["configured", "displayName", "enabled", "ready", "registered", "runnerKind"]);
+            .toEqual(["childThreads", "configured", "displayName", "enabled", "ready", "registered", "runnerKind"]);
         }, { codex });
       });
     });
