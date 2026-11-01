@@ -259,7 +259,7 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     const projectYaml = await readFile(resolve(visionOSRoot, "project.yml"), "utf8");
     const workspaceThreads = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceThreadPanel.swift"), "utf8");
     const workspaceWindow = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceWindowView.swift"), "utf8");
-    const workspaceThreadColumn = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceThreadColumn.swift"), "utf8");
+    const workspaceToolbar = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceWindowToolbar.swift"), "utf8");
     const threadTranscript = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Transcript/ThreadTranscriptView.swift"), "utf8");
     const composerPanel = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/WorkspaceComposerPanel.swift"), "utf8");
     const turnComposer = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Composer/TurnComposerView.swift"), "utf8");
@@ -297,19 +297,19 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     expect(projectYaml).not.toContain("UIApplicationPreferredDefaultSceneSessionRole: UIWindowSceneSessionRoleVolumetricApplication");
     expect(dashboardView).toContain("SettingsView()");
     expect(dashboardView).not.toContain(".sheet(isPresented: $showSettings)");
-    expect(workspaceThreadColumn).toContain('Label("New Thread", systemImage: "plus.circle")');
+    expect(workspaceToolbar).toContain('Label("New Thread", systemImage: "plus.circle")');
     // Enumerated from the backend's own descriptor catalog rather than a Swift
     // enum, so a runner the backend registers is offered without shipping the
     // app again (docs/engineering/RUNNERS.md), and
     // through the one shared view that also renders a runner this backend
     // reports as unstartable as disabled rather than as ready.
-    expect(workspaceThreadColumn).toContain("NewThreadMenuItems(runners: runners, createSession: createSession)");
+    expect(workspaceToolbar).toContain("NewThreadMenuItems(runners: store.runnerCatalog.descriptors, createSession: actions.createSession)");
     expect(workspaceWindow).toContain("store.createAgentSession(workspace: workspace, runnerKind: runnerKind)");
-    expect(workspaceThreadColumn).toContain("if spatialSceneEnabled");
+    expect(workspaceToolbar).toContain("if store.spatialSceneEnabled");
     // The spatial entry is a picker over the workspace's discovered documents,
     // not a button onto an assumed path: a diagram under `docs/` was
     // unreachable while the toolbar hardcoded the workspace-root scene file.
-    expect(workspaceThreadColumn).toContain("SpatialDocumentMenu(");
+    expect(workspaceToolbar).toContain("SpatialDocumentMenu(");
     expect(workspaceWindow).toContain("id: SpatialSceneWindow.id");
     expect(workspaceWindow).not.toContain("SpatialSceneWindow.defaultScenePath");
     expect(workspaceThreads).toContain("WorkspaceThreadPanel");
@@ -563,12 +563,13 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     }
     expect(workspaceChatColumn).toContain("CodingPermissionRequestView(");
 
-    // The clarifying-question deck is a trailing scene ornament owned by the
+    // The clarifying-question deck is a side scene ornament owned by the
     // chat column, beside the composer's bottom one; the record cards sit in
     // the artifact tray. Neither reaches the composer or the navigation-only
     // window view.
     expect(workspaceChatColumn).toContain("CodingQuestionDeckView(presentation: questionDeck)");
-    expect(workspaceChatColumn).toContain("attachmentAnchor: .scene(.trailing)");
+    // The deck floats on the side away from the thread list.
+    expect(workspaceChatColumn).toContain("attachmentAnchor: .scene(threadSide.opposite.unitPoint)");
     expect(artifactTray).toContain("CodingQuestionRequestView(");
     // Closing the deck hides it in this window only; the tray's record card is
     // the way back while the batch can still be answered.
@@ -649,9 +650,16 @@ describe.skipIf(!visionOSTreePresent)("visionOS XcodeGen project", () => {
     const workspaceWindow = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceWindowView.swift"), "utf8");
     const workspaceThreadColumn = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceThreadColumn.swift"), "utf8");
     const workspaceChatColumn = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceChatColumn.swift"), "utf8");
+    const workspaceColumns = await readFile(resolve(visionOSRoot, "AgentRoom/Views/Workspace/WorkspaceColumnsView.swift"), "utf8");
 
-    expect(workspaceWindow).toContain("NavigationSplitView");
-    expect(workspaceWindow).toContain(".navigationSplitViewStyle(.balanced)");
+    // Hand-built columns: the split view couldn't put Files on the right in code mode, and on
+    // visionOS 26.5 it ignored widths in its detail column.
+    expect(workspaceWindow).toContain("WorkspaceColumnsView(");
+    expect(workspaceWindow).not.toContain("NavigationSplitView {");
+    expect(workspaceWindow).not.toContain(".navigationSplitViewStyle(");
+    expect(workspaceColumns).toContain("HStack(spacing: 0)");
+    expect(workspaceColumns).toContain("Divider()");
+    expect(workspaceColumns).toContain(".onGeometryChange(for: Double.self)");
     expect(workspaceThreadColumn).toContain("WorkspaceThreadPanel");
     expect(workspaceChatColumn).toContain("ThreadTranscriptView");
     expect(workspaceChatColumn).toContain("WorkspaceComposerPanel");
