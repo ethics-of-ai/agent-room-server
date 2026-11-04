@@ -5,8 +5,10 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LocalWorkspace, ServiceConfig } from "../src/domain/models";
 import { LanguageServiceHost } from "../src/editor/languageServices/LanguageServiceHost";
-import { LanguageServiceRegistry, sourceKitLspDescriptor } from "../src/editor/languageServices/registry";
+import { LanguageServiceRegistry } from "../src/editor/languageServices/registry";
+import { sourceKitLspDescriptor } from "../src/editor/languageServices/sourceKitLsp";
 import type { LocalWorkspaceRegistry } from "../src/workspace/LocalWorkspaceRegistry";
+import { featureResponse } from "./support/languageServiceFeatureResponse";
 
 function sourceKitPath(): string | undefined {
   try {
@@ -52,7 +54,6 @@ describe("production SourceKit-LSP adapter", () => {
       port: 8787,
       workspaceRoot: root,
       stateDir: join(root, ".state"),
-      editorCatalogDir: join(root, ".catalog"),
       requireAuth: false,
       gitCommandTimeoutMs: 30_000,
       codexArgs: [],
@@ -75,7 +76,7 @@ describe("production SourceKit-LSP adapter", () => {
         clientVersion: 1,
         text
       });
-      const completion = await host.requestFeature("sourcekit-tab", {
+      const completion = await featureResponse(host, "sourcekit-tab", {
         requestId: "completion",
         clientVersion: 1,
         kind: "completion",
@@ -86,7 +87,7 @@ describe("production SourceKit-LSP adapter", () => {
         result: { kind: "completion", items: expect.any(Array) }
       });
 
-      const hover = await host.requestFeature("sourcekit-tab", {
+      const hover = await featureResponse(host, "sourcekit-tab", {
         requestId: "hover",
         clientVersion: 1,
         kind: "hover",
@@ -97,7 +98,7 @@ describe("production SourceKit-LSP adapter", () => {
         result: { kind: "hover" }
       });
 
-      const definition = await host.requestFeature("sourcekit-tab", {
+      const definition = await featureResponse(host, "sourcekit-tab", {
         requestId: "definition",
         clientVersion: 1,
         kind: "definition",
@@ -108,7 +109,7 @@ describe("production SourceKit-LSP adapter", () => {
         result: { kind: "definition", locations: expect.any(Array) }
       });
 
-      const symbols = await host.requestFeature("sourcekit-tab", {
+      const symbols = await featureResponse(host, "sourcekit-tab", {
         requestId: "symbols",
         clientVersion: 1,
         kind: "document_symbols"
@@ -118,7 +119,7 @@ describe("production SourceKit-LSP adapter", () => {
         result: { kind: "document_symbols", symbols: expect.any(Array) }
       });
 
-      const semanticTokens = await host.requestFeature("sourcekit-tab", {
+      const semanticTokens = await featureResponse(host, "sourcekit-tab", {
         requestId: "semantic-tokens",
         clientVersion: 1,
         kind: "semantic_tokens"

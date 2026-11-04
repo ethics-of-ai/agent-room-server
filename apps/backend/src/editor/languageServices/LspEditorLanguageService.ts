@@ -16,6 +16,7 @@ import type {
   LanguageServiceSpawner,
   OpenLanguageDocument
 } from "./types";
+import { utf8Bytes } from "./text";
 
 export class LspEditorLanguageService implements EditorLanguageService {
   private client?: LspStdioClient;
@@ -191,7 +192,7 @@ function semanticLegend(value: unknown): { tokenTypes: string[]; tokenModifiers:
     : undefined;
   if (!legend) return undefined;
   const bounded = (candidate: unknown, limit: number): string[] => Array.isArray(candidate)
-    ? candidate.filter((item): item is string => typeof item === "string" && Buffer.byteLength(item, "utf8") <= 64).slice(0, limit)
+    ? candidate.filter((item): item is string => typeof item === "string" && utf8Bytes(item) <= 64).slice(0, limit)
     : [];
   return { tokenTypes: bounded(legend.tokenTypes, 128), tokenModifiers: bounded(legend.tokenModifiers, 64) };
 }

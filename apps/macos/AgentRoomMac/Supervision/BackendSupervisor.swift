@@ -60,8 +60,6 @@ final class BackendSupervisor {
     private(set) var runnerCapabilityResults: [String: CodingAgentCapabilitiesResponse] = [:]
     private(set) var runnerConnectionTests: Set<String> = []
     private(set) var runnerConnectionMessages: [String: String] = [:]
-    var editorCatalogStatus: EditorCatalogStatus?
-    var editorCatalogActionStatus: EditorCatalogActionStatus?
     var languageServiceCatalog: LanguageServiceCatalog?
     var languageServiceCatalogIssue: String?
     /// Whether a backend this app supervises exists right now — spawned this

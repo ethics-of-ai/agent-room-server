@@ -2,7 +2,7 @@
 
 The macOS app is AgentRoom's local operator surface. It owns backend setup,
 sidecar supervision, runner bootstrap, managed settings, workspace registration,
-LAN pairing, diagnostics, language-catalog import, and published app updates.
+LAN pairing, diagnostics, and published app updates.
 It does not run coding agents or Git commands directly.
 
 Backend setup and recovery recipes are in
@@ -27,7 +27,6 @@ XcodeGen. CI and public release select Xcode 27.0.
 - Register existing folders and request bounded branch switches through the API.
 - Mirror backend sessions, transcripts, metrics, events, and active-turn cancel.
 - Display pairing URLs and export secret-redacted diagnostics.
-- Import and validate data-only editor catalogs.
 - Edit the local model catalog at `$AGENTROOM_HOME/config/models.json`.
 - Run the source-controlled Sparkle update channel.
 
@@ -48,8 +47,8 @@ Pairing and configuration use two columns when the detail content can fit two
 320-point groups plus spacing, and stack below that width. Long values wrap and
 remain selectable; pairing rows have individually labeled copy controls.
 
-Settings uses a sidebar for Setup, Credentials, Runners, Models, Languages,
-Appearance, and Advanced. It opens on Setup and keeps its selection while open.
+Settings uses a sidebar for Setup, Credentials, Runners, Models, Appearance,
+and Advanced. It opens on Setup and keeps its selection while open.
 The default size is 820 by 640 points with a 720 by 560 minimum. Existing grouped
 forms retain offline editing, environment locks, pending restart, schema repair,
 and Keychain masking behavior.
@@ -74,7 +73,6 @@ The effective roots are:
 ```text
 AGENTROOM_HOME=$HOME/Library/Application Support/AgentRoom
 WORKSPACE_ROOT=$HOME/Developer/AgentRoom/Workspaces
-EDITOR_CATALOG_DIR=$AGENTROOM_HOME/catalog-assets
 HOST=0.0.0.0
 ```
 
@@ -332,22 +330,18 @@ build no longer knows. Status reports only whether a slot is configured.
 
 ## Editor language catalog
 
-The Languages pane imports a catalog folder containing its manifest and
-`.json` or `.wasm` assets. It copies data only into a sibling staging directory,
-swaps the candidate, asks the backend to validate and reload, and retains the
-prior override until acceptance. Rejection rolls back. Reset removes the
-operator override and returns to bundled assets.
+The bundled backend serves the catalog that ships inside the app. A Mac release
+updates it, and visionOS picks up the new catalog the next time it connects.
+There is no operator import. An older build created
+`$AGENTROOM_HOME/catalog-assets` for one; the backend no longer reads that
+folder, and it is safe to delete.
 
-The pane shows safe status: source, content version, schema versions, language
-and grammar counts, unresolved scopes, bounded validation code and relative
-location, and semantic-service availability. It never shows executable paths,
-argv, environment values, absolute project roots, or raw child errors.
-
-`editor_catalog_changed` carries version and language count only. visionOS then
-fetches and verifies every blob before activating the generation. The
+The Advanced pane shows semantic-service readiness below the "Enable editor
+language services" toggle. It never shows executable paths, argv, environment
+values, absolute project roots, or raw child errors. The
 [catalog API](../api/API.md#editor-language-catalog) owns the wire contract;
 [language-catalog safety](../safety/TRUST_AND_SAFETY.md#language-catalog) owns
-validation, activation, and import bounds.
+validation and activation.
 
 ## Model catalog
 

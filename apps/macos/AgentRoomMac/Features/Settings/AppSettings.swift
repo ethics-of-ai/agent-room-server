@@ -49,20 +49,6 @@ struct AppSettings: Equatable {
             .path
     }
 
-    /// Operator-managed editor language catalog override directory.
-    /// The Languages pane imports catalog data here; the backend reads the same
-    /// path from `EDITOR_CATALOG_DIR` and prefers it over the bundled catalog.
-    static func editorCatalogPath(for agentRoomHomePath: String) -> String {
-        URL(fileURLWithPath: agentRoomHomePath, isDirectory: true)
-            .appendingPathComponent("catalog-assets", isDirectory: true)
-            .standardizedFileURL
-            .path
-    }
-
-    var editorCatalogPath: String {
-        Self.editorCatalogPath(for: agentRoomHomePath)
-    }
-
     /// The backend-owned managed settings file. The backend resolves the same
     /// path from `AGENTROOM_HOME`, so the panes and the sidecar read one file.
     var managedSettingsFileURL: URL {

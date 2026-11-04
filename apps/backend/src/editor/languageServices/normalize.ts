@@ -15,7 +15,7 @@ import type {
 } from "../../domain/languageService";
 import { isInside } from "../../util/pathBounding";
 import { indexableRelativePath } from "../../workspace/explorer/paths";
-import { clampUtf8, comparePositions, validRange } from "./text";
+import { clampUtf8, comparePositions, utf8Bytes, validRange } from "./text";
 
 const completionKinds: LanguageServiceCompletionKind[] = [
   "text", "method", "function", "constructor", "field", "variable", "class", "interface",
@@ -167,7 +167,7 @@ async function definitionLocation(
     }
     if (!isInside(workspaceRoot, absolute) || !(await lstat(absolute)).isFile()) return undefined;
     const path = relative(workspaceRoot, absolute).split("\\").join("/");
-    if (!indexableRelativePath(path) || Buffer.byteLength(path, "utf8") > 1024) return undefined;
+    if (!indexableRelativePath(path) || utf8Bytes(path) > 1024) return undefined;
     return { path, range: locationRange };
   } catch {
     return undefined;

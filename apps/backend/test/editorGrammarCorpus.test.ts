@@ -5,9 +5,8 @@ import { join, resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { EditorCatalogStore } from "../src/editor/EditorCatalogStore";
 import type { EditorCatalogManifest } from "../src/editor/editorCatalogManifest";
+import { catalogAssetsDir, repoRoot } from "./support/editorCatalogFixtures";
 
-const repoRoot = resolve(__dirname, "../../..");
-const catalogAssetsDir = resolve(__dirname, "..", "catalog-assets");
 const corpusPath = resolve(__dirname, "fixtures/editorGrammarCorpus.json");
 // The engine the headset runs is the vendored one under the visionOS tree; the public
 // mirror ships the catalog without it, so this suite skips there rather than pretending
@@ -42,7 +41,9 @@ interface TokenizedLine {
 interface Registry {
   loadGrammar(scopeName: string): Promise<{
     tokenizeLine(line: string, state: unknown, timeLimit?: number): { tokens: Array<{ startIndex: number; endIndex: number; scopes: string[] }>; ruleStack: unknown };
+    tokenizeLine2(line: string, state: unknown, timeLimit?: number): { tokens: Uint32Array; ruleStack: unknown };
   } | null>;
+  setTheme(theme: unknown): void;
 }
 
 interface Engine {
@@ -150,4 +151,59 @@ describe.skipIf(!hasEngine)("editor grammar corpus", async () => {
       expect(elapsed).toBeLessThan(2_000);
     });
   }
+
+  // A grammar that tokenizes is not enough: its scopes must also reach a theme
+  // rule, or the file renders in one colour. Count distinct non-default
+  // foregrounds per fixture under a theme.
+  const colourCounts = async (theme: unknown): Promise<Map<string, number>> => {
+    const defaultForeground = 1;
+    engine.registry.setTheme(theme);
+    const counts = new Map<string, number>();
+    for (const fixture of corpus.fixtures) {
+      const grammar = (await engine.registry.loadGrammar(byLanguage.get(fixture.languageId)!.scopeName))!;
+      const colours = new Set<number>();
+      let state = engine.initial;
+      for (const line of fixture.text.split("\n")) {
+        const result = grammar.tokenizeLine2(line, state, 500);
+        state = result.ruleStack;
+        for (let index = 0; index < result.tokens.length; index += 2) {
+          const end = index + 2 < result.tokens.length ? result.tokens[index + 2] : line.length;
+          if (!line.slice(result.tokens[index], end).trim()) continue;
+          const foreground = (result.tokens[index + 1] & 0x00ff8000) >>> 15;
+          if (foreground !== defaultForeground) colours.add(foreground);
+        }
+      }
+      counts.set(fixture.languageId, colours.size);
+    }
+    return counts;
+  };
+  const authoredThemes = new Set(["AgentRoom-Light", "AgentRoom-Dark"]);
+
+  // The AgentRoom themes are written for this corpus, so every fixture must colour.
+  it("colours every fixture under each AgentRoom TextMate theme", async () => {
+    const themes = JSON.parse(await readFile(join(catalogAssetsDir, "EditorTextMateThemes.json"), "utf8")) as Record<string, unknown>;
+    for (const themeName of authoredThemes) {
+      const counts = await colourCounts(themes[themeName]);
+      for (const fixture of corpus.fixtures) {
+        expect(counts.get(fixture.languageId), `${fixture.languageId} renders in too few colours under ${themeName}`)
+          .toBeGreaterThanOrEqual(Math.min(2, fixture.expect.length));
+      }
+    }
+  });
+
+  // Imported themes are faithful to their upstream, which may leave a scope such as a
+  // commit subject uncoloured, as it is in VS Code. They must still colour real code and
+  // nearly all of the corpus, which catches a conversion that loses its rules.
+  it("colours code and nearly all fixtures under each imported TextMate theme", async () => {
+    const themes = JSON.parse(await readFile(join(catalogAssetsDir, "EditorTextMateThemes.json"), "utf8")) as Record<string, unknown>;
+    for (const [themeName, theme] of Object.entries(themes)) {
+      if (authoredThemes.has(themeName)) continue;
+      const counts = await colourCounts(theme);
+      for (const languageId of ["swift", "typescript", "python"]) {
+        expect(counts.get(languageId), `${languageId} renders in too few colours under ${themeName}`).toBeGreaterThanOrEqual(2);
+      }
+      const coloured = corpus.fixtures.filter((fixture) => counts.get(fixture.languageId)! >= Math.min(2, fixture.expect.length));
+      expect(coloured.length / corpus.fixtures.length, `share of fixtures coloured under ${themeName}`).toBeGreaterThanOrEqual(0.9);
+    }
+  });
 });

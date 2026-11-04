@@ -15,6 +15,7 @@ import type { LanguageServiceLimits } from "../editor/languageServices/limits";
 import { DEFAULT_LANGUAGE_SERVICE_LIMITS } from "../editor/languageServices/limits";
 import type { LanguageServiceRegistry } from "../editor/languageServices/registry";
 import { authorizedForRead } from "./readAuthorization";
+import { utf8Bytes } from "../editor/languageServices/text";
 
 const paramsSchema = z.object({ workspaceId: z.string().min(1).max(256) });
 
@@ -47,7 +48,7 @@ export class BoundedLanguageServiceSender {
       return;
     }
     const data = JSON.stringify(parsed.data);
-    const bytes = Buffer.byteLength(data, "utf8");
+    const bytes = utf8Bytes(data);
     if (bytes > this.limits.maxOutboundSocketFrameBytes) {
       this.abort("Outbound frame too large");
       return;
@@ -104,7 +105,7 @@ export async function registerLanguageServiceRoutes(
     services: deps.registry.projection()
   }));
 
-  if (!deps.host || deps.config.languageServicesEnabled !== true) return;
+  if (!deps.host) return;
   if (!app.hasDecorator("websocketServer")) await app.register(websocket);
   const limits = deps.limits ?? DEFAULT_LANGUAGE_SERVICE_LIMITS;
 
@@ -225,7 +226,7 @@ export async function registerLanguageServiceRoutes(
         const candidate = value && typeof value === "object" ? value as { type?: unknown; text?: unknown } : undefined;
         if ((candidate?.type === "open" || candidate?.type === "change")
           && typeof candidate.text === "string"
-          && Buffer.byteLength(candidate.text, "utf8") > limits.maxDocumentBytes) {
+          && utf8Bytes(candidate.text) > limits.maxDocumentBytes) {
           sender.send({ type: "error", code: "document_too_large", message: "Document exceeds the 256 KiB limit" });
           return;
         }

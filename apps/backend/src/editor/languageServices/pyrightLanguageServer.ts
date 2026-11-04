@@ -1,6 +1,6 @@
 import { bundledRegularFile } from "./bundledExecutable";
 import { baseLanguageServiceEnvironmentKeys } from "./environment";
-import type { LanguageServiceDescriptor, ResolvedLanguageServiceExecutable } from "./types";
+import { standardServerRequests, type LanguageServiceDescriptor, type ResolvedLanguageServiceExecutable } from "./types";
 
 async function resolvePyrightLanguageServer(): Promise<ResolvedLanguageServiceExecutable> {
   const languageServer = await bundledRegularFile(
@@ -24,10 +24,7 @@ export const pyrightLanguageServerDescriptor: LanguageServiceDescriptor = {
   ],
   standaloneWorkspaceRoot: true,
   projectLoading: { mayInvokeBuildTools: false, mayLoadPlugins: false },
-  serverRequests: {
-    workDoneProgressCreate: "null",
-    workspaceConfiguration: "null_per_item"
-  },
+  serverRequests: standardServerRequests,
   environmentKeys: baseLanguageServiceEnvironmentKeys,
   configured: () => true,
   resolveExecutable: resolvePyrightLanguageServer

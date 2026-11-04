@@ -17,17 +17,18 @@ import {
   type EditorCatalogManifest,
   type EditorCatalogScopeGrammar
 } from "./editorCatalogManifest";
+import { utf8Bytes } from "./languageServices/text";
 
 /** A client-facing refusal from the asset route: the path itself is malformed. */
 export class EditorCatalogError extends Error {
-  constructor(message: string, readonly statusCode = 400) {
+  constructor(message: string) {
     super(message);
     this.name = "EditorCatalogError";
   }
 }
 
 /** A catalog directory that cannot become a live generation, with a stable code and location. */
-export class EditorCatalogAssemblyError extends Error {
+class EditorCatalogAssemblyError extends Error {
   constructor(
     readonly code: string,
     readonly location: string,
@@ -43,7 +44,7 @@ export interface EditorCatalogAsset {
   contentType: string;
 }
 
-export type EditorCatalogValidationState = "accepted" | "fallback" | "rejected" | "unavailable";
+type EditorCatalogValidationState = "accepted" | "rejected" | "unavailable";
 
 export interface EditorCatalogValidation {
   state: EditorCatalogValidationState;
@@ -51,7 +52,7 @@ export interface EditorCatalogValidation {
   location: string | null;
 }
 
-export type CatalogSnapshotResult =
+type CatalogSnapshotResult =
   | {
       state: "accepted";
       manifest: EditorCatalogManifest;
@@ -61,12 +62,6 @@ export type CatalogSnapshotResult =
     }
   | { state: "missing"; validation: EditorCatalogValidation }
   | { state: "rejected"; validation: EditorCatalogValidation; detail: string };
-
-export const allowedCatalogExtensions: ReadonlySet<string> = new Set([".json", ".wasm"]);
-const contentTypeByExtension: Record<string, string> = {
-  ".json": "application/json",
-  ".wasm": "application/wasm"
-};
 
 type GrammarIndexEntry = ReturnType<typeof editorGrammarsIndexSchema.parse>["grammars"][number];
 type ScopeIndexEntry = NonNullable<ReturnType<typeof editorGrammarsIndexSchema.parse>["scopeGrammars"]>[number];
@@ -138,7 +133,6 @@ export async function buildCatalogSnapshot(assetsDir: string): Promise<CatalogSn
     };
 
     const grammarsIndex = await parseJson("EditorGrammars.json", editorGrammarsIndexSchema);
-    const schemaVersion = grammarsIndex.schemaVersion ?? 1;
     const languageMap = await parseJson("EditorLanguages.json", editorLanguageMapSchema);
     const themes = await parseJson("EditorThemes.json", editorThemeMapSchema);
     const textMateThemes = await parseJson("EditorTextMateThemes.json", editorTextMateThemeMapSchema);
@@ -188,9 +182,7 @@ export async function buildCatalogSnapshot(assetsDir: string): Promise<CatalogSn
         if (parsedByScope.has(scope)) resolved.push(scope);
         else unresolvedScopes.add(scope);
       }
-      // Schema 1 predates derived dependencies, so a schema-1 manifest keeps its exact
-      // shape for the clients that were built against it.
-      if (schemaVersion === 1 || resolved.length === 0) return {};
+      if (resolved.length === 0) return {};
       return { dependencyScopes: resolved };
     };
 
@@ -223,7 +215,7 @@ export async function buildCatalogSnapshot(assetsDir: string): Promise<CatalogSn
         ...(entry.embeddedLanguages ? { embeddedLanguages: entry.embeddedLanguages } : {}),
         ...(entry.injectionScopes ? { injectionScopes: entry.injectionScopes } : {}),
         ...dependencyFields(parsed),
-        ...(entry.provenance ? { provenance: entry.provenance } : {})
+        provenance: entry.provenance
       });
     }
     const scopeGrammars: EditorCatalogScopeGrammar[] = auxiliaries.map((parsed) => ({
@@ -231,7 +223,7 @@ export async function buildCatalogSnapshot(assetsDir: string): Promise<CatalogSn
       grammar: parsed.ref,
       ...(parsed.entry.injectionScopes ? { injectionScopes: parsed.entry.injectionScopes } : {}),
       ...dependencyFields(parsed),
-      ...(parsed.entry.provenance ? { provenance: parsed.entry.provenance } : {})
+      provenance: parsed.entry.provenance
     }));
 
     const onigWasm = (
@@ -244,7 +236,7 @@ export async function buildCatalogSnapshot(assetsDir: string): Promise<CatalogSn
         .join("\n")
     );
     const manifest = editorCatalogManifestSchema.parse({
-      schemaVersion,
+      schemaVersion: grammarsIndex.schemaVersion,
       version,
       languageMap,
       grammars,
@@ -444,25 +436,14 @@ export function acceptedValidation(): EditorCatalogValidation {
   return { state: "accepted", code: null, location: null };
 }
 
-export function rejectedValidation(validation: EditorCatalogValidation): EditorCatalogValidation {
-  return { ...validation, state: "rejected" };
-}
-
-export function unavailableValidation(
-  code = "catalog_unavailable",
-  location: string | null = null
-): EditorCatalogValidation {
+function unavailableValidation(code: string, location: string | null): EditorCatalogValidation {
   return { state: "unavailable", code, location };
 }
 
 function boundedLocation(location: string): string {
-  return Buffer.byteLength(location, "utf8") <= editorCatalogBounds.pathBytes
+  return utf8Bytes(location) <= editorCatalogBounds.pathBytes
     ? location
     : `${location.slice(0, editorCatalogBounds.pathBytes - 1)}…`;
-}
-
-export function catalogContentType(extension: string): string | undefined {
-  return contentTypeByExtension[extension];
 }
 
 export function normalizeCatalogPath(inputPath: string): string {
@@ -470,7 +451,7 @@ export function normalizeCatalogPath(inputPath: string): string {
     throw new EditorCatalogError("Catalog asset path must stay inside the catalog");
   });
   if (!safePath) throw new EditorCatalogError("Catalog asset path is required");
-  if (Buffer.byteLength(safePath, "utf8") > editorCatalogBounds.pathBytes) {
+  if (utf8Bytes(safePath) > editorCatalogBounds.pathBytes) {
     throw new EditorCatalogError("Catalog asset path is too long");
   }
   return safePath;

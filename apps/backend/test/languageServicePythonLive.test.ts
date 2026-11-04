@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { pyrightLanguageServerDescriptor } from "../src/editor/languageServices/registry";
+import { pyrightLanguageServerDescriptor } from "../src/editor/languageServices/pyrightLanguageServer";
 import {
   completionLabels,
   definitions,
@@ -40,7 +40,7 @@ describe("production Pyright language-service descriptor", () => {
       0,
       "result.".length
     ))).toContain("bit_length");
-    expect(documentSymbolNames(await harness.requestFeature("standalone", {
+    expect(documentSymbolNames(await harness.featureResponse("standalone", {
       requestId: "standalone-document-symbols",
       clientVersion: 1,
       kind: "document_symbols"
@@ -65,7 +65,7 @@ describe("production Pyright language-service descriptor", () => {
       0,
       "request.".length
     ))).toContain("method");
-    expect(documentSymbolNames(await harness.requestFeature("django", {
+    expect(documentSymbolNames(await harness.featureResponse("django", {
       requestId: "django-document-symbols",
       clientVersion: 1,
       kind: "document_symbols"

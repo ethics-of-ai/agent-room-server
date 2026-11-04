@@ -45,6 +45,8 @@ struct AdvancedSettingsPane: View {
                 ManagedSettingFootnote(key: .languageServicesEnabled)
             }
 
+            LanguageServiceStatusSection()
+
             Section("Spatial Scenes") {
                 Toggle("Enable spatial scene volumes", isOn: $sceneEngineEnabled)
                     .disabled(supervisor.isSettingEnvironmentLocked(.sceneEngineEnabled))
@@ -89,6 +91,7 @@ struct AdvancedSettingsPane: View {
         }
         .formStyle(.grouped)
         .onAppear(perform: loadSettings)
+        .task { await supervisor.refreshLanguageServiceCatalog() }
         .onChange(of: supervisor.managedSettings) { _, _ in
             loadManagedSettings()
         }

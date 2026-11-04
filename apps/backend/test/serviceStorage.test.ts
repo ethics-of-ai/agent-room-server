@@ -17,10 +17,9 @@ describe("service storage initialization", () => {
       await expectDirectory(join(agentRoomHome, "config"));
       await expectDirectory(config.workspaceRoot);
       await expectDirectory(config.stateDir);
-      // The operator-managed editor catalog override dir is created at boot so the
-      // macOS app can import assets into it (empty -> backend serves bundled).
-      await expectDirectory(config.editorCatalogDir);
-      expect(config.editorCatalogDir).toBe(join(agentRoomHome, "catalog-assets"));
+      // The backend serves only its bundled editor catalog, so it no longer
+      // creates the retired operator override directory.
+      await expect(stat(join(agentRoomHome, "catalog-assets"))).rejects.toThrow();
     });
   });
 });
@@ -30,7 +29,7 @@ async function expectDirectory(path: string): Promise<void> {
 }
 
 async function withCleanEnv(run: () => Promise<void>): Promise<void> {
-  const names = ["AGENTROOM_HOME", "WORKSPACE_ROOT", "STATE_DIR", "EDITOR_CATALOG_DIR"];
+  const names = ["AGENTROOM_HOME", "WORKSPACE_ROOT", "STATE_DIR"];
   const previous = new Map(names.map((name) => [name, process.env[name]]));
   for (const name of names) {
     delete process.env[name];

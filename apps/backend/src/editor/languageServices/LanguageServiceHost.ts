@@ -174,14 +174,6 @@ export class LanguageServiceHost {
     this.scheduleChange(found.instance, found.shadow);
   }
 
-  async requestFeature(
-    connectionId: string,
-    input: StartFeatureRequestInput
-  ): Promise<LanguageServiceServerFrame | undefined> {
-    const started = await this.startFeatureRequest(connectionId, input);
-    return started.response;
-  }
-
   async startFeatureRequest(
     connectionId: string,
     input: StartFeatureRequestInput

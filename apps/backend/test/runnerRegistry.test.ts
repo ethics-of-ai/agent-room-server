@@ -26,7 +26,6 @@ const config = (overrides: Partial<ServiceConfig> = {}): ServiceConfig =>
     port: 8787,
     workspaceRoot: "/tmp/workspaces",
     stateDir: "/tmp/state",
-    editorCatalogDir: "/tmp/catalog-assets",
     requireAuth: false,
     gitCommandTimeoutMs: 30_000,
     codexArgs: [],

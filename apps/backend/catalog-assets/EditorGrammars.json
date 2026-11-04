@@ -159,6 +159,605 @@
       }
     },
     {
+      "languageId": "bat",
+      "scopeName": "source.batchfile",
+      "grammar": "grammars/bat.tmLanguage.json",
+      "languageConfig": "language-configs/bat.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/bat/syntaxes/batchfile.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "clojure",
+      "scopeName": "source.clojure",
+      "grammar": "grammars/clojure.tmLanguage.json",
+      "languageConfig": "language-configs/clojure.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/clojure/syntaxes/clojure.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "coffeescript",
+      "scopeName": "source.coffee",
+      "grammar": "grammars/coffeescript.tmLanguage.json",
+      "languageConfig": "language-configs/coffeescript.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/coffeescript/syntaxes/coffeescript.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "c",
+      "scopeName": "source.c",
+      "grammar": "grammars/c.tmLanguage.json",
+      "languageConfig": "language-configs/c.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/cpp/syntaxes/c.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "cpp",
+      "scopeName": "source.cpp",
+      "grammar": "grammars/cpp.tmLanguage.json",
+      "languageConfig": "language-configs/cpp.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/cpp/syntaxes/cpp.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "csharp",
+      "scopeName": "source.cs",
+      "grammar": "grammars/csharp.tmLanguage.json",
+      "languageConfig": "language-configs/csharp.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/csharp/syntaxes/csharp.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "dart",
+      "scopeName": "source.dart",
+      "grammar": "grammars/dart.tmLanguage.json",
+      "languageConfig": "language-configs/dart.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/dart/syntaxes/dart.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "diff",
+      "scopeName": "source.diff",
+      "grammar": "grammars/diff.tmLanguage.json",
+      "languageConfig": "language-configs/diff.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/diff/syntaxes/diff.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "dockerfile",
+      "scopeName": "source.dockerfile",
+      "grammar": "grammars/dockerfile.tmLanguage.json",
+      "languageConfig": "language-configs/dockerfile.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/docker/syntaxes/docker.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "dotenv",
+      "scopeName": "source.dotenv",
+      "grammar": "grammars/dotenv.tmLanguage.json",
+      "languageConfig": "language-configs/dotenv.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/dotenv/syntaxes/dotenv.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "fsharp",
+      "scopeName": "source.fsharp",
+      "grammar": "grammars/fsharp.tmLanguage.json",
+      "languageConfig": "language-configs/fsharp.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/fsharp/syntaxes/fsharp.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "git-commit",
+      "scopeName": "text.git-commit",
+      "grammar": "grammars/git-commit.tmLanguage.json",
+      "languageConfig": "language-configs/git-commit.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/git-base/syntaxes/git-commit.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "git-rebase",
+      "scopeName": "text.git-rebase",
+      "grammar": "grammars/git-rebase.tmLanguage.json",
+      "languageConfig": "language-configs/git-rebase.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/git-base/syntaxes/git-rebase.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "ignore",
+      "scopeName": "source.ignore",
+      "grammar": "grammars/ignore.tmLanguage.json",
+      "languageConfig": "language-configs/ignore.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/git-base/syntaxes/ignore.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "go",
+      "scopeName": "source.go",
+      "grammar": "grammars/go.tmLanguage.json",
+      "languageConfig": "language-configs/go.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/go/syntaxes/go.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "groovy",
+      "scopeName": "source.groovy",
+      "grammar": "grammars/groovy.tmLanguage.json",
+      "languageConfig": "language-configs/groovy.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/groovy/syntaxes/groovy.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "handlebars",
+      "scopeName": "text.html.handlebars",
+      "grammar": "grammars/handlebars.tmLanguage.json",
+      "languageConfig": "language-configs/handlebars.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/handlebars/syntaxes/Handlebars.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "hlsl",
+      "scopeName": "source.hlsl",
+      "grammar": "grammars/hlsl.tmLanguage.json",
+      "languageConfig": "language-configs/hlsl.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/hlsl/syntaxes/hlsl.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "ini",
+      "scopeName": "source.ini",
+      "grammar": "grammars/ini.tmLanguage.json",
+      "languageConfig": "language-configs/ini.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/ini/syntaxes/ini.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "java",
+      "scopeName": "source.java",
+      "grammar": "grammars/java.tmLanguage.json",
+      "languageConfig": "language-configs/java.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/java/syntaxes/java.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "julia",
+      "scopeName": "source.julia",
+      "grammar": "grammars/julia.tmLanguage.json",
+      "languageConfig": "language-configs/julia.json",
+      "embeddedLanguages": {
+        "meta.embedded.inline.cpp": "cpp",
+        "meta.embedded.inline.javascript": "javascript",
+        "meta.embedded.inline.python": "python",
+        "meta.embedded.inline.r": "r",
+        "meta.embedded.inline.sql": "sql"
+      },
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/julia/syntaxes/julia.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "tex",
+      "scopeName": "text.tex",
+      "grammar": "grammars/tex.tmLanguage.json",
+      "languageConfig": "language-configs/tex.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/latex/syntaxes/TeX.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "latex",
+      "scopeName": "text.tex.latex",
+      "grammar": "grammars/latex.tmLanguage.json",
+      "languageConfig": "language-configs/latex.json",
+      "embeddedLanguages": {
+        "source.css": "css",
+        "text.html": "html",
+        "source.java": "java",
+        "source.js": "javascript",
+        "source.julia": "julia",
+        "source.lua": "lua",
+        "source.python": "python",
+        "source.ruby": "ruby",
+        "source.ts": "typescript",
+        "text.xml": "xml",
+        "source.yaml": "yaml"
+      },
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/latex/syntaxes/LaTeX.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "bibtex",
+      "scopeName": "text.bibtex",
+      "grammar": "grammars/bibtex.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/latex/syntaxes/Bibtex.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "less",
+      "scopeName": "source.css.less",
+      "grammar": "grammars/less.tmLanguage.json",
+      "languageConfig": "language-configs/less.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/less/syntaxes/less.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "log",
+      "scopeName": "text.log",
+      "grammar": "grammars/log.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/log/syntaxes/log.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "lua",
+      "scopeName": "source.lua",
+      "grammar": "grammars/lua.tmLanguage.json",
+      "languageConfig": "language-configs/lua.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/lua/syntaxes/lua.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "makefile",
+      "scopeName": "source.makefile",
+      "grammar": "grammars/makefile.tmLanguage.json",
+      "languageConfig": "language-configs/makefile.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/make/syntaxes/make.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "objective-c",
+      "scopeName": "source.objc",
+      "grammar": "grammars/objective-c.tmLanguage.json",
+      "languageConfig": "language-configs/objective-c.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/objective-c/syntaxes/objective-c.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "objective-cpp",
+      "scopeName": "source.objcpp",
+      "grammar": "grammars/objective-cpp.tmLanguage.json",
+      "languageConfig": "language-configs/objective-cpp.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/objective-c/syntaxes/objective-c++.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "perl",
+      "scopeName": "source.perl",
+      "grammar": "grammars/perl.tmLanguage.json",
+      "languageConfig": "language-configs/perl.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/perl/syntaxes/perl.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "raku",
+      "scopeName": "source.perl.6",
+      "grammar": "grammars/raku.tmLanguage.json",
+      "languageConfig": "language-configs/raku.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/perl/syntaxes/perl6.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "php",
+      "scopeName": "text.html.php",
+      "grammar": "grammars/php.tmLanguage.json",
+      "languageConfig": "language-configs/php.json",
+      "embeddedLanguages": {
+        "text.html": "html",
+        "source.sql": "sql",
+        "text.xml": "xml",
+        "source.js": "javascript",
+        "source.json": "json",
+        "source.css": "css"
+      },
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/php/syntaxes/html.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "powershell",
+      "scopeName": "source.powershell",
+      "grammar": "grammars/powershell.tmLanguage.json",
+      "languageConfig": "language-configs/powershell.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/powershell/syntaxes/powershell.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "pug",
+      "scopeName": "text.pug",
+      "grammar": "grammars/pug.tmLanguage.json",
+      "languageConfig": "language-configs/pug.json",
+      "injectionScopes": [
+        "vue.directives",
+        "vue.interpolations"
+      ],
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/pug/syntaxes/pug.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "python",
+      "scopeName": "source.python",
+      "grammar": "grammars/python.tmLanguage.json",
+      "languageConfig": "language-configs/python.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/python/syntaxes/MagicPython.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "r",
+      "scopeName": "source.r",
+      "grammar": "grammars/r.tmLanguage.json",
+      "languageConfig": "language-configs/r.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/r/syntaxes/r.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "razor",
+      "scopeName": "text.html.cshtml",
+      "grammar": "grammars/razor.tmLanguage.json",
+      "languageConfig": "language-configs/razor.json",
+      "embeddedLanguages": {
+        "section.embedded.source.cshtml": "csharp",
+        "source.css": "css",
+        "source.js": "javascript"
+      },
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/razor/syntaxes/cshtml.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "restructuredtext",
+      "scopeName": "source.rst",
+      "grammar": "grammars/restructuredtext.tmLanguage.json",
+      "languageConfig": "language-configs/restructuredtext.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/restructuredtext/syntaxes/rst.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "ruby",
+      "scopeName": "source.ruby",
+      "grammar": "grammars/ruby.tmLanguage.json",
+      "languageConfig": "language-configs/ruby.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/ruby/syntaxes/ruby.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "rust",
+      "scopeName": "source.rust",
+      "grammar": "grammars/rust.tmLanguage.json",
+      "languageConfig": "language-configs/rust.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/rust/syntaxes/rust.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "scss",
+      "scopeName": "source.css.scss",
+      "grammar": "grammars/scss.tmLanguage.json",
+      "languageConfig": "language-configs/scss.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/scss/syntaxes/scss.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "shaderlab",
+      "scopeName": "source.shaderlab",
+      "grammar": "grammars/shaderlab.tmLanguage.json",
+      "languageConfig": "language-configs/shaderlab.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/shaderlab/syntaxes/shaderlab.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "sql",
+      "scopeName": "source.sql",
+      "grammar": "grammars/sql.tmLanguage.json",
+      "languageConfig": "language-configs/sql.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/sql/syntaxes/sql.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "vb",
+      "scopeName": "source.asp.vb.net",
+      "grammar": "grammars/vb.tmLanguage.json",
+      "languageConfig": "language-configs/vb.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/vb/syntaxes/asp-vb-net.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "xml",
+      "scopeName": "text.xml",
+      "grammar": "grammars/xml.tmLanguage.json",
+      "languageConfig": "language-configs/xml.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/xml/syntaxes/xml.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "languageId": "xsl",
+      "scopeName": "text.xml.xsl",
+      "grammar": "grammars/xsl.tmLanguage.json",
+      "languageConfig": "language-configs/xsl.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/xml/syntaxes/xsl.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
       "languageId": "vue",
       "scopeName": "text.html.vue",
       "grammar": "grammars/vue.tmLanguage.json",
@@ -292,6 +891,56 @@
       "provenance": {
         "family": "vscode",
         "source": "github.com/microsoft/vscode@1.125.0/extensions/html/syntaxes/html.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.cpp.embedded.macro",
+      "grammar": "grammars/source-cpp-embedded-macro.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/cpp/syntaxes/cpp.embedded.macro.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.c.platform",
+      "grammar": "grammars/source-c-platform.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/cpp/syntaxes/platform.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.php",
+      "grammar": "grammars/source-php.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/php/syntaxes/php.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.regexp.python",
+      "grammar": "grammars/source-regexp-python.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/python/syntaxes/MagicRegExp.tmLanguage.json",
+        "version": "1.125.0",
+        "license": "MIT"
+      }
+    },
+    {
+      "scopeName": "source.sassdoc",
+      "grammar": "grammars/source-sassdoc.tmLanguage.json",
+      "provenance": {
+        "family": "vscode",
+        "source": "github.com/microsoft/vscode@1.125.0/extensions/scss/syntaxes/sassdoc.tmLanguage.json",
         "version": "1.125.0",
         "license": "MIT"
       }

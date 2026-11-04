@@ -31,7 +31,7 @@ import { registerToolAppCallRoutes } from "./routes/toolAppCallRoutes";
 import { ToolAppCallService } from "./agent/toolAppCalls";
 import { registerCodingAgentRoutes } from "./routes/codingAgentRoutes";
 import { registerEditorCatalogRoutes } from "./routes/editorCatalogRoutes";
-import { EditorCatalogManager } from "./editor/EditorCatalogStore";
+import { EditorCatalogStore } from "./editor/EditorCatalogStore";
 import type { AuditLogStore } from "./state/AuditLogStore";
 import { initializeServiceStorage } from "./config/serviceStorage";
 import { LocalWorkspaceRegistry } from "./workspace/LocalWorkspaceRegistry";
@@ -305,30 +305,24 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
   }
 
   // The editor language catalog defaults on. Only an explicit
-  // `languageCatalogEnabled: false` skips the routes. The catalog is
-  // operator-managed and reloadable. The override dir (`EDITOR_CATALOG_DIR`,
-  // default AGENTROOM_HOME-relative) is preferred when it holds a manifest, else
-  // the bundled `catalog-assets` is served, else the routes 404 and clients fall
-  // back to their bundled editor assets.
+  // `languageCatalogEnabled: false` skips the routes. The backend loads its
+  // bundled `catalog-assets` once at startup; without an accepted catalog the
+  // routes 404 and clients fall back to their bundled editor assets.
   if (input.config.languageCatalogEnabled !== false) {
     const bundledCatalogDir = resolve(__dirname, "..", "catalog-assets");
-    const editorCatalog = await EditorCatalogManager.create({
-      overrideDir: input.config.editorCatalogDir,
-      bundledDir: bundledCatalogDir,
-      logger: app.log
-    });
+    const editorCatalog = await EditorCatalogStore.create(bundledCatalogDir, app.log);
     if (!editorCatalog.hasManifest()) {
       app.log.warn(
-        { overrideDir: input.config.editorCatalogDir, bundledCatalogDir },
-        "language catalog enabled but no catalog assets found; clients will use bundled editor assets"
+        { bundledCatalogDir, validation: editorCatalog.validation() },
+        "language catalog enabled but no catalog assets were accepted; clients will use bundled editor assets"
       );
     } else {
       app.log.info(
-        { source: editorCatalog.source(), overrideDir: input.config.editorCatalogDir },
+        { version: editorCatalog.getManifest()?.version, unresolvedScopeCount: editorCatalog.unresolvedScopes().length },
         "editor language catalog ready"
       );
     }
-    await registerEditorCatalogRoutes(app, editorCatalog, input.config, eventBus);
+    await registerEditorCatalogRoutes(app, editorCatalog, input.config);
   }
 
   // Interactive terminal (PTY). OFF by default and registered only when the

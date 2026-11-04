@@ -39,7 +39,6 @@ const MANAGED_ENV_NAMES = [
   "AGENTROOM_HOME",
   "WORKSPACE_ROOT",
   "STATE_DIR",
-  "EDITOR_CATALOG_DIR",
   "AUTH_TOKEN"
 ];
 
@@ -339,7 +338,6 @@ describe("PATCH /api/config write behavior", () => {
       port: 8787,
       workspaceRoot: join(root, "workspaces"),
       stateDir: join(root, "state"),
-      editorCatalogDir: join(root, "catalog-assets"),
       requireAuth: false,
       gitCommandTimeoutMs: 30_000,
       codexArgs: []

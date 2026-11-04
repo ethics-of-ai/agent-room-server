@@ -1,16 +1,6 @@
 import Foundation
 
 extension BackendSupervisor {
-    /// Refresh both halves of the Languages pane. These reads are independent:
-    /// a catalog-status failure must not hide semantic-service readiness, or the
-    /// reverse.
-    func refreshEditorLanguageStatus() async {
-        async let catalogStatus: Void = refreshEditorCatalogStatus()
-        async let serviceCatalog: Void = refreshLanguageServiceCatalog()
-        await catalogStatus
-        await serviceCatalog
-    }
-
     /// Reads the registry's probe-free public projection. This never initializes
     /// a language server and the response contains no executable or environment
     /// values; readiness appears only after an editor connection observed it.

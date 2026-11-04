@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ServiceConfig } from "../../domain/models";
 import type { LanguageServiceDescriptor, ResolvedLanguageServiceExecutable } from "./types";
 
-export interface PreparedLanguageServiceLaunch extends ResolvedLanguageServiceExecutable {
+interface PreparedLanguageServiceLaunch extends ResolvedLanguageServiceExecutable {
   cleanup(): Promise<void>;
 }
 

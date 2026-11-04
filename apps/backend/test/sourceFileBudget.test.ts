@@ -86,7 +86,6 @@ const allowlist: Readonly<Record<string, number>> = {
 
   "apps/backend/test/codexJsonRpcRunner.test.ts": 1480,
   "apps/backend/test/workspaceContext.test.ts": 1233,
-  "apps/visionos/AgentRoomTests/Editor/MonacoEditorRenderTests.swift": 1192,
   "apps/backend/test/acpRunner.test.ts": 1175,
   "apps/backend/test/diagramCompose.test.ts": 945
 };

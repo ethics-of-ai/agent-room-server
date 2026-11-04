@@ -408,7 +408,6 @@ async function parentWorkspace(options: { unborn?: boolean; ignore?: string } = 
     port: 8787,
     workspaceRoot: join(root, "workspaces"),
     stateDir: join(root, "state"),
-    editorCatalogDir: join(root, "catalog-assets"),
     requireAuth: false,
     gitCommandTimeoutMs: 30_000,
     codexArgs: []

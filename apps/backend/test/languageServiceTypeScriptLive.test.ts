@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { typeScriptLanguageServerDescriptor } from "../src/editor/languageServices/registry";
+import { typeScriptLanguageServerDescriptor } from "../src/editor/languageServices/typescriptLanguageServer";
 import {
   completionLabels,
   definitions,
@@ -52,12 +52,12 @@ describe("production TypeScript language-service descriptor", () => {
     expect(componentHover).toContain("CounterProps");
     expect(definitions(await harness.requestAt("react", react, "definition", "initialCount={2}")))
       .toContainEqual(expect.objectContaining({ path: "react/src/Counter.tsx" }));
-    expect(documentSymbolNames(await harness.requestFeature("react", {
+    expect(documentSymbolNames(await harness.featureResponse("react", {
       requestId: "react-document-symbols",
       clientVersion: 1,
       kind: "document_symbols"
     }))).toEqual(expect.arrayContaining(["CounterProps", "Counter", "preview"]));
-    const tokenData = semanticTokenData(await harness.requestFeature("react", {
+    const tokenData = semanticTokenData(await harness.featureResponse("react", {
       requestId: "react-semantic-tokens",
       clientVersion: 1,
       kind: "semantic_tokens"

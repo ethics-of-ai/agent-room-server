@@ -33,7 +33,6 @@ export type AgentRoomEventType =
   | "workspace_entry_copied"
   | "workspace_git_operation"
   | "config_reloaded"
-  | "editor_catalog_changed"
   | "sketch_document_changed"
   | "terminal_session_started"
   | "terminal_session_closed"
@@ -85,15 +84,6 @@ export interface AgentChildChangedPayload {
 
 export interface StatusSnapshotPayload {
   snapshot: StatusSnapshot;
-}
-
-// Emitted when an operator reload changes the served editor language catalog
-// after an operator-managed reload. Carries only the new aggregate version and language count, never
-// asset content. visionOS clients re-hydrate the catalog on receipt and verify
-// every fetched blob's sha256 before use.
-export interface EditorCatalogChangedPayload {
-  version: string;
-  languageCount: number;
 }
 
 // Emitted when `PATCH /api/config` changes the backend-owned managed settings

@@ -10,7 +10,11 @@ const closingPair = z.union([pair, z.object({
 // Unknown fields remain data for future configurations. Validate every field
 // consumed by the bundled converter; the complete JSON also has a depth cap.
 export const editorLanguageConfigurationSchema = z.object({
-  comments: z.object({ lineComment: z.string().optional(), blockComment: pair.optional() }).optional(),
+  // VS Code's makefile configuration uses the object form, which Monaco 0.55 reads.
+  comments: z.object({
+    lineComment: z.union([z.string(), z.object({ comment: z.string(), noIndent: z.boolean().optional() })]).optional(),
+    blockComment: pair.optional()
+  }).optional(),
   brackets: z.array(pair).optional(),
   colorizedBracketPairs: z.array(pair).optional(),
   autoClosingPairs: z.array(closingPair).optional(),

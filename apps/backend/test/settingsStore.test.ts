@@ -49,7 +49,6 @@ const MANAGED_ENV_NAMES = [
   "AGENTROOM_HOME",
   "WORKSPACE_ROOT",
   "STATE_DIR",
-  "EDITOR_CATALOG_DIR",
   "AUTH_TOKEN"
 ];
 
@@ -153,7 +152,6 @@ describe("managed settings precedence", () => {
         "stateDir",
         "workspaceRoot",
         "agentRoomHome",
-        "editorCatalogDir",
         "requireAuth"
       ]) {
         expect(keys).not.toContain(forbidden);

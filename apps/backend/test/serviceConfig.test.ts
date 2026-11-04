@@ -10,7 +10,6 @@ describe("service config", () => {
       expect(config.runnerKind).toBe("codex");
       expect(config.workspaceRoot).toContain(".agentroom/workspaces");
       expect(config.stateDir).toContain(".agentroom/state");
-      expect(config.editorCatalogDir).toContain(".agentroom/catalog-assets");
       expect(config.codexRunnerProtocol).toBe("jsonrpc");
       expect(config.codexApprovalPolicy).toBe("never");
       expect(config.codexSandboxMode).toBe("workspace-write");
@@ -154,7 +153,6 @@ describe("service config", () => {
       expect(config.agentRoomHome).toBe(agentRoomHome);
       expect(config.workspaceRoot).toBe(join(agentRoomHome, "workspaces"));
       expect(config.stateDir).toBe(join(agentRoomHome, "state"));
-      expect(config.editorCatalogDir).toBe(join(agentRoomHome, "catalog-assets"));
       expect(toPublicConfig(config)).toMatchObject({
         agentRoomHome,
         workspaceRoot: join(agentRoomHome, "workspaces"),
@@ -242,19 +240,6 @@ describe("service config", () => {
       expect(config.stateDir).toBe("/Volumes/AgentRoom/state");
     });
   });
-
-  it("lets EDITOR_CATALOG_DIR override the editor catalog directory", () => {
-    withCleanEnv(() => {
-      process.env.AGENTROOM_HOME = join("/tmp", "AgentRoom");
-      process.env.EDITOR_CATALOG_DIR = "/Volumes/AgentRoom/catalog";
-
-      const config = getServiceConfig();
-
-      expect(config.editorCatalogDir).toBe("/Volumes/AgentRoom/catalog");
-      // It is an internal filesystem path; clients discover the catalog by fetching.
-      expect(toPublicConfig(config)).not.toHaveProperty("editorCatalogDir");
-    });
-  });
 });
 
 function withCleanEnv(run: () => void): void {
@@ -273,7 +258,6 @@ function withCleanEnv(run: () => void): void {
     "AGENTROOM_HOME",
     "WORKSPACE_ROOT",
     "STATE_DIR",
-    "EDITOR_CATALOG_DIR",
     "LANGUAGE_CATALOG_ENABLED",
     "LANGUAGE_SERVICES_ENABLED",
     "SOURCEKIT_LSP_EXECUTABLE",

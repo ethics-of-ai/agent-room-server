@@ -7,9 +7,11 @@ import type { LocalWorkspace, ServiceConfig } from "../src/domain/models";
 import { LanguageServiceError } from "../src/editor/languageServices/errors";
 import { LanguageServiceHost, type LanguageServiceConnectionPort } from "../src/editor/languageServices/LanguageServiceHost";
 import { DEFAULT_LANGUAGE_SERVICE_LIMITS, type LanguageServiceLimits } from "../src/editor/languageServices/limits";
-import { LanguageServiceRegistry, languageServiceEnvironment, sourceKitLspDescriptor } from "../src/editor/languageServices/registry";
+import { LanguageServiceRegistry, languageServiceEnvironment } from "../src/editor/languageServices/registry";
+import { sourceKitLspDescriptor } from "../src/editor/languageServices/sourceKitLsp";
 import type { LanguageServiceDescriptor } from "../src/editor/languageServices/types";
 import type { LocalWorkspaceRegistry } from "../src/workspace/LocalWorkspaceRegistry";
+import { featureResponse } from "./support/languageServiceFeatureResponse";
 
 const fakeServer = resolve(__dirname, "fixtures/fakeLanguageServer.mjs");
 const roots: string[] = [];
@@ -22,7 +24,6 @@ function config(root: string): ServiceConfig {
     port: 8787,
     workspaceRoot: join(root, "registered"),
     stateDir: join(root, "state"),
-    editorCatalogDir: join(root, "catalog"),
     requireAuth: false,
     gitCommandTimeoutMs: 30_000,
     codexArgs: [],
@@ -156,7 +157,7 @@ describe("language-service host", () => {
     await open(test, connection.port);
     await waitFor(() => connection.frames.some((frame) => frame.type === "diagnostics"));
 
-    const completion = await test.host.requestFeature(connection.port.id, {
+    const completion = await featureResponse(test.host, connection.port.id, {
       requestId: "completion-1",
       clientVersion: 1,
       kind: "completion",
@@ -181,16 +182,16 @@ describe("language-service host", () => {
     expect(connection.frames.find((frame) => frame.type === "status"))
       .toMatchObject({ readiness: "ready", clientVersion: 1 });
 
-    await expect(test.host.requestFeature(connection.port.id, {
+    await expect(featureResponse(test.host, connection.port.id, {
       requestId: "hover-1", clientVersion: 1, kind: "hover", position: { line: 0, character: 4 }
     })).resolves.toMatchObject({ result: { kind: "hover", hover: { contents: "<script>x</script> **hover**" } } });
-    await expect(test.host.requestFeature(connection.port.id, {
+    await expect(featureResponse(test.host, connection.port.id, {
       requestId: "definition-1", clientVersion: 1, kind: "definition", position: { line: 0, character: 2 }
     })).resolves.toMatchObject({ result: { kind: "definition", locations: [{ path: "Sources/main.swift" }], truncated: true } });
-    await expect(test.host.requestFeature(connection.port.id, {
+    await expect(featureResponse(test.host, connection.port.id, {
       requestId: "symbols-1", clientVersion: 1, kind: "document_symbols"
     })).resolves.toMatchObject({ result: { kind: "document_symbols", symbols: [{ name: "Thing", kind: "struct" }] } });
-    await expect(test.host.requestFeature(connection.port.id, {
+    await expect(featureResponse(test.host, connection.port.id, {
       requestId: "tokens-1", clientVersion: 1, kind: "semantic_tokens"
     })).resolves.toMatchObject({ result: { kind: "semantic_tokens", tokens: { data: [0, 0, 2, 0, 0] } } });
 
@@ -206,7 +207,7 @@ describe("language-service host", () => {
     await open(test, connection.port);
     await test.host.changeDocument(connection.port.id, 2, "😀a\n");
     await test.host.changeDocument(connection.port.id, 3, "😀latest\n");
-    await test.host.requestFeature(connection.port.id, {
+    await featureResponse(test.host, connection.port.id, {
       requestId: "completion-3",
       clientVersion: 3,
       kind: "completion",
@@ -357,7 +358,7 @@ describe("language-service host", () => {
     ));
 
     await test.host.changeDocument(connection.port.id, 3, "latest draft\n");
-    await expect(test.host.requestFeature(connection.port.id, {
+    await expect(featureResponse(test.host, connection.port.id, {
       requestId: "after-restart", clientVersion: 3, kind: "completion", position: { line: 0, character: 1 }
     })).resolves.toMatchObject({ type: "response", clientVersion: 3 });
 
@@ -372,7 +373,7 @@ describe("language-service host", () => {
     const test = await fixture("timeout");
     const connection = test.connection("primary");
     await open(test, connection.port);
-    const response = test.host.requestFeature(connection.port.id, {
+    const response = featureResponse(test.host, connection.port.id, {
       requestId: "cancel-me",
       clientVersion: 1,
       kind: "completion",
@@ -430,11 +431,11 @@ describe("language-service host", () => {
     const requestTest = await fixture("timeout", "", { maxOutstandingPerSocket: 1 });
     const connection = requestTest.connection("requests");
     await open(requestTest, connection.port);
-    const firstRequest = requestTest.host.requestFeature(connection.port.id, {
+    const firstRequest = featureResponse(requestTest.host, connection.port.id, {
       requestId: "one", clientVersion: 1, kind: "completion", position: { line: 0, character: 2 }
     });
     await waitFor(async () => (await entries(requestTest.log)).some((entry) => entry.type === "request"));
-    await expect(requestTest.host.requestFeature(connection.port.id, {
+    await expect(featureResponse(requestTest.host, connection.port.id, {
       requestId: "two", clientVersion: 1, kind: "completion", position: { line: 0, character: 2 }
     })).rejects.toMatchObject({ code: "request_limit" } satisfies Partial<LanguageServiceError>);
     requestTest.host.cancelRequest(connection.port.id, "one");
@@ -474,7 +475,7 @@ describe("language-service host", () => {
     expect((await entries(test.log)).filter((entry) => entry.type === "start")).toHaveLength(4);
     await test.host.changeDocument(connection.port.id, 2, "edited after failure");
     await new Promise((resolve) => setTimeout(resolve, 50));
-    await expect(test.host.requestFeature(connection.port.id, {
+    await expect(featureResponse(test.host, connection.port.id, {
       requestId: "after-failure", clientVersion: 2, kind: "hover", position: { line: 0, character: 0 }
     })).rejects.toMatchObject({ code: "service_unavailable" });
     expect((await entries(test.log)).filter((entry) => entry.type === "start")).toHaveLength(4);

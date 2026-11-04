@@ -1,60 +1,20 @@
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { EditorCatalogManager, EditorCatalogStore } from "../src/editor/EditorCatalogStore";
+import { EditorCatalogStore } from "../src/editor/EditorCatalogStore";
 import {
   editorCatalogBounds,
   editorLanguageMapSchema,
   editorTextMateThemeMapSchema,
   editorThemeMapSchema
 } from "../src/editor/editorCatalogManifest";
+import { catalogAssetsDir, copyCatalog } from "./support/editorCatalogFixtures";
 
-const catalogAssetsDir = resolve(__dirname, "..", "catalog-assets");
 const sha256 = (data: Buffer): string => createHash("sha256").update(data).digest("hex");
 
-const copyCatalog = async (): Promise<string> => {
-  const root = await mkdtemp(join(tmpdir(), "agentroom-catalog-validation-"));
-  const catalog = join(root, "catalog-assets");
-  await cp(catalogAssetsDir, catalog, { recursive: true });
-  return catalog;
-};
-
 describe("editor catalog schemas", () => {
-  it("accepts explicit deterministic ambiguities independent of candidate order", () => {
-    const language = (id: string) => ({
-      id,
-      displayName: id,
-      syntaxSource: "monaco" as const,
-      extensions: ["m"]
-    });
-    const ambiguity = {
-      kind: "extension" as const,
-      value: "m",
-      candidates: [
-        { languageId: "matlab", projectMarkers: ["*.prj"], priority: 50 },
-        { languageId: "objective-c", projectMarkers: ["*.xcodeproj"], priority: 100 }
-      ],
-      fallbackLanguageId: "objective-c"
-    };
-    expect(
-      editorLanguageMapSchema.safeParse({
-        version: 3,
-        languages: [language("matlab"), language("objective-c")],
-        ambiguities: [ambiguity]
-      }).success
-    ).toBe(true);
-    expect(
-      editorLanguageMapSchema.safeParse({
-        version: 3,
-        languages: [language("objective-c"), language("matlab")],
-        ambiguities: [{ ...ambiguity, candidates: [...ambiguity.candidates].reverse() }]
-      }).success
-    ).toBe(true);
-  });
-
-  it("rejects duplicate unmodeled claims and catalog bounds", () => {
+  it("rejects shared detection claims and catalog bounds", () => {
     const language = (id: string, extension: string) => ({
       id,
       displayName: id,
@@ -104,20 +64,42 @@ describe("editor catalog schemas", () => {
     const textMate = { settings: [] };
     expect(editorTextMateThemeMapSchema.safeParse({ "AgentRoom-Light": textMate }).success).toBe(false);
   });
+
+  it("accepts Monaco's empty default-token rule", () => {
+    const rules = [{ token: "", foreground: "CCCCCC", background: "1F1F1F" }, { token: "comment", foreground: "6A9955" }];
+    const monaco = { base: "vs-dark", rules };
+    expect(editorThemeMapSchema.safeParse({ "AgentRoom-Light": monaco, "AgentRoom-Dark": monaco }).success).toBe(true);
+    const plain = { ...monaco, semanticHighlighting: false };
+    expect(editorThemeMapSchema.safeParse({ "AgentRoom-Light": plain, "AgentRoom-Dark": plain }).success).toBe(true);
+  });
+
+  it("rejects a theme id Monaco's defineTheme would refuse", () => {
+    const monaco = { base: "vs", rules: [] };
+    const base = { "AgentRoom-Light": monaco, "AgentRoom-Dark": monaco };
+    expect(editorThemeMapSchema.safeParse({ ...base, "Catppuccin-Mocha": monaco }).success).toBe(true);
+    expect(editorThemeMapSchema.safeParse({ ...base, "One Dark Pro": monaco }).success).toBe(false);
+    expect(editorThemeMapSchema.safeParse({ ...base, "Dark+": monaco }).success).toBe(false);
+    const textMate = { settings: [] };
+    expect(
+      editorTextMateThemeMapSchema.safeParse({
+        "AgentRoom-Light": textMate,
+        "AgentRoom-Dark": textMate,
+        "Catppuccin-Frappe": { name: "Catppuccin Frappé", settings: [] }
+      }).success
+    ).toBe(true);
+  });
 });
 
 describe("accepted editor catalog generations", () => {
-  it("rejects invalid language configurations and retains the last accepted generation", async () => {
-    const catalog = await copyCatalog();
+  it("rejects invalid language configurations and normalizes accepted JSONC", async () => {
+    const catalog = await copyCatalog("agentroom-catalog-validation-");
     try {
-      const manager = await EditorCatalogManager.create({ overrideDir: catalog, bundledDir: catalogAssetsDir });
-      const version = manager.getManifest()!.version;
-      const previous = manager.getManifest()!.grammars.find((entry) => entry.languageId === "swift")!.languageConfig;
       for (const invalid of ["", "// comment only", "/* comment only */", "not JSON at all", "null", "[]", '{"brackets":true}',
         '{"extra":' + '['.repeat(33) + '0' + ']'.repeat(33) + '}']) {
         await writeFile(join(catalog, "language-configs/swift.json"), invalid);
-        expect(await manager.reload()).toMatchObject({ accepted: false, changed: false, version });
-        expect(manager.getManifest()!.grammars.find((entry) => entry.languageId === "swift")!.languageConfig).toBe(previous);
+        const store = await EditorCatalogStore.create(catalog);
+        expect(store.getManifest()).toBeNull();
+        expect(store.validation()).toMatchObject({ state: "rejected", location: "language-configs/swift.json" });
       }
       for (const jsonc of [
         '{ // comments are permitted\n "comments": { "lineComment": "//" }, "wordPattern": "[,}]", }',
@@ -125,8 +107,9 @@ describe("accepted editor catalog generations", () => {
         '\u00a0{"comments":{"lineComment":"//"},"wordPattern":"[,}]"}'
       ]) {
         await writeFile(join(catalog, "language-configs/swift.json"), jsonc);
-        expect(await manager.reload()).toMatchObject({ accepted: true });
-        const config = manager.getManifest()!.grammars.find((entry) => entry.languageId === "swift")!.languageConfig!;
+        const store = await EditorCatalogStore.create(catalog);
+        expect(store.validation()).toMatchObject({ state: "accepted" });
+        const config = store.getManifest()!.grammars.find((entry) => entry.languageId === "swift")!.languageConfig!;
         expect(JSON.parse(config)).toEqual({ comments: { lineComment: "//" }, wordPattern: "[,}]" });
       }
     } finally {
@@ -135,7 +118,7 @@ describe("accepted editor catalog generations", () => {
   });
 
   it("pins the bytes that produced the manifest hash", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-validation-");
     const store = await EditorCatalogStore.create(catalog);
     const grammarRef = store.getManifest()!.grammars.find((grammar) => grammar.languageId === "swift")!.grammar;
     const before = await store.readAsset(grammarRef.path);
@@ -146,38 +129,8 @@ describe("accepted editor catalog generations", () => {
     expect(after && sha256(after.data)).toBe(grammarRef.sha256);
   });
 
-  it("keeps the last accepted runtime snapshot when an override becomes invalid", async () => {
-    const override = await copyCatalog();
-    const manager = await EditorCatalogManager.create({ overrideDir: override, bundledDir: catalogAssetsDir });
-    const version = manager.getManifest()!.version;
-    const grammarPath = manager.getManifest()!.grammars[0].grammar.path;
-    const grammar = await manager.readAsset(grammarPath);
-
-    await writeFile(join(override, "EditorLanguages.json"), "{invalid");
-    const result = await manager.reload();
-
-    expect(result).toMatchObject({
-      accepted: false,
-      changed: false,
-      source: "override",
-      version,
-      validation: { state: "rejected" }
-    });
-    expect((await manager.readAsset(grammarPath))?.data).toEqual(grammar?.data);
-  });
-
-  it("uses bundled assets when the startup override is invalid", async () => {
-    const override = await copyCatalog();
-    await writeFile(join(override, "EditorLanguages.json"), "{invalid");
-    const manager = await EditorCatalogManager.create({ overrideDir: override, bundledDir: catalogAssetsDir });
-
-    expect(manager.source()).toBe("bundled");
-    expect(manager.status().validation).toMatchObject({ state: "fallback", code: "json_invalid" });
-    expect(manager.status().languageCount).toBe(76);
-  });
-
   it("rejects an over-limit language map before it becomes live", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-validation-");
     const languageMap = {
       version: 3,
       languages: Array.from({ length: editorCatalogBounds.languages + 1 }, (_, index) => ({
@@ -195,7 +148,7 @@ describe("accepted editor catalog generations", () => {
   });
 
   it("rejects a grammar that exceeds its byte ceiling", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-validation-");
     await writeFile(
       join(catalog, "grammars/swift.tmLanguage.json"),
       Buffer.alloc(editorCatalogBounds.grammarBytes + 1, 0x20)
@@ -207,7 +160,7 @@ describe("accepted editor catalog generations", () => {
   });
 
   it("rejects a schema-two grammar dependency cycle", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-validation-");
     const indexPath = join(catalog, "EditorGrammars.json");
     const index = JSON.parse(await readFile(indexPath, "utf8")) as {
       schemaVersion?: number;
@@ -243,7 +196,7 @@ describe("accepted editor catalog generations", () => {
 
   it("bounds grammar dependency depth regardless of index order", async () => {
     const chain = async (length: number, reverse: boolean): Promise<EditorCatalogStore> => {
-      const catalog = await copyCatalog();
+      const catalog = await copyCatalog("agentroom-catalog-validation-");
       const indexPath = join(catalog, "EditorGrammars.json");
       const index = JSON.parse(await readFile(indexPath, "utf8")) as {
         schemaVersion?: number;
@@ -281,7 +234,7 @@ describe("accepted editor catalog generations", () => {
   });
 
   it("reports a missing referenced asset with a stable code and catalog-relative location", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-validation-");
     await rm(join(catalog, "grammars/swift.tmLanguage.json"));
     const store = await EditorCatalogStore.create(catalog);
 
@@ -294,7 +247,7 @@ describe("accepted editor catalog generations", () => {
   });
 
   it("rejects a grammar nested deeper than the JSON bound", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-validation-");
     const depth = editorCatalogBounds.jsonNestingDepth;
     await writeFile(
       join(catalog, "grammars/swift.tmLanguage.json"),

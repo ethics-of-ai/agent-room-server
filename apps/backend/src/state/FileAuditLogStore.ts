@@ -32,7 +32,6 @@ const DURABLE_EVENT_TYPES = new Set([
   "workspace_entry_moved",
   "workspace_entry_copied",
   "config_reloaded",
-  "editor_catalog_changed",
   "sketch_document_changed",
   "terminal_session_started",
   "terminal_session_closed"

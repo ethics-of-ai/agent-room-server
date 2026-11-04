@@ -1,6 +1,6 @@
 import { jvmLanguageServiceEnvironmentKeys } from "./environment";
 import { configuredExecutableDescriptorFields } from "./executable";
-import type { LanguageServiceDescriptor } from "./types";
+import { standardServerRequests, type LanguageServiceDescriptor } from "./types";
 
 export const kotlinLspDescriptor: LanguageServiceDescriptor = {
   id: "kotlin_lsp",
@@ -18,10 +18,7 @@ export const kotlinLspDescriptor: LanguageServiceDescriptor = {
   ],
   standaloneWorkspaceRoot: true,
   projectLoading: { mayInvokeBuildTools: true, mayLoadPlugins: true },
-  serverRequests: {
-    workDoneProgressCreate: "null",
-    workspaceConfiguration: "null_per_item"
-  },
+  serverRequests: standardServerRequests,
   environmentKeys: jvmLanguageServiceEnvironmentKeys,
   ...configuredExecutableDescriptorFields(
     (config) => config.kotlinLspExecutable,

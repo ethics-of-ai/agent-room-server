@@ -27,12 +27,12 @@ export interface LspRequestHandle {
   promise: Promise<unknown>;
 }
 
-export interface LspClientHandlers {
+interface LspClientHandlers {
   onNotification(method: string, params: unknown): void;
   onFatal(error: Error): void;
 }
 
-export const defaultLanguageServiceSpawner: LanguageServiceSpawner = {
+const defaultLanguageServiceSpawner: LanguageServiceSpawner = {
   spawn: (command, args, options) => spawn(command, [...args], {
     cwd: options.cwd,
     env: options.env,

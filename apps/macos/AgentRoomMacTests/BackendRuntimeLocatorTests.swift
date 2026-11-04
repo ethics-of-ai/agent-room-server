@@ -37,7 +37,6 @@ final class BackendRuntimeLocatorTests: XCTestCase {
         XCTAssertEqual(configuration.environment["AGENTROOM_HOME"], "/tmp/AgentRoom")
         XCTAssertEqual(configuration.environment["WORKSPACE_ROOT"], "/tmp/workspaces")
         XCTAssertEqual(configuration.environment["STATE_DIR"], "/tmp/state")
-        XCTAssertEqual(configuration.environment["EDITOR_CATALOG_DIR"], "/tmp/AgentRoom/catalog-assets")
         XCTAssertEqual(configuration.environment["PORT"], "8799")
         XCTAssertEqual(configuration.environment["HOST"], "0.0.0.0")
         XCTAssertEqual(configuration.environment["AUTH_TOKEN"], "auth-token")

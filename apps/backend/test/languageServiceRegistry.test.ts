@@ -3,12 +3,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ServiceConfig } from "../src/domain/models";
-import {
-  LanguageServiceRegistry,
-  pyrightLanguageServerDescriptor,
-  sourceKitLspDescriptor,
-  typeScriptLanguageServerDescriptor
-} from "../src/editor/languageServices/registry";
+import { pyrightLanguageServerDescriptor } from "../src/editor/languageServices/pyrightLanguageServer";
+import { builtInLanguageServiceDescriptors, LanguageServiceRegistry } from "../src/editor/languageServices/registry";
+import { sourceKitLspDescriptor } from "../src/editor/languageServices/sourceKitLsp";
+import { typeScriptLanguageServerDescriptor } from "../src/editor/languageServices/typescriptLanguageServer";
 
 const roots: string[] = [];
 
@@ -19,7 +17,6 @@ function config(root: string, executable?: string): ServiceConfig {
     port: 8787,
     workspaceRoot: root,
     stateDir: join(root, "state"),
-    editorCatalogDir: join(root, "catalog"),
     requireAuth: false,
     gitCommandTimeoutMs: 30_000,
     codexArgs: [],
@@ -129,7 +126,7 @@ describe("language-service registry", () => {
   });
 
   it("publishes every built-in service without private descriptor metadata", () => {
-    const projection = new LanguageServiceRegistry(config("/tmp")).projection();
+    const projection = new LanguageServiceRegistry(config("/tmp"), builtInLanguageServiceDescriptors).projection();
     expect(projection.map((service) => service.id)).toEqual([
       "sourcekit_lsp",
       "typescript_language_server",

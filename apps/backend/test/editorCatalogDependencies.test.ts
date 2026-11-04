@@ -1,12 +1,11 @@
-import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { collectExternalScopes } from "../src/editor/editorCatalogAssembly";
-import { EditorCatalogManager, EditorCatalogStore } from "../src/editor/EditorCatalogStore";
+import { EditorCatalogStore } from "../src/editor/EditorCatalogStore";
 import { editorCatalogBounds } from "../src/editor/editorCatalogManifest";
+import { catalogAssetsDir, copyCatalog } from "./support/editorCatalogFixtures";
 
-const catalogAssetsDir = resolve(__dirname, "..", "catalog-assets");
 
 interface GrammarsIndex {
   version?: number;
@@ -14,13 +13,6 @@ interface GrammarsIndex {
   grammars: Array<Record<string, unknown>>;
   scopeGrammars?: Array<Record<string, unknown>>;
 }
-
-const copyCatalog = async (): Promise<string> => {
-  const root = await mkdtemp(join(tmpdir(), "agentroom-catalog-deps-"));
-  const catalog = join(root, "catalog-assets");
-  await cp(catalogAssetsDir, catalog, { recursive: true });
-  return catalog;
-};
 
 const readIndex = async (catalog: string): Promise<GrammarsIndex> =>
   JSON.parse(await readFile(join(catalog, "EditorGrammars.json"), "utf8")) as GrammarsIndex;
@@ -69,8 +61,9 @@ describe("the committed catalog's dependency records", () => {
     }
     // Fenced-code scopes no grammar supplies stay visible as a count, never silently zero.
     expect(store.unresolvedScopes().length).toBeGreaterThan(0);
-    expect(store.unresolvedScopes()).toContain("source.python");
+    expect(store.unresolvedScopes()).toContain("source.elixir");
     expect(store.unresolvedScopes()).not.toContain("source.css");
+    expect(store.unresolvedScopes()).not.toContain("source.python");
   });
 
   it("records injections on their host scopes", async () => {
@@ -89,38 +82,22 @@ describe("the committed catalog's dependency records", () => {
       expect(grammar.provenance?.license).toBe("MIT");
     }
   });
-
-  it("reports the unresolved count through status", async () => {
-    const override = await mkdtemp(join(tmpdir(), "agentroom-catalog-deps-empty-"));
-    const manager = await EditorCatalogManager.create({ overrideDir: override, bundledDir: catalogAssetsDir });
-
-    expect(manager.status().unresolvedScopeCount).toBeGreaterThan(0);
-    expect(manager.status().scopeGrammarCount).toBeGreaterThan(0);
-  });
 });
 
 describe("dependency and injection validation", () => {
-  it("keeps a schema-1 manifest free of derived fields", async () => {
-    const catalog = await copyCatalog();
+  it("rejects a grammar index that is not schema 2", async () => {
+    const catalog = await copyCatalog("agentroom-catalog-deps-");
     const index = await readIndex(catalog);
     delete index.schemaVersion;
-    delete index.scopeGrammars;
-    index.grammars = index.grammars.map(
-      ({ injectionScopes: _injections, provenance: _provenance, embeddedLanguages: _embedded, ...rest }) => rest
-    );
     await writeIndex(catalog, index);
     const store = await EditorCatalogStore.create(catalog);
 
-    expect(store.validation()).toMatchObject({ state: "accepted" });
-    const manifest = store.getManifest()!;
-    expect(manifest.schemaVersion).toBe(1);
-    for (const grammar of manifest.grammars) expect(grammar).not.toHaveProperty("dependencyScopes");
-    // The HTML grammar still includes text.html.basic, which this generation no longer carries.
-    expect(store.unresolvedScopes()).toContain("text.html.basic");
+    expect(store.getManifest()).toBeNull();
+    expect(store.validation()).toMatchObject({ state: "rejected", code: "schema_invalid", location: "schemaVersion" });
   });
 
   it("refuses an injection whose grammar declares no injectionSelector", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-deps-");
     const index = await readIndex(catalog);
     const css = index.grammars.find((grammar) => grammar.languageId === "css")!;
     css.injectionScopes = ["source.json"];
@@ -136,7 +113,7 @@ describe("dependency and injection validation", () => {
   });
 
   it("refuses an injection into a scope the generation does not carry", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-deps-");
     const index = await readIndex(catalog);
     const css = index.grammars.find((grammar) => grammar.languageId === "css")!;
     css.injectionScopes = ["vue.absent"];
@@ -148,7 +125,7 @@ describe("dependency and injection validation", () => {
   });
 
   it("refuses a grammar that names more external scopes than the bound", async () => {
-    const catalog = await copyCatalog();
+    const catalog = await copyCatalog("agentroom-catalog-deps-");
     const patterns = Array.from({ length: editorCatalogBounds.dependenciesPerGrammar + 1 }, (_, index) => ({
       include: `source.dependency${index}`
     }));

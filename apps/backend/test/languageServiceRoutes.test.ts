@@ -50,7 +50,6 @@ async function setup(
     port: 8787,
     workspaceRoot: join(root, "registered"),
     stateDir: join(root, "state"),
-    editorCatalogDir: join(root, "catalog"),
     requireAuth,
     ...(requireAuth ? { authToken: "test-token" } : {}),
     gitCommandTimeoutMs: 30_000,

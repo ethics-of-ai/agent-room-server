@@ -1,13 +1,11 @@
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ServiceConfig } from "../src/domain/models";
-import {
-  csharpLsDescriptor,
-  eclipseJdtLsDescriptor,
-  goplsDescriptor,
-  kotlinLspDescriptor,
-  rustAnalyzerDescriptor
-} from "../src/editor/languageServices/registry";
+import { csharpLsDescriptor } from "../src/editor/languageServices/csharpLs";
+import { eclipseJdtLsDescriptor } from "../src/editor/languageServices/eclipseJdtLs";
+import { goplsDescriptor } from "../src/editor/languageServices/gopls";
+import { kotlinLspDescriptor } from "../src/editor/languageServices/kotlinLsp";
+import { rustAnalyzerDescriptor } from "../src/editor/languageServices/rustAnalyzer";
 import type { LanguageServiceDescriptor } from "../src/editor/languageServices/types";
 import {
   completionLabels,
@@ -228,13 +226,13 @@ describe("expanded production language-service descriptors", () => {
         0,
         entry.featureFixture.completion.offset
       ))).toContain(entry.featureFixture.completion.expectedLabel);
-      expect(documentSymbolNames(await harness.requestFeature("features", {
+      expect(documentSymbolNames(await harness.featureResponse("features", {
         requestId: "feature-document-symbols",
         clientVersion: 1,
         kind: "document_symbols"
       }))).toEqual(expect.arrayContaining(entry.featureFixture.symbols));
       if (entry.descriptor.featureKinds.includes("semantic_tokens")) {
-        const tokenData = semanticTokenData(await harness.requestFeature("features", {
+        const tokenData = semanticTokenData(await harness.featureResponse("features", {
           requestId: "feature-semantic-tokens",
           clientVersion: 1,
           kind: "semantic_tokens"

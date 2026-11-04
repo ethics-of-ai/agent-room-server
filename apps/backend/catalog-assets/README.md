@@ -5,9 +5,6 @@ curated editor assets (`apps/visionos/AgentRoom/Resources`). Do not edit by hand
 edit the app source and re-run the sync script. The backend serves these as DATA
 (`.json` + `.wasm`) over the flag-gated, bearer-auth'd `/api/editor/catalog` routes.
 
-This is the **bundled fallback** catalog (Phase C.5). At runtime the backend prefers
-the operator-managed override directory (`EDITOR_CATALOG_DIR`, default
-`$AGENTROOM_HOME/catalog-assets`) when it holds a manifest, and only serves this
-committed directory when the override is absent/empty. The macOS Languages pane
-imports into the override dir and triggers `POST /api/editor/catalog/reload`, so
-operators never edit this directory directly.
+This is the only catalog the backend serves. It loads this directory once at
+startup. A Mac release ships a new copy, and paired visionOS clients pick it up
+the next time they connect.

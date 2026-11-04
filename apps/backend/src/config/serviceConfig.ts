@@ -51,11 +51,6 @@ export function getServiceConfig(): ServiceConfig {
     ?? (agentRoomHome ? resolve(agentRoomHome, "workspaces") : resolve(process.cwd(), ".agentroom", "workspaces"));
   const stateDir = optionalEnv("STATE_DIR")
     ?? (agentRoomHome ? resolve(agentRoomHome, "state") : resolve(process.cwd(), ".agentroom", "state"));
-  // Operator-managed editor language catalog override dir. The macOS
-  // app imports curated catalog data here; the backend prefers it over the bundled
-  // catalog when it holds a manifest. AGENTROOM_HOME-relative default, like stateDir.
-  const editorCatalogDir = optionalEnv("EDITOR_CATALOG_DIR")
-    ?? (agentRoomHome ? resolve(agentRoomHome, "catalog-assets") : resolve(process.cwd(), ".agentroom", "catalog-assets"));
   const authToken = optionalEnv("AUTH_TOKEN");
 
   // Managed settings: env wins and locks the key, else the backend-owned
@@ -101,7 +96,6 @@ export function getServiceConfig(): ServiceConfig {
     port: numberEnv("PORT", 8787),
     workspaceRoot,
     stateDir,
-    editorCatalogDir,
     requireAuth: Boolean(authToken),
     authToken,
     // Tier 3: bootstrap, secret, and execution settings, which are deliberately

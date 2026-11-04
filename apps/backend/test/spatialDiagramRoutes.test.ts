@@ -46,7 +46,6 @@ async function config(overrides: Partial<ServiceConfig> = {}): Promise<ServiceCo
     port: 8787,
     workspaceRoot: root,
     stateDir: join(root, ".state"),
-    editorCatalogDir: join(root, ".catalog-assets"),
     requireAuth: false,
     gitCommandTimeoutMs: 30_000,
     codexArgs: [],

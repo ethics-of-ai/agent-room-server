@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedUtf8String, utf8Bytes } from "./languageServices/text";
 
 export const editorCatalogBounds = {
   languages: 256,
@@ -15,6 +16,8 @@ export const editorCatalogBounds = {
   inlineJsonBytes: 2 * 1_024 * 1_024,
   jsonNestingDepth: 32,
   identifierBytes: 64,
+  themes: 64,
+  themeRules: 4_096,
   scopeBytes: 256,
   claimBytes: 255,
   displayNameBytes: 128,
@@ -23,24 +26,21 @@ export const editorCatalogBounds = {
 
 // The visionOS editor resolves its light and dark appearance by these two theme
 // names, so a catalog that lacks either would be accepted here and then refused
-// whole by every client. Requiring them keeps that refusal visible in status.
-export const editorCatalogRequiredThemeNames = ["AgentRoom-Light", "AgentRoom-Dark"] as const;
+// whole by every client. Requiring them makes the backend reject it at load and
+// log why, so clients keep their bundled assets.
+const editorCatalogRequiredThemeNames = ["AgentRoom-Light", "AgentRoom-Dark"] as const;
 
-const utf8Bytes = (value: string): number => Buffer.byteLength(value, "utf8");
 const boundedString = (name: string, maxBytes: number) =>
-  z
-    .string()
-    .min(1)
-    .refine((value) => utf8Bytes(value) <= maxBytes, `${name} exceeds ${maxBytes} UTF-8 bytes`);
+  boundedUtf8String(maxBytes, `${name} exceeds ${maxBytes} UTF-8 bytes`, z.string().min(1));
 
-const identifierSchema = z
-  .string()
-  .min(1)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/, "identifier contains unsupported characters")
-  .refine(
-    (value) => utf8Bytes(value) <= editorCatalogBounds.identifierBytes,
-    `identifier exceeds ${editorCatalogBounds.identifierBytes} UTF-8 bytes`
+/** A catalog or language-service language identifier, named the way the catalog names it. */
+export const languageIdentifierSchema = (label = "identifier") =>
+  boundedUtf8String(
+    editorCatalogBounds.identifierBytes,
+    `${label} exceeds ${editorCatalogBounds.identifierBytes} UTF-8 bytes`,
+    z.string().min(1).regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/, `${label} contains unsupported characters`)
   );
+const identifierSchema = languageIdentifierSchema();
 const claimSchema = boundedString("detection claim", editorCatalogBounds.claimBytes);
 const lowerClaimSchema = claimSchema.refine((value) => value === value.toLowerCase(), "claim must be lowercase");
 const basenameClaimSchema = claimSchema.refine(
@@ -58,17 +58,9 @@ const filenameGlobSchema = z
   .refine((value) => value !== "." && value !== "..", "glob must be a basename")
   .refine((value) => value.includes("*") || value.includes("?"), "glob must contain * or ?");
 
-const legacyLanguageSchema = z
-  .object({
-    id: identifierSchema,
-    extensions: z.array(lowerClaimSchema).max(editorCatalogBounds.detectionClaimsPerLanguage).optional(),
-    filenames: z.array(basenameClaimSchema).max(editorCatalogBounds.detectionClaimsPerLanguage).optional()
-  })
-  .strict();
+const editorLanguageSyntaxSourceSchema = z.enum(["monaco", "textmate", "plaintext"]);
 
-export const editorLanguageSyntaxSourceSchema = z.enum(["monaco", "textmate", "plaintext"]);
-
-const editorLanguageV3Schema = z
+const editorLanguageSchema = z
   .object({
     id: identifierSchema,
     displayName: boundedString("display name", editorCatalogBounds.displayNameBytes),
@@ -83,49 +75,12 @@ const editorLanguageV3Schema = z
   })
   .strict();
 
-export const editorLanguageClaimKindSchema = z.enum([
-  "filename",
-  "compoundSuffix",
-  "filenameGlob",
-  "shebangInterpreter",
-  "modelineId",
-  "extension"
-]);
-
-const ambiguityCandidateSchema = z
-  .object({
-    languageId: identifierSchema,
-    projectMarkers: z.array(filenameGlobSchema.or(basenameClaimSchema)).max(64),
-    priority: z.number().int().min(0).max(1_000)
-  })
-  .strict();
-
-const editorLanguageAmbiguitySchema = z
-  .object({
-    kind: editorLanguageClaimKindSchema,
-    value: claimSchema,
-    candidates: z.array(ambiguityCandidateSchema).min(2).max(16),
-    fallbackLanguageId: identifierSchema
-  })
-  .strict();
-
-const legacyLanguageMapSchema = z
-  .object({
-    version: z.union([z.literal(1), z.literal(2)]),
-    languages: z.array(legacyLanguageSchema).min(1).max(editorCatalogBounds.languages)
-  })
-  .strict();
-
-const languageMapV3Schema = z
+export const editorLanguageMapSchema = z
   .object({
     version: z.literal(3),
-    languages: z.array(editorLanguageV3Schema).min(1).max(editorCatalogBounds.languages),
-    ambiguities: z.array(editorLanguageAmbiguitySchema).max(editorCatalogBounds.detectionClaims).optional()
+    languages: z.array(editorLanguageSchema).min(1).max(editorCatalogBounds.languages)
   })
-  .strict();
-
-export const editorLanguageMapSchema = z
-  .union([legacyLanguageMapSchema, languageMapV3Schema])
+  .strict()
   .superRefine((map, context) => {
     const languageIds = new Set<string>();
     const normalizedLanguageIds = new Set<string>();
@@ -147,20 +102,14 @@ export const editorLanguageMapSchema = z
       }
       normalizedLanguageIds.add(normalizedLanguageId);
 
-      const claimGroups: ReadonlyArray<readonly [string, readonly string[]]> = [
+      const allClaimGroups: ReadonlyArray<readonly [string, readonly string[]]> = [
         ["extension", language.extensions ?? []],
-        ["filename", language.filenames ?? []]
+        ["filename", language.filenames ?? []],
+        ["filenameGlob", language.filenameGlobs ?? []],
+        ["compoundSuffix", language.compoundSuffixes ?? []],
+        ["shebangInterpreter", language.shebangInterpreters ?? []],
+        ["modelineId", language.modelineIds ?? []]
       ];
-      const allClaimGroups = [...claimGroups];
-      if (map.version === 3) {
-        const v3Language = map.languages[languageIndex];
-        allClaimGroups.push(
-          ["filenameGlob", v3Language.filenameGlobs ?? []],
-          ["compoundSuffix", v3Language.compoundSuffixes ?? []],
-          ["shebangInterpreter", v3Language.shebangInterpreters ?? []],
-          ["modelineId", v3Language.modelineIds ?? []]
-        );
-      }
       const perLanguageClaims = allClaimGroups.reduce((count, [, claims]) => count + claims.length, 0);
       if (perLanguageClaims > editorCatalogBounds.detectionClaimsPerLanguage) {
         context.addIssue({
@@ -184,14 +133,12 @@ export const editorLanguageMapSchema = z
         }
       }
 
-      if (map.version === 3) {
-        for (const alias of map.languages[languageIndex].aliases ?? []) {
-          const key = alias.toLowerCase();
-          if (selectors.has(key)) {
-            context.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate language alias: ${alias}` });
-          }
-          selectors.add(key);
+      for (const alias of language.aliases ?? []) {
+        const key = alias.toLowerCase();
+        if (selectors.has(key)) {
+          context.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate language alias: ${alias}` });
         }
+        selectors.add(key);
       }
     }
 
@@ -202,49 +149,9 @@ export const editorLanguageMapSchema = z
       });
     }
 
-    if (map.version !== 3) {
-      for (const [key, claimOwners] of owners) {
-        if (claimOwners.size > 1) {
-          context.addIssue({ code: z.ZodIssueCode.custom, message: `ambiguous legacy detection claim: ${key}` });
-        }
-      }
-      return;
-    }
-
-    const ambiguityKeys = new Set<string>();
-    for (const ambiguity of map.ambiguities ?? []) {
-      const normalized =
-        ambiguity.kind === "filename" || ambiguity.kind === "filenameGlob"
-          ? ambiguity.value
-          : ambiguity.value.toLowerCase();
-      const key = `${ambiguity.kind}:${normalized}`;
-      if (ambiguityKeys.has(key)) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate ambiguity record: ${key}` });
-      }
-      ambiguityKeys.add(key);
-      const candidates = new Set(ambiguity.candidates.map((candidate) => candidate.languageId));
-      if (candidates.size !== ambiguity.candidates.length) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate ambiguity candidate: ${key}` });
-      }
-      if (!candidates.has(ambiguity.fallbackLanguageId)) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: `ambiguity fallback is not a candidate: ${key}` });
-      }
-      for (const candidate of candidates) {
-        if (!languageIds.has(candidate)) {
-          context.addIssue({ code: z.ZodIssueCode.custom, message: `unknown ambiguity candidate: ${candidate}` });
-        }
-      }
-      const claimOwners = owners.get(key) ?? new Set<string>();
-      if (
-        claimOwners.size !== candidates.size ||
-        [...claimOwners].some((languageId) => !candidates.has(languageId))
-      ) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: `ambiguity candidates do not match claim owners: ${key}` });
-      }
-    }
     for (const [key, claimOwners] of owners) {
-      if (claimOwners.size > 1 && !ambiguityKeys.has(key)) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: `detection claim needs an ambiguity record: ${key}` });
+      if (claimOwners.size > 1) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: `ambiguous detection claim: ${key}` });
       }
     }
   });
@@ -253,7 +160,8 @@ const themeNameSchema = boundedString("theme name", editorCatalogBounds.identifi
 const colorSchema = boundedString("theme color", editorCatalogBounds.identifierBytes);
 const monacoThemeRuleSchema = z
   .object({
-    token: claimSchema,
+    // Monaco styles default text with the rule whose token is the empty string.
+    token: z.literal("").or(claimSchema),
     foreground: colorSchema.optional(),
     background: colorSchema.optional(),
     fontStyle: boundedString("font style", editorCatalogBounds.identifierBytes).optional()
@@ -263,7 +171,9 @@ const monacoThemeSchema = z
   .object({
     base: z.enum(["vs", "vs-dark", "hc-black", "hc-light"]),
     inherit: z.boolean().optional(),
-    rules: z.array(monacoThemeRuleSchema).max(editorCatalogBounds.detectionClaims),
+    // False keeps semantic tokens from recoloring the theme's TextMate colors.
+    semanticHighlighting: z.boolean().optional(),
+    rules: z.array(monacoThemeRuleSchema).max(editorCatalogBounds.themeRules),
     colors: z.record(colorSchema).optional()
   })
   .strict();
@@ -271,11 +181,16 @@ const refineThemeMap =
   (label: string) =>
   (themes: Record<string, unknown>, context: z.RefinementCtx): void => {
     const names = Object.keys(themes);
-    if (names.length === 0 || names.length > 64) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must contain between 1 and 64 themes` });
+    if (names.length === 0 || names.length > editorCatalogBounds.themes) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${label} must contain between 1 and ${editorCatalogBounds.themes} themes`
+      });
     }
     for (const name of names) {
-      if (!themeNameSchema.safeParse(name).success) {
+      // The editor passes the key to Monaco's `defineTheme`, which throws on any name
+      // outside this set and would leave the page without a theme.
+      if (!themeNameSchema.safeParse(name).success || !/^[A-Za-z0-9-]+$/.test(name)) {
         context.addIssue({ code: z.ZodIssueCode.custom, message: `invalid ${label} name: ${name}` });
       }
     }
@@ -297,14 +212,14 @@ const textMateSettingsSchema = z
   .strict();
 const textMateRuleSchema = z
   .object({
-    scope: z.union([claimSchema, z.array(claimSchema).max(editorCatalogBounds.detectionClaims)]).optional(),
+    scope: z.union([claimSchema, z.array(claimSchema).max(editorCatalogBounds.themeRules)]).optional(),
     settings: textMateSettingsSchema
   })
   .strict();
 const textMateThemeSchema = z
   .object({
     name: themeNameSchema.optional(),
-    settings: z.array(textMateRuleSchema).max(editorCatalogBounds.detectionClaims)
+    settings: z.array(textMateRuleSchema).max(editorCatalogBounds.themeRules)
   })
   .strict();
 export const editorTextMateThemeMapSchema = z
@@ -326,7 +241,7 @@ const grammarIndexEntryBase = {
   scopeName: scopeNameSchema,
   grammar: catalogPathSchema,
   injectionScopes: z.array(scopeNameSchema).max(editorCatalogBounds.dependenciesPerGrammar).optional(),
-  provenance: provenanceSchema.optional()
+  provenance: provenanceSchema
 };
 const primaryGrammarIndexEntrySchema = z
   .object({
@@ -341,29 +256,13 @@ const scopeGrammarIndexEntrySchema = z.object(grammarIndexEntryBase).strict();
 export const editorGrammarsIndexSchema = z
   .object({
     version: z.number().int().positive().optional(),
-    schemaVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+    schemaVersion: z.literal(2),
     grammars: z.array(primaryGrammarIndexEntrySchema).max(editorCatalogBounds.primaryGrammars),
     scopeGrammars: z.array(scopeGrammarIndexEntrySchema).max(editorCatalogBounds.scopeGrammars).optional()
   })
   .strict()
   .superRefine((index, context) => {
-    const schemaVersion = index.schemaVersion ?? 1;
-    const entries = [...index.grammars, ...(index.scopeGrammars ?? [])];
-    for (const entry of entries) {
-      if (schemaVersion === 1 && (entry.injectionScopes || entry.provenance)) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: "grammar extensions require schemaVersion 2" });
-      }
-      if (schemaVersion === 2 && !entry.provenance) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: `grammar lacks provenance: ${entry.scopeName}` });
-      }
-    }
-    if (schemaVersion === 1 && index.scopeGrammars) {
-      context.addIssue({ code: z.ZodIssueCode.custom, message: "scopeGrammars requires schemaVersion 2" });
-    }
     for (const entry of index.grammars) {
-      if (schemaVersion === 1 && entry.embeddedLanguages) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: "embeddedLanguages requires schemaVersion 2" });
-      }
       if (Object.keys(entry.embeddedLanguages ?? {}).length > editorCatalogBounds.dependenciesPerGrammar) {
         context.addIssue({ code: z.ZodIssueCode.custom, message: `too many embedded languages: ${entry.scopeName}` });
       }
@@ -375,7 +274,7 @@ export const editorGrammarsIndexSchema = z
     }
   });
 
-export const editorCatalogAssetRefSchema = z
+const editorCatalogAssetRefSchema = z
   .object({
     path: catalogPathSchema,
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -389,11 +288,11 @@ const assembledGrammarFields = {
   injectionScopes: z.array(scopeNameSchema).max(editorCatalogBounds.dependenciesPerGrammar).optional(),
   // Derived at assembly from the grammar's own `include` rules, never declared: the
   // catalog scopes this grammar reaches, so a client can load a language's closure
-  // and a reader can see which embedded blocks will tokenize. Schema 2 only.
+  // and a reader can see which embedded blocks will tokenize.
   dependencyScopes: z.array(scopeNameSchema).max(editorCatalogBounds.dependenciesPerGrammar).optional(),
-  provenance: provenanceSchema.optional()
+  provenance: provenanceSchema
 };
-export const editorCatalogGrammarSchema = z
+const editorCatalogGrammarSchema = z
   .object({
     languageId: identifierSchema,
     ...assembledGrammarFields,
@@ -401,11 +300,11 @@ export const editorCatalogGrammarSchema = z
     embeddedLanguages: z.record(identifierSchema).optional()
   })
   .strict();
-export const editorCatalogScopeGrammarSchema = z.object(assembledGrammarFields).strict();
+const editorCatalogScopeGrammarSchema = z.object(assembledGrammarFields).strict();
 
 export const editorCatalogManifestSchema = z
   .object({
-    schemaVersion: z.union([z.literal(1), z.literal(2)]).default(1),
+    schemaVersion: z.literal(2),
     version: z.string().regex(/^[a-f0-9]{64}$/),
     languageMap: editorLanguageMapSchema,
     grammars: z.array(editorCatalogGrammarSchema).max(editorCatalogBounds.primaryGrammars),
@@ -423,9 +322,6 @@ export const editorCatalogManifestSchema = z
         context.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate grammar scope: ${grammar.scopeName}` });
       }
       scopes.add(grammar.scopeName);
-      if (manifest.schemaVersion === 2 && !grammar.provenance) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: `schema 2 grammar lacks provenance: ${grammar.scopeName}` });
-      }
     }
     const grammarLanguages = new Set<string>();
     for (const grammar of manifest.grammars) {
@@ -442,17 +338,12 @@ export const editorCatalogManifestSchema = z
         }
       }
     }
-    if (manifest.languageMap.version === 3) {
-      for (const language of manifest.languageMap.languages) {
-        if (language.syntaxSource === "textmate" && !grammarLanguages.has(language.id)) {
-          context.addIssue({ code: z.ZodIssueCode.custom, message: `TextMate language lacks a grammar: ${language.id}` });
-        }
+    for (const language of manifest.languageMap.languages) {
+      if (language.syntaxSource === "textmate" && !grammarLanguages.has(language.id)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: `TextMate language lacks a grammar: ${language.id}` });
       }
     }
     for (const grammar of [...manifest.grammars, ...(manifest.scopeGrammars ?? [])]) {
-      if (manifest.schemaVersion === 1 && grammar.dependencyScopes) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: "dependencyScopes requires schemaVersion 2" });
-      }
       for (const dependency of [...(grammar.injectionScopes ?? []), ...(grammar.dependencyScopes ?? [])]) {
         if (!scopes.has(dependency)) {
           context.addIssue({ code: z.ZodIssueCode.custom, message: `missing grammar dependency: ${dependency}` });
@@ -461,7 +352,6 @@ export const editorCatalogManifestSchema = z
     }
   });
 
-export type EditorLanguageMap = z.infer<typeof editorLanguageMapSchema>;
 export type EditorCatalogAssetRef = z.infer<typeof editorCatalogAssetRefSchema>;
 export type EditorCatalogGrammar = z.infer<typeof editorCatalogGrammarSchema>;
 export type EditorCatalogScopeGrammar = z.infer<typeof editorCatalogScopeGrammarSchema>;

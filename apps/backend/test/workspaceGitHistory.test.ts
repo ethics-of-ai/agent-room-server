@@ -29,7 +29,7 @@ async function fixture(options: { auth?: boolean; subdirectory?: boolean; empty?
   }
   const config: ServiceConfig = {
     runnerKind: "codex", host: "127.0.0.1", port: 8799, workspaceRoot: join(root, "workspaces"),
-    stateDir: join(root, "state"), editorCatalogDir: join(root, "catalog"), codexArgs: [],
+    stateDir: join(root, "state"), codexArgs: [],
     requireAuth: Boolean(options.auth), authToken: options.auth ? "test-bearer" : undefined, gitCommandTimeoutMs: 30_000
   };
   const { app } = await buildServer({ config });

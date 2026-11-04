@@ -14,8 +14,8 @@ import {
 import { LanguageServiceRegistry } from "../../src/editor/languageServices/registry";
 import type { LanguageServiceDescriptor } from "../../src/editor/languageServices/types";
 import type { LocalWorkspaceRegistry } from "../../src/workspace/LocalWorkspaceRegistry";
+import { featureResponse, type FeatureRequest } from "./languageServiceFeatureResponse";
 
-type FeatureRequest = Parameters<LanguageServiceHost["requestFeature"]>[1];
 type PositionedFeatureKind = Extract<FeatureRequest["kind"], "completion" | "hover" | "definition">;
 
 interface LiveTestHarnessOptions {
@@ -74,7 +74,6 @@ export class LanguageServiceLiveTestHarness {
         port: 8787,
         workspaceRoot: root,
         stateDir: join(root, ".state"),
-        editorCatalogDir: join(root, ".catalog"),
         requireAuth: false,
         gitCommandTimeoutMs: 30_000,
         codexArgs: [],
@@ -105,8 +104,8 @@ export class LanguageServiceLiveTestHarness {
     return text;
   }
 
-  requestFeature(id: string, input: FeatureRequest): Promise<LanguageServiceServerFrame | undefined> {
-    return this.host.requestFeature(id, input);
+  featureResponse(id: string, input: FeatureRequest): Promise<LanguageServiceServerFrame | undefined> {
+    return featureResponse(this.host, id, input);
   }
 
   requestAt(
@@ -119,7 +118,7 @@ export class LanguageServiceLiveTestHarness {
   ): Promise<LanguageServiceServerFrame | undefined> {
     const position = positionOf(text, needle, occurrence);
     position.character += offset;
-    return this.requestFeature(id, {
+    return this.featureResponse(id, {
       requestId: `${id}-${kind}`,
       clientVersion: 1,
       kind,

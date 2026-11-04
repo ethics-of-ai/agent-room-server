@@ -9,7 +9,6 @@ struct SettingsPaneContent: View {
         case .credentials: CredentialsSettingsPane()
         case .runners: RunnerSettingsPane()
         case .models: ModelCatalogSettingsPane()
-        case .languages: EditorCatalogSettingsPane()
         case .appearance: AppearanceSettingsPane()
         case .advanced: AdvancedSettingsPane()
         }

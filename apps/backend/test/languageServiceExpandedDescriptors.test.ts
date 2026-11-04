@@ -6,14 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { LocalWorkspace, ServiceConfig } from "../src/domain/models";
 import { LspEditorLanguageService } from "../src/editor/languageServices/LspEditorLanguageService";
 import { DEFAULT_LANGUAGE_SERVICE_LIMITS } from "../src/editor/languageServices/limits";
-import {
-  csharpLsDescriptor,
-  eclipseJdtLsDescriptor,
-  goplsDescriptor,
-  LanguageServiceRegistry,
-  kotlinLspDescriptor,
-  rustAnalyzerDescriptor
-} from "../src/editor/languageServices/registry";
+import { csharpLsDescriptor } from "../src/editor/languageServices/csharpLs";
+import { eclipseJdtLsDescriptor } from "../src/editor/languageServices/eclipseJdtLs";
+import { goplsDescriptor } from "../src/editor/languageServices/gopls";
+import { kotlinLspDescriptor } from "../src/editor/languageServices/kotlinLsp";
+import { builtInLanguageServiceDescriptors, LanguageServiceRegistry } from "../src/editor/languageServices/registry";
+import { rustAnalyzerDescriptor } from "../src/editor/languageServices/rustAnalyzer";
 import { prepareLanguageServiceLaunch } from "../src/editor/languageServices/launch";
 import { resolveLanguageServiceProject } from "../src/editor/languageServices/projectRoot";
 import type {
@@ -193,7 +191,6 @@ function config(root: string, override?: Partial<ServiceConfig>): ServiceConfig 
     port: 8787,
     workspaceRoot: root,
     stateDir: join(root, "state"),
-    editorCatalogDir: join(root, "catalog"),
     requireAuth: false,
     gitCommandTimeoutMs: 30_000,
     codexArgs: [],
@@ -378,7 +375,7 @@ describe("expanded built-in language-service descriptors", () => {
         expect(entry.descriptor.configured(config(root))).toBe(false);
         expect(entry.descriptor.configured(configured)).toBe(true);
 
-        const expandedProjection = new LanguageServiceRegistry(configured).projection().slice(3);
+        const expandedProjection = new LanguageServiceRegistry(configured, builtInLanguageServiceDescriptors).projection().slice(3);
         expect(expandedProjection.map((service) => [service.id, service.configured])).toEqual(
           descriptors.map((candidate) => [
             candidate.descriptor.id,

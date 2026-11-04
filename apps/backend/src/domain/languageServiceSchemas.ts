@@ -1,15 +1,25 @@
 import { z } from "zod";
+import { boundedUtf8String } from "../editor/languageServices/text";
 import type {
+  LanguageServiceCompletion,
+  LanguageServiceCompletionKind,
+  LanguageServiceDefinition,
+  LanguageServiceDiagnostic,
   LanguageServiceDocumentSymbol,
-  LanguageServiceServerFrame
+  LanguageServiceErrorCode,
+  LanguageServiceFeatureKind,
+  LanguageServiceFeatureResult,
+  LanguageServiceHover,
+  LanguageServicePosition,
+  LanguageServiceRange,
+  LanguageServiceReadiness,
+  LanguageServiceServerFrame,
+  LanguageServiceStatusFrame
 } from "./languageService";
 
-const boundedUtf8 = (maxBytes: number) => z.string().refine(
-  (value) => Buffer.byteLength(value, "utf8") <= maxBytes,
-  `Must be at most ${maxBytes} UTF-8 bytes`
-);
+const boundedUtf8 = (maxBytes: number) => boundedUtf8String(maxBytes, `Must be at most ${maxBytes} UTF-8 bytes`);
 
-export const languageServiceFeatureKindSchema = z.enum([
+const languageServiceFeatureKindSchema: z.ZodType<LanguageServiceFeatureKind> = z.enum([
   "completion",
   "hover",
   "definition",
@@ -17,12 +27,12 @@ export const languageServiceFeatureKindSchema = z.enum([
   "semantic_tokens"
 ]);
 
-export const languageServicePositionSchema = z.object({
+const languageServicePositionSchema: z.ZodType<LanguageServicePosition> = z.object({
   line: z.number().int().nonnegative(),
   character: z.number().int().nonnegative()
 }).strict();
 
-export const languageServiceRangeSchema = z.object({
+const languageServiceRangeSchema: z.ZodType<LanguageServiceRange> = z.object({
   start: languageServicePositionSchema,
   end: languageServicePositionSchema
 }).strict();
@@ -58,13 +68,13 @@ export const languageServiceClientFrameSchema = z.discriminatedUnion("type", [
 
 export type LanguageServiceClientFrame = z.infer<typeof languageServiceClientFrameSchema>;
 
-export const languageServiceCompletionKindSchema = z.enum([
+const languageServiceCompletionKindSchema: z.ZodType<LanguageServiceCompletionKind> = z.enum([
   "text", "method", "function", "constructor", "field", "variable", "class", "interface",
   "module", "property", "value", "enum", "keyword", "file", "reference", "folder",
   "enum_member", "constant", "struct", "event", "operator", "type_parameter", "other"
 ]);
 
-export const languageServiceDiagnosticSchema = z.object({
+const languageServiceDiagnosticSchema: z.ZodType<LanguageServiceDiagnostic> = z.object({
   range: languageServiceRangeSchema,
   message: boundedUtf8(4 * 1024),
   severity: z.enum(["error", "warning", "information", "hint"]),
@@ -72,7 +82,7 @@ export const languageServiceDiagnosticSchema = z.object({
   code: boundedUtf8(128).optional()
 }).strict();
 
-const languageServiceCompletionSchema = z.object({
+const languageServiceCompletionSchema: z.ZodType<LanguageServiceCompletion> = z.object({
   label: boundedUtf8(256),
   kind: languageServiceCompletionKindSchema,
   detail: boundedUtf8(4 * 1024).optional(),
@@ -84,12 +94,12 @@ const languageServiceCompletionSchema = z.object({
   }).strict().optional()
 }).strict();
 
-const languageServiceHoverSchema = z.object({
+const languageServiceHoverSchema: z.ZodType<LanguageServiceHover> = z.object({
   contents: boundedUtf8(16 * 1024),
   range: languageServiceRangeSchema.optional()
 }).strict();
 
-const languageServiceDefinitionSchema = z.object({
+const languageServiceDefinitionSchema: z.ZodType<LanguageServiceDefinition> = z.object({
   path: boundedUtf8(1024),
   range: languageServiceRangeSchema
 }).strict();
@@ -102,7 +112,7 @@ const languageServiceDocumentSymbolSchema: z.ZodType<LanguageServiceDocumentSymb
   children: z.array(languageServiceDocumentSymbolSchema).max(1_000)
 }).strict());
 
-export const languageServiceFeatureResultSchema = z.discriminatedUnion("kind", [
+const languageServiceFeatureResultSchema: z.ZodType<LanguageServiceFeatureResult> = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("completion"),
     items: z.array(languageServiceCompletionSchema).max(200),
@@ -133,7 +143,7 @@ export const languageServiceFeatureResultSchema = z.discriminatedUnion("kind", [
   }).strict()
 ]);
 
-export const languageServiceErrorCodeSchema = z.enum([
+const languageServiceErrorCodeSchema: z.ZodType<LanguageServiceErrorCode> = z.enum([
   "unauthorized", "invalid_frame", "frame_too_large", "workspace_not_found", "invalid_path",
   "unsupported_language", "project_not_found", "ambiguous_project", "service_unavailable",
   "process_limit", "document_limit", "document_too_large", "global_document_limit",
@@ -141,20 +151,26 @@ export const languageServiceErrorCodeSchema = z.enum([
   "timeout", "cancelled", "server_failed", "unsupported_response", "outbound_limit"
 ]);
 
+const languageServiceReadinessSchema: z.ZodType<LanguageServiceReadiness> = z.enum([
+  "ready", "unavailable", "ambiguous_project", "project_not_found", "restarting", "failed"
+]);
+
+const languageServiceStatusFrameSchema = z.object({
+  type: z.literal("status"),
+  protocolVersion: z.literal(1),
+  clientVersion: clientVersionSchema,
+  service: z.object({ id: boundedUtf8(64), displayName: boundedUtf8(128) }).strict(),
+  readiness: languageServiceReadinessSchema,
+  featureKinds: z.array(languageServiceFeatureKindSchema).max(5),
+  project: z.object({ root: boundedUtf8(1024), marker: boundedUtf8(255).optional() }).strict().optional(),
+  semanticTokenLegend: z.object({
+    tokenTypes: z.array(boundedUtf8(64)).max(128),
+    tokenModifiers: z.array(boundedUtf8(64)).max(64)
+  }).strict().optional()
+}).strict() satisfies z.ZodType<LanguageServiceStatusFrame>;
+
 export const languageServiceServerFrameSchema: z.ZodType<LanguageServiceServerFrame> = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("status"),
-    protocolVersion: z.literal(1),
-    clientVersion: clientVersionSchema,
-    service: z.object({ id: boundedUtf8(64), displayName: boundedUtf8(128) }).strict(),
-    readiness: z.enum(["ready", "unavailable", "ambiguous_project", "project_not_found", "restarting", "failed"]),
-    featureKinds: z.array(languageServiceFeatureKindSchema).max(5),
-    project: z.object({ root: boundedUtf8(1024), marker: boundedUtf8(255).optional() }).strict().optional(),
-    semanticTokenLegend: z.object({
-      tokenTypes: z.array(boundedUtf8(64)).max(128),
-      tokenModifiers: z.array(boundedUtf8(64)).max(64)
-    }).strict().optional()
-  }).strict(),
+  languageServiceStatusFrameSchema,
   z.object({
     type: z.literal("diagnostics"),
     clientVersion: clientVersionSchema,

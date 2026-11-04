@@ -10,9 +10,6 @@ export interface ServiceConfig extends LanguageServiceExecutableConfig {
   port: number;
   workspaceRoot: string;
   stateDir: string;
-  // Operator-managed editor catalog override. It falls back to bundled assets
-  // and is always resolved like workspaceRoot and stateDir.
-  editorCatalogDir: string;
   requireAuth: boolean;
   authToken?: string;
   gitCommandTimeoutMs: number;

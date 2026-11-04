@@ -666,6 +666,1882 @@
           ]
         }
       ]
+    },
+    {
+      "languageId": "sql",
+      "title": "SQL query with a join, an aggregate call, a string literal, and a line comment",
+      "text": "-- active users\nSELECT u.id, COUNT(o.id) AS orders\nFROM users u\nJOIN orders o ON o.user_id = u.id\nWHERE u.status = 'active'\nGROUP BY u.id;\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "active users",
+          "scopes": [
+            "comment.line.double-dash.sql"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "SELECT",
+          "scopes": [
+            "keyword.other.DML.sql"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "u",
+          "scopes": [
+            "constant.other.database-name.sql"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "COUNT",
+          "scopes": [
+            "support.function.aggregate.sql"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "=",
+          "scopes": [
+            "keyword.operator.comparison.sql"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "active",
+          "scopes": [
+            "string.quoted.single.sql"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "python",
+      "title": "Python class with a decorator, a typed method, an f-string, and a comment",
+      "text": "import os\n# note\n@dataclass\nclass Point:\n    def norm(self, scale: int = 2) -> float:\n        return f\"{self.x}\"\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "import",
+          "scopes": [
+            "keyword.control.import.python"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.python"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "dataclass",
+          "scopes": [
+            "entity.name.function.decorator.python"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "class",
+          "scopes": [
+            "storage.type.class.python"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "self",
+          "scopes": [
+            "variable.parameter.function.language.special.self.python"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "int",
+          "scopes": [
+            "support.type.python"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "go",
+      "title": "Go package with an import, a func, a string, and a comment",
+      "text": "package main\n\nimport \"fmt\"\n\n// Greet says hi\nfunc Greet(name string) error {\n\treturn nil\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "package",
+          "scopes": [
+            "keyword.package.go"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "main",
+          "scopes": [
+            "entity.name.type.package.go"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "import",
+          "scopes": [
+            "keyword.control.import.go"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "Greet says hi",
+          "scopes": [
+            "comment.line.double-slash.go"
+          ]
+        },
+        {
+          "line": 5,
+          "token": "func",
+          "scopes": [
+            "keyword.function.go"
+          ]
+        },
+        {
+          "line": 5,
+          "token": "name",
+          "scopes": [
+            "variable.parameter.go"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "rust",
+      "title": "Rust function with an attribute, a let binding, a macro, and a comment",
+      "text": "use std::fmt;\n// note\n#[derive(Debug)]\npub struct Point { x: i32 }\nfn main() {\n    let total = 3;\n    println!(\"{}\", total);\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "use",
+          "scopes": [
+            "keyword.other.rust"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "std",
+          "scopes": [
+            "entity.name.namespace.rust"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "::",
+          "scopes": [
+            "keyword.operator.namespace.rust"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-slash.rust"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "struct",
+          "scopes": [
+            "storage.type.rust"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "x",
+          "scopes": [
+            "variable.other.rust"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "java",
+      "title": "Java class with an annotation, a method, a string, and a comment",
+      "text": "package demo;\n// note\n@Override\npublic class Greeter {\n    public String greet(int times) { return \"hi\"; }\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "package",
+          "scopes": [
+            "keyword.other.package.java"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "demo",
+          "scopes": [
+            "storage.modifier.package.java"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-slash.java"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Override",
+          "scopes": [
+            "storage.type.annotation.java"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "Greeter",
+          "scopes": [
+            "entity.name.type.class.java"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "times",
+          "scopes": [
+            "variable.parameter.java"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "c",
+      "title": "C file with an include, a function, a string, and a comment",
+      "text": "#include <stdio.h>\n// note\nint main(void) {\n    printf(\"hi\");\n    return 0;\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "include",
+          "scopes": [
+            "keyword.control.directive.include.c"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "stdio.h",
+          "scopes": [
+            "string.quoted.other.lt-gt.include.c"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-slash.c"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "int",
+          "scopes": [
+            "storage.type.built-in.primitive.c"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "main",
+          "scopes": [
+            "entity.name.function.c"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "0",
+          "scopes": [
+            "constant.numeric.decimal.c"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "cpp",
+      "title": "C++ with a namespace, a class, a template, and a comment",
+      "text": "#include <vector>\n// note\nnamespace demo {\nclass Greeter {\npublic:\n    int count = 0;\n};\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "include",
+          "scopes": [
+            "keyword.control.directive.include.cpp"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "vector",
+          "scopes": [
+            "string.quoted.other.lt-gt.include.cpp"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-slash.cpp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "namespace",
+          "scopes": [
+            "storage.type.namespace.definition.cpp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "demo",
+          "scopes": [
+            "entity.name.namespace.cpp"
+          ]
+        },
+        {
+          "line": 5,
+          "token": "=",
+          "scopes": [
+            "keyword.operator.assignment.cpp"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "objective-c",
+      "title": "Objective-C interface with an import, a property, and a string literal",
+      "text": "#import <Foundation/Foundation.h>\n@interface Greeter : NSObject\n@property NSString *name;\n@end\nNSString *s = @\"hi\";\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "import",
+          "scopes": [
+            "keyword.control.directive.import.objc"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "Foundation/Foundation.h",
+          "scopes": [
+            "string.quoted.other.lt-gt.include.objc"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "interface",
+          "scopes": [
+            "storage.type.objc"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "Greeter",
+          "scopes": [
+            "entity.name.type.objc"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "NSObject",
+          "scopes": [
+            "entity.other.inherited-class.objc"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "property",
+          "scopes": [
+            "keyword.other.property.objc"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "objective-cpp",
+      "title": "Objective-C++ implementation with an import and a message send",
+      "text": "#import \"Greeter.h\"\n@implementation Greeter\n- (void)greet { NSLog(@\"hi\"); }\n@end\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "import",
+          "scopes": [
+            "keyword.control.directive.import.objcpp"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "Greeter.h",
+          "scopes": [
+            "string.quoted.double.include.objcpp"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "implementation",
+          "scopes": [
+            "storage.type.objcpp"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "Greeter",
+          "scopes": [
+            "entity.name.type.objcpp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "NSLog",
+          "scopes": [
+            "support.function.cocoa.objcpp"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "csharp",
+      "title": "C# class with a using, an attribute, a method, and a string",
+      "text": "using System;\n// note\nnamespace Demo {\n    public class Greeter {\n        public string Greet() { return \"hi\"; }\n    }\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "using",
+          "scopes": [
+            "keyword.other.directive.using.cs"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "System",
+          "scopes": [
+            "entity.name.type.namespace.cs"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-slash.cs"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "namespace",
+          "scopes": [
+            "storage.type.namespace.cs"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "public",
+          "scopes": [
+            "storage.modifier.public.cs"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "string",
+          "scopes": [
+            "keyword.type.string.cs"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "ruby",
+      "title": "Ruby class with a method, a symbol, a string, and a comment",
+      "text": "require 'json'\n# note\nclass Greeter\n  def greet(name)\n    puts \"hi #{name}\"\n    :done\n  end\nend\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "require",
+          "scopes": [
+            "keyword.other.special-method.ruby"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "json",
+          "scopes": [
+            "string.quoted.single.ruby"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.ruby"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "class",
+          "scopes": [
+            "keyword.control.class.ruby"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Greeter",
+          "scopes": [
+            "entity.name.type.class.ruby"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "name",
+          "scopes": [
+            "variable.parameter.function.ruby"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "php",
+      "title": "PHP embedded in HTML with a function, a variable, and a string",
+      "text": "<html>\n<?php\nfunction greet($name) {\n    echo \"hi\";\n}\n?>\n</html>\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "html",
+          "scopes": [
+            "entity.name.tag.html"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "function",
+          "scopes": [
+            "storage.type.function.php"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "name",
+          "scopes": [
+            "variable.other.php"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "echo",
+          "scopes": [
+            "support.function.construct.output.php"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.php"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "perl",
+      "title": "Perl script with use, a sub, a scalar, and a string",
+      "text": "use strict;\n# note\nsub greet {\n    my $name = shift;\n    print \"hi\";\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "use",
+          "scopes": [
+            "keyword.control.perl"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.perl"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "sub",
+          "scopes": [
+            "storage.type.sub.perl"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "greet",
+          "scopes": [
+            "entity.name.function.perl"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "my",
+          "scopes": [
+            "storage.modifier.perl"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "name",
+          "scopes": [
+            "variable.other.readwrite.global.perl"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "lua",
+      "title": "Lua function with a local, a string, and a comment",
+      "text": "-- note\nlocal function greet(name)\n  return \"hi\" .. name\nend\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-dash.lua"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "local",
+          "scopes": [
+            "keyword.local.lua"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "function",
+          "scopes": [
+            "keyword.control.lua"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "greet",
+          "scopes": [
+            "entity.name.function.lua"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "name",
+          "scopes": [
+            "variable.parameter.function.lua"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.lua"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "r",
+      "title": "R function with an assignment, a string, and a comment",
+      "text": "# note\ngreet <- function(name) {\n  paste(\"hi\", name)\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.r"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "greet",
+          "scopes": [
+            "entity.name.function.r"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "<-",
+          "scopes": [
+            "keyword.operator.assignment.r"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "function",
+          "scopes": [
+            "keyword.control.r"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "name",
+          "scopes": [
+            "variable.parameter.function.language.r"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "paste",
+          "scopes": [
+            "support.function.r"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "dart",
+      "title": "Dart class with an import, a method, and a string",
+      "text": "import 'dart:io';\n// note\nclass Greeter {\n  String greet() => 'hi';\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "import",
+          "scopes": [
+            "keyword.other.import.dart"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "'",
+          "scopes": [
+            "string.interpolated.single.dart"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "// note",
+          "scopes": [
+            "comment.line.double-slash.dart"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "class",
+          "scopes": [
+            "keyword.declaration.dart"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Greeter",
+          "scopes": [
+            "support.class.dart"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "greet",
+          "scopes": [
+            "entity.name.function.dart"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "clojure",
+      "title": "Clojure function definition with a string and a keyword",
+      "text": "; note\n(defn greet [name]\n  (str \"hi \" name :done))\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.semicolon.clojure"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "defn",
+          "scopes": [
+            "keyword.control.clojure"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "str",
+          "scopes": [
+            "entity.name.function.clojure"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.clojure"
+          ]
+        },
+        {
+          "line": 2,
+          "token": ":done",
+          "scopes": [
+            "constant.keyword.clojure"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "coffeescript",
+      "title": "CoffeeScript class with a method and a string",
+      "text": "# note\nclass Greeter\n  greet: (name) ->\n    \"hi #{name}\"\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.coffee"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "class",
+          "scopes": [
+            "storage.type.class.coffee"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "Greeter",
+          "scopes": [
+            "entity.name.type.class.coffee"
+          ]
+        },
+        {
+          "line": 2,
+          "token": ":",
+          "scopes": [
+            "keyword.operator.assignment.coffee"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "name",
+          "scopes": [
+            "variable.parameter.function.coffee"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.coffee"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "fsharp",
+      "title": "F# module with a let binding, a function, and a string",
+      "text": "module Demo\n// note\nlet greet name = sprintf \"hi %s\" name\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "module",
+          "scopes": [
+            "keyword.fsharp"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "Demo",
+          "scopes": [
+            "entity.name.section.fsharp"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "// note",
+          "scopes": [
+            "comment.line.double-slash.fsharp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "name",
+          "scopes": [
+            "variable.parameter.fsharp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "=",
+          "scopes": [
+            "keyword.symbol.fsharp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.fsharp"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "julia",
+      "title": "Julia function with a string and a comment",
+      "text": "# note\nfunction greet(name::String)\n    return \"hi\"\nend\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.julia"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "function",
+          "scopes": [
+            "keyword.other.julia"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "greet",
+          "scopes": [
+            "entity.name.function.julia"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "::",
+          "scopes": [
+            "keyword.operator.relation.types.julia"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "String",
+          "scopes": [
+            "support.type.julia"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "return",
+          "scopes": [
+            "keyword.control.julia"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "powershell",
+      "title": "PowerShell function with a parameter, a variable, and a string",
+      "text": "# note\nfunction Get-Greeting {\n    param([string]$Name)\n    Write-Output \"hi\"\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.powershell"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "function",
+          "scopes": [
+            "storage.type.powershell"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "Get-Greeting",
+          "scopes": [
+            "entity.name.function.powershell"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "param",
+          "scopes": [
+            "keyword.control.powershell"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Name",
+          "scopes": [
+            "variable.other.readwrite.powershell"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "Write-Output",
+          "scopes": [
+            "support.function.powershell"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "bat",
+      "title": "Batch file with echo off, a variable, and a label",
+      "text": "@echo off\nREM note\nset NAME=world\n:greet\necho hi %NAME%\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "@",
+          "scopes": [
+            "keyword.operator.at.batchfile"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "echo",
+          "scopes": [
+            "keyword.command.batchfile"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "off",
+          "scopes": [
+            "keyword.other.special-method.batchfile"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.line.rem.batchfile"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "NAME",
+          "scopes": [
+            "variable.other.readwrite.batchfile"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "vb",
+      "title": "Visual Basic module with a sub and a string",
+      "text": "' note\nModule Demo\n    Sub Main()\n        Console.WriteLine(\"hi\")\n    End Sub\nEnd Module\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.apostrophe.asp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Sub",
+          "scopes": [
+            "storage.type.asp"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "Main",
+          "scopes": [
+            "entity.name.function.asp"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.asp"
+          ]
+        },
+        {
+          "line": 5,
+          "token": "End",
+          "scopes": [
+            "support.function.asp"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "xml",
+      "title": "XML document with a declaration, an element, an attribute, and a comment",
+      "text": "<?xml version=\"1.0\"?>\n<!-- note -->\n<project name=\"demo\">\n  <item>text</item>\n</project>\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "xml",
+          "scopes": [
+            "entity.name.tag.xml"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "version",
+          "scopes": [
+            "entity.other.attribute-name.xml"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "1.0",
+          "scopes": [
+            "string.quoted.double.xml"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "note",
+          "scopes": [
+            "comment.block.xml"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "xsl",
+      "title": "XSL stylesheet with a template",
+      "text": "<?xml version=\"1.0\"?>\n<xsl:stylesheet version=\"1.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">\n  <xsl:template match=\"/\"><b>hi</b></xsl:template>\n</xsl:stylesheet>\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "xml",
+          "scopes": [
+            "entity.name.tag.xml"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "version",
+          "scopes": [
+            "entity.other.attribute-name.xml"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "1.0",
+          "scopes": [
+            "string.quoted.double.xml"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "ini",
+      "title": "INI file with a section, a key, a value, and a comment",
+      "text": "; note\n[core]\nname = demo\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.semicolon.ini"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "core",
+          "scopes": [
+            "entity.name.section.group-title.ini"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "name",
+          "scopes": [
+            "keyword.other.definition.ini"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "dockerfile",
+      "title": "Dockerfile with FROM, RUN, and ENV instructions",
+      "text": "# note\nFROM node:22\nENV PORT=8080\nRUN npm install\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.dockerfile"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "FROM",
+          "scopes": [
+            "keyword.other.special-method.dockerfile"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "makefile",
+      "title": "Makefile with a variable, a target, and a recipe",
+      "text": "# note\nCC = clang\nbuild: main.o\n\t$(CC) -o app main.o\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.makefile"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "CC",
+          "scopes": [
+            "variable.other.makefile"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "build",
+          "scopes": [
+            "entity.name.function.target.makefile"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "diff",
+      "title": "Unified diff with headers, a hunk, an addition, and a deletion",
+      "text": "--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@\n-old line\n+new line\n",
+      "expect": [
+        {
+          "line": 3,
+          "token": "old line",
+          "scopes": [
+            "markup.deleted.diff"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "new line",
+          "scopes": [
+            "markup.inserted.diff"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "dotenv",
+      "title": "Dotenv file with a comment, a key, and a quoted value",
+      "text": "# note\nAPI_URL=\"https://example.test\"\nDEBUG=true\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "# note",
+          "scopes": [
+            "comment.line.dotenv"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "API_URL",
+          "scopes": [
+            "variable.key.dotenv"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "=",
+          "scopes": [
+            "keyword.operator.assignment.dotenv"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "\"",
+          "scopes": [
+            "string.quoted.double.dotenv"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "ignore",
+      "title": "Ignore file with a comment, a pattern, and a negation",
+      "text": "# build output\nnode_modules/\n!keep.txt\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "# build output",
+          "scopes": [
+            "comment.line.number-sign.ignore"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "git-commit",
+      "title": "Git commit message with a subject and a comment",
+      "text": "Fix the parser\n\n# Please enter the commit message\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "Fix the parser",
+          "scopes": [
+            "meta.scope.subject.git-commit"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "# Please enter the commit message",
+          "scopes": [
+            "comment.line.number-sign.git-commit"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "git-rebase",
+      "title": "Git rebase todo with pick and squash",
+      "text": "pick 1a2b3c4 First change\nsquash 5d6e7f8 Second change\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "pick",
+          "scopes": [
+            "support.function.git-rebase"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "1a2b3c4",
+          "scopes": [
+            "constant.sha.git-rebase"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "log",
+      "title": "Log file with a timestamp, a level, and a message",
+      "text": "2026-11-02 10:00:00 ERROR failed to connect\n2026-11-02 10:00:01 INFO retrying\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "2026-11-02",
+          "scopes": [
+            "log.date"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "ERROR",
+          "scopes": [
+            "log.error"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "INFO",
+          "scopes": [
+            "log.info"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "groovy",
+      "title": "Groovy Gradle script with a block, a method call, and a string",
+      "text": "// note\nplugins {\n    id 'java'\n}\ndef name = \"demo\"\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-slash.groovy"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "java",
+          "scopes": [
+            "string.quoted.single.groovy"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "def",
+          "scopes": [
+            "storage.type.def.groovy"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "=",
+          "scopes": [
+            "keyword.operator.assignment.groovy"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "hlsl",
+      "title": "HLSL shader function with a semantic",
+      "text": "// note\nfloat4 main(float4 pos : SV_POSITION) : SV_TARGET {\n    return float4(1, 0, 0, 1);\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "//",
+          "scopes": [
+            "comment.line.double-slash.hlsl"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "float4",
+          "scopes": [
+            "storage.type.basic.hlsl"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "main",
+          "scopes": [
+            "support.function.hlsl"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "SV_POSITION",
+          "scopes": [
+            "support.variable.semantic.sm4.hlsl"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "return",
+          "scopes": [
+            "keyword.control.hlsl"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "1",
+          "scopes": [
+            "constant.numeric.decimal.hlsl"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "shaderlab",
+      "title": "ShaderLab shader with a property block",
+      "text": "Shader \"Demo/Color\" {\n    Properties { _Color (\"Color\", Color) = (1,1,1,1) }\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "Shader",
+          "scopes": [
+            "storage.type.structure.shaderlab"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "\"",
+          "scopes": [
+            "string.quoted.double.shaderlab"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "_Color (",
+          "scopes": [
+            "support.variable.declaration.shaderlab"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "1",
+          "scopes": [
+            "constant.numeric.shaderlab"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "latex",
+      "title": "LaTeX document with a command, an environment, and a comment",
+      "text": "% note\n\\documentclass{article}\n\\begin{document}\nHello \\textbf{world}\n\\end{document}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.percentage.tex"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "documentclass",
+          "scopes": [
+            "keyword.control.preamble.latex"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "article",
+          "scopes": [
+            "support.class.latex"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "begin",
+          "scopes": [
+            "support.function.be.latex"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "document",
+          "scopes": [
+            "variable.parameter.function.latex"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "world",
+          "scopes": [
+            "markup.bold.textbf.latex"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "tex",
+      "title": "TeX style file with a macro definition and a comment",
+      "text": "% note\n\\def\\greet#1{Hello #1}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.percentage.tex"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "def",
+          "scopes": [
+            "support.function.general.tex"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "bibtex",
+      "title": "BibTeX entry with fields",
+      "text": "@article{key2026,\n  title = {Demo},\n  year = 2026\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "article",
+          "scopes": [
+            "keyword.other.entry-type.bibtex"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "key2026",
+          "scopes": [
+            "entity.name.type.entry-key.bibtex"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "title",
+          "scopes": [
+            "support.function.key.bibtex"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "2026",
+          "scopes": [
+            "constant.numeric.bibtex"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "raku",
+      "title": "Raku script with a sub and a string",
+      "text": "# note\nsub greet($name) {\n    say \"hi\";\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.number-sign.perl"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "sub",
+          "scopes": [
+            "storage.type.declare.routine.perl"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "$name",
+          "scopes": [
+            "variable.other.identifier.perl.6"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "say",
+          "scopes": [
+            "support.function.perl"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "hi",
+          "scopes": [
+            "string.quoted.double.perl"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "razor",
+      "title": "Razor view with a code block and HTML",
+      "text": "@model Demo\n<p>@Model.Name</p>\n@{ var x = 1; }\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "@",
+          "scopes": [
+            "keyword.control.cshtml.transition"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "Demo",
+          "scopes": [
+            "entity.name.type.cs"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "Model",
+          "scopes": [
+            "variable.other.object.cs"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "var",
+          "scopes": [
+            "storage.type.var.cs"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "=",
+          "scopes": [
+            "keyword.operator.assignment.cs"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "1",
+          "scopes": [
+            "constant.numeric.decimal.cs"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "handlebars",
+      "title": "Handlebars template with an expression and a block helper",
+      "text": "<p>{{name}}</p>\n{{#if ok}}yes{{/if}}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "p",
+          "scopes": [
+            "entity.name.tag.block.any.html"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "{{",
+          "scopes": [
+            "support.constant.handlebars"
+          ]
+        },
+        {
+          "line": 0,
+          "token": "name",
+          "scopes": [
+            "variable.parameter.handlebars"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "#",
+          "scopes": [
+            "keyword.control"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "pug",
+      "title": "Pug template with a tag, a class, and text",
+      "text": "//- note\ndiv.card\n  p Hello\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "//-",
+          "scopes": [
+            "comment.unbuffered.block.pug"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "div",
+          "scopes": [
+            "entity.name.tag.pug"
+          ]
+        },
+        {
+          "line": 1,
+          "token": ".card",
+          "scopes": [
+            "entity.other.attribute-name.class.css.pug"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "scss",
+      "title": "SCSS with a variable, nesting, and a comment",
+      "text": "// note\n$brand: #333;\n.card {\n  color: $brand;\n  &:hover { color: red; }\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.scss"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "$brand",
+          "scopes": [
+            "variable.scss"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "333",
+          "scopes": [
+            "constant.other.color.rgb-value.hex.css"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "card",
+          "scopes": [
+            "entity.other.attribute-name.class.css"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "color",
+          "scopes": [
+            "support.type.property-name.css"
+          ]
+        },
+        {
+          "line": 4,
+          "token": "&",
+          "scopes": [
+            "entity.name.tag.reference.scss"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "less",
+      "title": "Less with a variable and a mixin",
+      "text": "// note\n@brand: #333;\n.card {\n  color: @brand;\n}\n",
+      "expect": [
+        {
+          "line": 0,
+          "token": "note",
+          "scopes": [
+            "comment.line.double-slash.less"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "brand",
+          "scopes": [
+            "support.other.variable.less"
+          ]
+        },
+        {
+          "line": 1,
+          "token": "333",
+          "scopes": [
+            "constant.other.color.rgb-value.less"
+          ]
+        },
+        {
+          "line": 2,
+          "token": "card",
+          "scopes": [
+            "entity.other.attribute-name.class.less"
+          ]
+        },
+        {
+          "line": 3,
+          "token": "color",
+          "scopes": [
+            "support.type.property-name.less"
+          ]
+        }
+      ]
+    },
+    {
+      "languageId": "restructuredtext",
+      "title": "reStructuredText with a heading, a directive, an inline literal, and emphasis",
+      "text": "Title\n=====\n\n.. note:: Be careful\n\nRun ``make build`` with *emphasis* here.\n",
+      "expect": [
+        {
+          "line": 1,
+          "token": "=====",
+          "scopes": [
+            "markup.heading"
+          ]
+        },
+        {
+          "line": 3,
+          "token": ".. note::",
+          "scopes": [
+            "keyword.control"
+          ]
+        },
+        {
+          "line": 5,
+          "token": "``m",
+          "scopes": [
+            "string.interpolated"
+          ]
+        },
+        {
+          "line": 5,
+          "token": "*e",
+          "scopes": [
+            "markup.italic"
+          ]
+        }
+      ]
     }
   ]
 }

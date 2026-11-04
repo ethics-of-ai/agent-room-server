@@ -41,9 +41,9 @@ defense in depth, not a substitute for environment isolation.
 `.agentroom/config`, contains only managed preferences and trust posture. It
 never contains bootstrap, secret, executable, bind, storage, or process-start
 settings. In particular, `AUTH_TOKEN`, runner executable paths and arguments,
-`TERMINAL_SHELL`, `HOST`, `PORT`, `STATE_DIR`, `WORKSPACE_ROOT`,
-`AGENTROOM_HOME`, and `EDITOR_CATALOG_DIR` are not managed keys and cannot be
-read or patched through `/api/config`.
+`TERMINAL_SHELL`, `HOST`, `PORT`, `STATE_DIR`, `WORKSPACE_ROOT`, and
+`AGENTROOM_HOME` are not managed keys and cannot be read or patched through
+`/api/config`.
 
 Settings resolve in this order: process environment, managed file, code
 default. An environment value locks its key. The API reports it as
@@ -949,8 +949,8 @@ environment, cwd, or filesystem surface.
 The editor catalog contains app-global data, never workspace files. It serves
 manifest-referenced `.json` and `.wasm` only, never `.js`. Reads are bearer-
 gated when configured. `LANGUAGE_CATALOG_ENABLED` gates the surface and defaults
-on. The root is an operator override from `EDITOR_CATALOG_DIR`, then the bundled
-catalog; an absent catalog returns 404 and clients use bundled assets.
+on. The root is the catalog bundled with the backend, loaded once at startup; a
+catalog that is absent or rejected returns 404 and clients use bundled assets.
 
 A generation is accepted only after all paths, hashes, sizes, language claims,
 grammar relationships, theme maps, and JSON depth validate. Required caps are
@@ -960,17 +960,9 @@ language configuration, 32 MiB aggregate bytes, and JSON depth 32. Schema-2
 injection graphs must be acyclic; each grammar may name at most 128 external
 scopes. Accepted bytes are pinned in memory.
 
-Reload swaps only a complete valid snapshot. Failure preserves the last accepted
-generation, and invalid startup override falls back to bundled data. Status
-returns aggregates and bounded error location, not assets. Reload is bearer-
-gated and mutating but changes no workspace. `editor_catalog_changed` carries
-version and language count only.
-
-The macOS importer copies operator-selected `.json` and `.wasm` into AgentRoom
-app support through staging and same-volume rename, retaining the prior override
-until validation. It never writes a registered workspace. Maintainer grammar
-imports use pinned HTTPS sources, preserve provenance and licenses, validate
-data, execute nothing fetched, and sync one way into the backend catalog.
+No route reloads or replaces the catalog at runtime. Maintainer grammar imports
+use pinned HTTPS sources, preserve provenance and licenses, validate data,
+execute nothing fetched, and sync one way into the backend catalog.
 
 ### Language services
 

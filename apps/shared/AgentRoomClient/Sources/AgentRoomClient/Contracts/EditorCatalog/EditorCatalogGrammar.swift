@@ -10,10 +10,6 @@ public struct EditorCatalogGrammar: Codable, Hashable, Sendable {
     public var languageConfig: String?
     public var embeddedLanguages: [String: String]?
     public var injectionScopes: [String]?
-    /// Catalog scopes this grammar reaches through its own `include` rules, derived by
-    /// the backend at assembly (schema 2). A client can load a language's closure from it.
-    public var dependencyScopes: [String]?
-    public var provenance: EditorCatalogProvenance?
 
     public init(
         languageId: String,
@@ -21,9 +17,7 @@ public struct EditorCatalogGrammar: Codable, Hashable, Sendable {
         grammar: EditorCatalogAssetRef,
         languageConfig: String? = nil,
         embeddedLanguages: [String: String]? = nil,
-        injectionScopes: [String]? = nil,
-        dependencyScopes: [String]? = nil,
-        provenance: EditorCatalogProvenance? = nil
+        injectionScopes: [String]? = nil
     ) {
         self.languageId = languageId
         self.scopeName = scopeName
@@ -31,7 +25,5 @@ public struct EditorCatalogGrammar: Codable, Hashable, Sendable {
         self.languageConfig = languageConfig
         self.embeddedLanguages = embeddedLanguages
         self.injectionScopes = injectionScopes
-        self.dependencyScopes = dependencyScopes
-        self.provenance = provenance
     }
 }

@@ -1,7 +1,17 @@
+import { z } from "zod";
 import type { LanguageServicePosition, LanguageServiceRange } from "../../domain/languageService";
 
 export function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
+}
+
+/**
+ * A string schema that refuses values over `maxBytes` UTF-8 bytes with `message`. It checks
+ * the byte bound only; pass a `base` such as `z.string().min(1)` for other string checks,
+ * which run first.
+ */
+export function boundedUtf8String(maxBytes: number, message: string, base: z.ZodString = z.string()) {
+  return base.refine((value) => utf8Bytes(value) <= maxBytes, message);
 }
 
 export function clampUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {

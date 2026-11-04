@@ -1,6 +1,6 @@
 import { jvmLanguageServiceEnvironmentKeys } from "./environment";
 import { configuredExecutableDescriptorFields } from "./executable";
-import type { LanguageServiceDescriptor } from "./types";
+import { standardServerRequests, type LanguageServiceDescriptor } from "./types";
 
 export const eclipseJdtLsDescriptor: LanguageServiceDescriptor = {
   id: "eclipse_jdt_ls",
@@ -19,10 +19,7 @@ export const eclipseJdtLsDescriptor: LanguageServiceDescriptor = {
   ],
   standaloneWorkspaceRoot: true,
   projectLoading: { mayInvokeBuildTools: true, mayLoadPlugins: true },
-  serverRequests: {
-    workDoneProgressCreate: "null",
-    workspaceConfiguration: "null_per_item"
-  },
+  serverRequests: standardServerRequests,
   temporaryStorage: { argument: "-data", prefix: "agentroom-jdtls-" },
   environmentKeys: jvmLanguageServiceEnvironmentKeys,
   ...configuredExecutableDescriptorFields(

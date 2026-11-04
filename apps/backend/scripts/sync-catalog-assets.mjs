@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 // Sync the backend language-catalog asset directory from the visionOS app's
-// curated editor asset set. The app bundle is the single editing source of truth
-// for grammars/themes/configs/wasm (Phase A/B); this script copies that curated
-// set into `apps/backend/catalog-assets/`, which the backend serves over the
-// flag-gated, bearer-auth'd catalog routes (Phase C). Run it whenever the app's
-// editor assets change; `catalogSyncParity.test.ts` fails if the committed
-// backend copy drifts from the app source.
+// curated editor asset set. The app bundle is the one editing source for
+// grammars, themes, language configurations and the Oniguruma wasm. This script
+// copies that set into `apps/backend/catalog-assets/`, which the backend serves
+// over the bearer-auth'd catalog routes. `catalogSyncParity.test.ts` fails if
+// the committed backend copy drifts from the app source.
 //
 // DATA ONLY: the backend serves `.json` + `.wasm`. The TextMate engine JS
 // (`vscode-textmate.js`, `vscode-oniguruma.js`) stays bundled in the app and is
 // never copied here, so the catalog can never serve executable language packs.
-// Grammars themselves enter the app source through the maintainer importer
-// (`import-editor-grammars.mjs`), which runs this sync as its last step.
+// Grammars and themes enter the app source through the maintainer importers
+// (`import-editor-grammars.mjs` and `import-editor-themes.mjs`). Both run this
+// sync after they write; the grammar importer then regenerates the language
+// support matrix. Run it by hand after editing the app's editor assets directly.
+//
+// This script stays standalone. The public mirror publishes it without the
+// shared import module, so it must not import from `catalog-import-shared.mjs`.
 import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, extname, resolve, sep } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -40,6 +44,10 @@ const catalogSpecs = [
   // so the committed catalog, and the public mirror that ships it, carry attribution.
   { kind: "file", src: `${appResources}/Monaco/grammars/PROVENANCE.md`, dest: "grammars/PROVENANCE.md" },
   { kind: "dir", src: `${appResources}/Monaco/grammars/LICENSES`, dest: "grammars/LICENSES", onlyExts: [".txt"] },
+  // Imported themes are converted into the two theme maps above; their provenance and
+  // license texts travel the same way the grammars' do.
+  { kind: "file", src: `${appResources}/Monaco/themes/PROVENANCE.md`, dest: "themes/PROVENANCE.md" },
+  { kind: "dir", src: `${appResources}/Monaco/themes/LICENSES`, dest: "themes/LICENSES", onlyExts: [".txt"] },
   { kind: "dir", src: `${appResources}/Monaco/language-configs`, dest: "language-configs", onlyExts: [".json"] },
   { kind: "dir", src: `${appResources}/Monaco/vs-textmate`, dest: "vs-textmate", excludeExts: [".js"] }
 ];
@@ -95,12 +103,9 @@ export async function syncCatalogAssets({ repoRoot = defaultRepoRoot, log = () =
       "edit the app source and re-run the sync script. The backend serves these as DATA",
       "(`.json` + `.wasm`) over the flag-gated, bearer-auth'd `/api/editor/catalog` routes.",
       "",
-      "This is the **bundled fallback** catalog (Phase C.5). At runtime the backend prefers",
-      "the operator-managed override directory (`EDITOR_CATALOG_DIR`, default",
-      "`$AGENTROOM_HOME/catalog-assets`) when it holds a manifest, and only serves this",
-      "committed directory when the override is absent/empty. The macOS Languages pane",
-      "imports into the override dir and triggers `POST /api/editor/catalog/reload`, so",
-      "operators never edit this directory directly.",
+      "This is the only catalog the backend serves. It loads this directory once at",
+      "startup. A Mac release ships a new copy, and paired visionOS clients pick it up",
+      "the next time they connect.",
       ""
     ].join("\n")
   );

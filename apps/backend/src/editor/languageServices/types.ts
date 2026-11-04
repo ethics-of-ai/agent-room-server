@@ -15,6 +15,12 @@ export interface LanguageServiceServerRequestPolicy {
   readonly workspaceConfiguration?: "null_per_item";
 }
 
+/** The server-request answers most language servers need: null progress and per-item null configuration. */
+export const standardServerRequests: LanguageServiceServerRequestPolicy = {
+  workDoneProgressCreate: "null",
+  workspaceConfiguration: "null_per_item"
+};
+
 export interface ResolvedLanguageServiceExecutable {
   readonly command: string;
   readonly args: readonly string[];

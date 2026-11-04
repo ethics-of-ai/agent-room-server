@@ -26,6 +26,58 @@ pinned ref, validated as JSON data, and never executed. License texts are in
 | `html-derivative.tmLanguage.json` | `text.html.derivative` | language `html`; hosts `vue.directives`, `vue.interpolations` | `microsoft/vscode@1.125.0` `extensions/html/syntaxes/html-derivative.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
 | `html.tmLanguage.json` | `text.html.basic` | auxiliary scope | `microsoft/vscode@1.125.0` `extensions/html/syntaxes/html.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
 | `css.tmLanguage.json` | `source.css` | language `css` | `microsoft/vscode@1.125.0` `extensions/css/syntaxes/css.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `bat.tmLanguage.json` | `source.batchfile` | language `bat` | `microsoft/vscode@1.125.0` `extensions/bat/syntaxes/batchfile.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `clojure.tmLanguage.json` | `source.clojure` | language `clojure` | `microsoft/vscode@1.125.0` `extensions/clojure/syntaxes/clojure.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `coffeescript.tmLanguage.json` | `source.coffee` | language `coffeescript` | `microsoft/vscode@1.125.0` `extensions/coffeescript/syntaxes/coffeescript.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `c.tmLanguage.json` | `source.c` | language `c` | `microsoft/vscode@1.125.0` `extensions/cpp/syntaxes/c.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `source-cpp-embedded-macro.tmLanguage.json` | `source.cpp.embedded.macro` | auxiliary scope | `microsoft/vscode@1.125.0` `extensions/cpp/syntaxes/cpp.embedded.macro.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `cpp.tmLanguage.json` | `source.cpp` | language `cpp` | `microsoft/vscode@1.125.0` `extensions/cpp/syntaxes/cpp.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `source-c-platform.tmLanguage.json` | `source.c.platform` | auxiliary scope | `microsoft/vscode@1.125.0` `extensions/cpp/syntaxes/platform.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `csharp.tmLanguage.json` | `source.cs` | language `csharp` | `microsoft/vscode@1.125.0` `extensions/csharp/syntaxes/csharp.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `dart.tmLanguage.json` | `source.dart` | language `dart` | `microsoft/vscode@1.125.0` `extensions/dart/syntaxes/dart.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `diff.tmLanguage.json` | `source.diff` | language `diff` | `microsoft/vscode@1.125.0` `extensions/diff/syntaxes/diff.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `dockerfile.tmLanguage.json` | `source.dockerfile` | language `dockerfile` | `microsoft/vscode@1.125.0` `extensions/docker/syntaxes/docker.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `dotenv.tmLanguage.json` | `source.dotenv` | language `dotenv` | `microsoft/vscode@1.125.0` `extensions/dotenv/syntaxes/dotenv.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `fsharp.tmLanguage.json` | `source.fsharp` | language `fsharp` | `microsoft/vscode@1.125.0` `extensions/fsharp/syntaxes/fsharp.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `git-commit.tmLanguage.json` | `text.git-commit` | language `git-commit` | `microsoft/vscode@1.125.0` `extensions/git-base/syntaxes/git-commit.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `git-rebase.tmLanguage.json` | `text.git-rebase` | language `git-rebase` | `microsoft/vscode@1.125.0` `extensions/git-base/syntaxes/git-rebase.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `ignore.tmLanguage.json` | `source.ignore` | language `ignore` | `microsoft/vscode@1.125.0` `extensions/git-base/syntaxes/ignore.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `go.tmLanguage.json` | `source.go` | language `go` | `microsoft/vscode@1.125.0` `extensions/go/syntaxes/go.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `groovy.tmLanguage.json` | `source.groovy` | language `groovy` | `microsoft/vscode@1.125.0` `extensions/groovy/syntaxes/groovy.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `handlebars.tmLanguage.json` | `text.html.handlebars` | language `handlebars` | `microsoft/vscode@1.125.0` `extensions/handlebars/syntaxes/Handlebars.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `hlsl.tmLanguage.json` | `source.hlsl` | language `hlsl` | `microsoft/vscode@1.125.0` `extensions/hlsl/syntaxes/hlsl.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `ini.tmLanguage.json` | `source.ini` | language `ini` | `microsoft/vscode@1.125.0` `extensions/ini/syntaxes/ini.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `java.tmLanguage.json` | `source.java` | language `java` | `microsoft/vscode@1.125.0` `extensions/java/syntaxes/java.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `julia.tmLanguage.json` | `source.julia` | language `julia` | `microsoft/vscode@1.125.0` `extensions/julia/syntaxes/julia.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `tex.tmLanguage.json` | `text.tex` | language `tex` | `microsoft/vscode@1.125.0` `extensions/latex/syntaxes/TeX.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `latex.tmLanguage.json` | `text.tex.latex` | language `latex` | `microsoft/vscode@1.125.0` `extensions/latex/syntaxes/LaTeX.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `bibtex.tmLanguage.json` | `text.bibtex` | language `bibtex` | `microsoft/vscode@1.125.0` `extensions/latex/syntaxes/Bibtex.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `less.tmLanguage.json` | `source.css.less` | language `less` | `microsoft/vscode@1.125.0` `extensions/less/syntaxes/less.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `log.tmLanguage.json` | `text.log` | language `log` | `microsoft/vscode@1.125.0` `extensions/log/syntaxes/log.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `lua.tmLanguage.json` | `source.lua` | language `lua` | `microsoft/vscode@1.125.0` `extensions/lua/syntaxes/lua.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `makefile.tmLanguage.json` | `source.makefile` | language `makefile` | `microsoft/vscode@1.125.0` `extensions/make/syntaxes/make.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `objective-c.tmLanguage.json` | `source.objc` | language `objective-c` | `microsoft/vscode@1.125.0` `extensions/objective-c/syntaxes/objective-c.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `objective-cpp.tmLanguage.json` | `source.objcpp` | language `objective-cpp` | `microsoft/vscode@1.125.0` `extensions/objective-c/syntaxes/objective-c++.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `perl.tmLanguage.json` | `source.perl` | language `perl` | `microsoft/vscode@1.125.0` `extensions/perl/syntaxes/perl.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `raku.tmLanguage.json` | `source.perl.6` | language `raku` | `microsoft/vscode@1.125.0` `extensions/perl/syntaxes/perl6.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `source-php.tmLanguage.json` | `source.php` | auxiliary scope | `microsoft/vscode@1.125.0` `extensions/php/syntaxes/php.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `php.tmLanguage.json` | `text.html.php` | language `php` | `microsoft/vscode@1.125.0` `extensions/php/syntaxes/html.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `powershell.tmLanguage.json` | `source.powershell` | language `powershell` | `microsoft/vscode@1.125.0` `extensions/powershell/syntaxes/powershell.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `pug.tmLanguage.json` | `text.pug` | language `pug`; hosts `vue.directives`, `vue.interpolations` | `microsoft/vscode@1.125.0` `extensions/pug/syntaxes/pug.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `python.tmLanguage.json` | `source.python` | language `python` | `microsoft/vscode@1.125.0` `extensions/python/syntaxes/MagicPython.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `source-regexp-python.tmLanguage.json` | `source.regexp.python` | auxiliary scope | `microsoft/vscode@1.125.0` `extensions/python/syntaxes/MagicRegExp.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `r.tmLanguage.json` | `source.r` | language `r` | `microsoft/vscode@1.125.0` `extensions/r/syntaxes/r.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `razor.tmLanguage.json` | `text.html.cshtml` | language `razor` | `microsoft/vscode@1.125.0` `extensions/razor/syntaxes/cshtml.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `restructuredtext.tmLanguage.json` | `source.rst` | language `restructuredtext` | `microsoft/vscode@1.125.0` `extensions/restructuredtext/syntaxes/rst.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `ruby.tmLanguage.json` | `source.ruby` | language `ruby` | `microsoft/vscode@1.125.0` `extensions/ruby/syntaxes/ruby.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `rust.tmLanguage.json` | `source.rust` | language `rust` | `microsoft/vscode@1.125.0` `extensions/rust/syntaxes/rust.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `scss.tmLanguage.json` | `source.css.scss` | language `scss` | `microsoft/vscode@1.125.0` `extensions/scss/syntaxes/scss.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `source-sassdoc.tmLanguage.json` | `source.sassdoc` | auxiliary scope | `microsoft/vscode@1.125.0` `extensions/scss/syntaxes/sassdoc.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `shaderlab.tmLanguage.json` | `source.shaderlab` | language `shaderlab` | `microsoft/vscode@1.125.0` `extensions/shaderlab/syntaxes/shaderlab.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `sql.tmLanguage.json` | `source.sql` | language `sql` | `microsoft/vscode@1.125.0` `extensions/sql/syntaxes/sql.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `vb.tmLanguage.json` | `source.asp.vb.net` | language `vb` | `microsoft/vscode@1.125.0` `extensions/vb/syntaxes/asp-vb-net.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `xml.tmLanguage.json` | `text.xml` | language `xml` | `microsoft/vscode@1.125.0` `extensions/xml/syntaxes/xml.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
+| `xsl.tmLanguage.json` | `text.xml.xsl` | language `xsl` | `microsoft/vscode@1.125.0` `extensions/xml/syntaxes/xsl.tmLanguage.json` | MIT (`LICENSES/vscode.txt`) |
 | `vue.tmLanguage.json` | `text.html.vue` | language `vue`; hosts `vue.directives`, `vue.interpolations`, `vue.sfc.script.leading-operator-fix`, `vue.sfc.style.variable.injection` | `vuejs/language-tools@v3.3.11` `extensions/vscode/syntaxes/vue.tmLanguage.json` | MIT (`LICENSES/vue.txt`) |
 | `vue-directives.tmLanguage.json` | `vue.directives` | injection into `text.html.vue`, `text.html.markdown`, `text.html.derivative`, `text.pug` | `vuejs/language-tools@v3.3.11` `extensions/vscode/syntaxes/vue-directives.json` | MIT (`LICENSES/vue.txt`) |
 | `vue-interpolations.tmLanguage.json` | `vue.interpolations` | injection into `text.html.vue`, `text.html.markdown`, `text.html.derivative`, `text.pug` | `vuejs/language-tools@v3.3.11` `extensions/vscode/syntaxes/vue-interpolations.json` | MIT (`LICENSES/vue.txt`) |
@@ -58,17 +110,74 @@ pinned ref, validated as JSON data, and never executed. License texts are in
 | `shell.json` | `shell` | `github.com/microsoft/vscode@1.125.0/extensions/shellscript/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
 | `html.json` | `html` | `github.com/microsoft/vscode@1.125.0/extensions/html/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
 | `css.json` | `css` | `github.com/microsoft/vscode@1.125.0/extensions/css/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `bat.json` | `bat` | `github.com/microsoft/vscode@1.125.0/extensions/bat/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `clojure.json` | `clojure` | `github.com/microsoft/vscode@1.125.0/extensions/clojure/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `coffeescript.json` | `coffeescript` | `github.com/microsoft/vscode@1.125.0/extensions/coffeescript/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `c.json` | `c` | `github.com/microsoft/vscode@1.125.0/extensions/cpp/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `cpp.json` | `cpp` | `github.com/microsoft/vscode@1.125.0/extensions/cpp/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `csharp.json` | `csharp` | `github.com/microsoft/vscode@1.125.0/extensions/csharp/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `dart.json` | `dart` | `github.com/microsoft/vscode@1.125.0/extensions/dart/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `diff.json` | `diff` | `github.com/microsoft/vscode@1.125.0/extensions/diff/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `dockerfile.json` | `dockerfile` | `github.com/microsoft/vscode@1.125.0/extensions/docker/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `dotenv.json` | `dotenv` | `github.com/microsoft/vscode@1.125.0/extensions/dotenv/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `fsharp.json` | `fsharp` | `github.com/microsoft/vscode@1.125.0/extensions/fsharp/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `git-commit.json` | `git-commit` | `github.com/microsoft/vscode@1.125.0/extensions/git-base/languages/git-commit.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `git-rebase.json` | `git-rebase` | `github.com/microsoft/vscode@1.125.0/extensions/git-base/languages/git-rebase.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `ignore.json` | `ignore` | `github.com/microsoft/vscode@1.125.0/extensions/git-base/languages/ignore.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `go.json` | `go` | `github.com/microsoft/vscode@1.125.0/extensions/go/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `groovy.json` | `groovy` | `github.com/microsoft/vscode@1.125.0/extensions/groovy/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `handlebars.json` | `handlebars` | `github.com/microsoft/vscode@1.125.0/extensions/handlebars/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `hlsl.json` | `hlsl` | `github.com/microsoft/vscode@1.125.0/extensions/hlsl/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `ini.json` | `ini` | `github.com/microsoft/vscode@1.125.0/extensions/ini/ini.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `java.json` | `java` | `github.com/microsoft/vscode@1.125.0/extensions/java/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `julia.json` | `julia` | `github.com/microsoft/vscode@1.125.0/extensions/julia/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `tex.json` | `tex` | `github.com/microsoft/vscode@1.125.0/extensions/latex/latex-language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `latex.json` | `latex` | `github.com/microsoft/vscode@1.125.0/extensions/latex/latex-language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `less.json` | `less` | `github.com/microsoft/vscode@1.125.0/extensions/less/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `lua.json` | `lua` | `github.com/microsoft/vscode@1.125.0/extensions/lua/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `makefile.json` | `makefile` | `github.com/microsoft/vscode@1.125.0/extensions/make/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `objective-c.json` | `objective-c` | `github.com/microsoft/vscode@1.125.0/extensions/objective-c/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `objective-cpp.json` | `objective-cpp` | `github.com/microsoft/vscode@1.125.0/extensions/objective-c/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `perl.json` | `perl` | `github.com/microsoft/vscode@1.125.0/extensions/perl/perl.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `raku.json` | `raku` | `github.com/microsoft/vscode@1.125.0/extensions/perl/perl6.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `php.json` | `php` | `github.com/microsoft/vscode@1.125.0/extensions/php/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `powershell.json` | `powershell` | `github.com/microsoft/vscode@1.125.0/extensions/powershell/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `pug.json` | `pug` | `github.com/microsoft/vscode@1.125.0/extensions/pug/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `python.json` | `python` | `github.com/microsoft/vscode@1.125.0/extensions/python/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `r.json` | `r` | `github.com/microsoft/vscode@1.125.0/extensions/r/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `razor.json` | `razor` | `github.com/microsoft/vscode@1.125.0/extensions/razor/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `restructuredtext.json` | `restructuredtext` | `github.com/microsoft/vscode@1.125.0/extensions/restructuredtext/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `ruby.json` | `ruby` | `github.com/microsoft/vscode@1.125.0/extensions/ruby/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `rust.json` | `rust` | `github.com/microsoft/vscode@1.125.0/extensions/rust/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `scss.json` | `scss` | `github.com/microsoft/vscode@1.125.0/extensions/scss/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `shaderlab.json` | `shaderlab` | `github.com/microsoft/vscode@1.125.0/extensions/shaderlab/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `sql.json` | `sql` | `github.com/microsoft/vscode@1.125.0/extensions/sql/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `vb.json` | `vb` | `github.com/microsoft/vscode@1.125.0/extensions/vb/language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `xml.json` | `xml` | `github.com/microsoft/vscode@1.125.0/extensions/xml/xml.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
+| `xsl.json` | `xsl` | `github.com/microsoft/vscode@1.125.0/extensions/xml/xsl.language-configuration.json` | MIT (`LICENSES/vscode.txt`) |
 | `vue.json` | `vue` | `github.com/vuejs/language-tools@v3.3.11/extensions/vscode/languages/vue-language-configuration.json` | MIT (`LICENSES/vue.txt`) |
 | `mdx.json` | `mdx` | `github.com/mdx-js/mdx-analyzer@vscode-mdx@1.8.14/packages/vscode-mdx/language-configuration.json` | MIT (`LICENSES/mdx-analyzer.txt`) |
 
 ## Embedded scopes without a grammar
 
 Text under these scopes tokenizes as its enclosing scope until a grammar for it is
-added to the source table. This list is the dependency record, not a claim
+added to the source table. This list is the Phase 2 dependency record, not a claim
 that those languages highlight.
 
-- `source.mdx`: `source.c`, `source.c++`, `source.clojure`, `source.coffee`, `source.cpp`, `source.cs`, `source.css.less`, `source.css.scss`, `source.diff`, `source.dockerfile`, `source.elixir`, `source.elm`, `source.erlang`, `source.gfm`, `source.gitconfig`, `source.go`, `source.graphql`, `source.haskell`, `source.ini`, `source.java`, `source.julia`, `source.kotlin`, `source.lua`, `source.makefile`, `source.objc`, `source.perl`, `source.python`, `source.r`, `source.raku`, `source.ruby`, `source.rust`, `source.scala`, `source.sql`, `source.toml`, `source.vbnet`, `text.html.asciidoc`, `text.html.markdown.source.gfm.apib`, `text.html.php`, `text.md`, `text.python.console`, `text.shell-session`, `text.xml`, `text.xml.svg`
-- `text.html.markdown`: `source.abap`, `source.asp.vb.net`, `source.batchfile`, `source.c`, `source.clojure`, `source.coffee`, `source.cpp`, `source.cs`, `source.css.less`, `source.css.scss`, `source.dart`, `source.diff`, `source.dockerfile`, `source.elixir`, `source.erlang`, `source.fsharp`, `source.go`, `source.groovy`, `source.ignore`, `source.ini`, `source.java`, `source.js.regexp`, `source.json.comments`, `source.json.lines`, `source.julia`, `source.lua`, `source.makefile`, `source.objc`, `source.perl`, `source.perl.6`, `source.php`, `source.powershell`, `source.python`, `source.r`, `source.regexp.python`, `source.rst`, `source.ruby`, `source.rust`, `source.scala`, `source.sql`, `source.twig`, `source.yang`, `text.bibtex`, `text.git-commit`, `text.git-rebase`, `text.html.handlebars`, `text.log`, `text.pug`, `text.tex.latex`, `text.xml`, `text.xml.xsl`
-- `text.html.vue`: `source.coffee`, `source.css.less`, `source.css.scss`, `source.graphql`, `source.js.jsx`, `source.json.comments`, `source.json5`, `source.postcss`, `source.sass`, `source.stylus`, `source.toml`, `text.pug`
+- `source.c`: `source.arm`, `source.asm`, `source.x86`, `source.x86_64`
+- `source.coffee`: `source.js.regexp`
+- `source.cpp`: `source.arm`, `source.asm`, `source.glsl`, `source.x86`, `source.x86_64`
+- `source.cpp.embedded.macro`: `source.arm`, `source.asm`, `source.glsl`, `source.x86`, `source.x86_64`
+- `source.groovy`: `text.html.javadoc`
+- `source.mdx`: `source.c++`, `source.elixir`, `source.elm`, `source.erlang`, `source.gfm`, `source.gitconfig`, `source.graphql`, `source.haskell`, `source.kotlin`, `source.raku`, `source.scala`, `source.toml`, `source.vbnet`, `text.html.asciidoc`, `text.html.markdown.source.gfm.apib`, `text.md`, `text.python.console`, `text.shell-session`, `text.xml.svg`
+- `source.perl`: `source.postscript`
+- `source.rst`: `source.cmake`, `source.dts`, `source.kconfig`
+- `source.ruby`: `source.graphql`, `source.js.jquery`, `text.haml`, `text.slim`
+- `source.sassdoc`: `source.html`
+- `text.html.markdown`: `source.abap`, `source.elixir`, `source.erlang`, `source.js.regexp`, `source.json.comments`, `source.json.lines`, `source.scala`, `source.twig`, `source.yang`
+- `text.html.php`: `text.html.php.blade`
+- `text.html.vue`: `source.graphql`, `source.js.jsx`, `source.json.comments`, `source.json5`, `source.postcss`, `source.sass`, `source.stylus`, `source.toml`
+- `text.pug`: `source.less`, `source.sass`, `source.stylus`
+- `text.tex.latex`: `source.asy`, `source.asymptote`, `source.cpp.embedded.latex`, `source.dot`, `source.gnuplot`, `source.haskell`, `source.scala`, `text.tex.markdown_latex_combined`
 
 Source table families: `vscode`, `vue`, `mdx`.

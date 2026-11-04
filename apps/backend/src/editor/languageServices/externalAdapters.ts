@@ -8,23 +8,20 @@ import {
   baseLanguageServiceEnvironmentKeys,
   isGrantableLanguageServiceEnvironmentName
 } from "./environment";
-import type { LanguageServiceDescriptor } from "./types";
+import { languageIdentifierSchema } from "../editorCatalogManifest";
+import { boundedUtf8String, utf8Bytes } from "./text";
+import { standardServerRequests, type LanguageServiceDescriptor } from "./types";
 
 const MAX_DEFINITION_BYTES = 64 * 1_024;
 const adapterIdPattern = /^external_lsp_[a-z][a-z0-9_]{0,24}$/;
-const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
 
-const utf8Bytes = (value: string): number => Buffer.byteLength(value, "utf8");
-const boundedString = (label: string, maxBytes: number) => z.string().min(1).refine(
-  (value) => utf8Bytes(value) <= maxBytes,
-  `${label} exceeds ${maxBytes} UTF-8 bytes`
-).refine((value) => !value.includes("\0"), `${label} contains NUL`);
+const boundedString = (label: string, maxBytes: number) =>
+  boundedUtf8String(maxBytes, `${label} exceeds ${maxBytes} UTF-8 bytes`, z.string().min(1))
+    .refine((value) => !value.includes("\0"), `${label} contains NUL`);
 const argumentSchema = z.string().max(256).refine((value) => !value.includes("\0"), "argument contains NUL");
-const languageIdSchema = z.string().min(1)
-  .regex(identifierPattern, "language id contains unsupported characters")
-  .refine((value) => utf8Bytes(value) <= 64, "language id exceeds 64 UTF-8 bytes");
+const languageIdSchema = languageIdentifierSchema("language id");
 const markerValueSchema = boundedString("project marker", 255).refine(
-  (value) => !value.includes("/") && !value.includes("\\") && !value.includes("\0")
+  (value) => !value.includes("/") && !value.includes("\\")
     && value !== "." && value !== "..",
   "project marker must be a basename"
 );
@@ -86,11 +83,11 @@ const adapterDefinitionSchema = z.object({
 const adapterListSchema = z.array(adapterDefinitionSchema).max(8);
 type ParsedAdapterDefinition = z.infer<typeof adapterDefinitionSchema>;
 
-export interface ExternalLanguageServiceAdapterConfig extends ParsedAdapterDefinition {
+interface ExternalLanguageServiceAdapterConfig extends ParsedAdapterDefinition {
   readonly featureKinds: LanguageServiceFeatureKind[];
 }
 
-export function externalLanguageServicesEnabled(): boolean {
+function externalLanguageServicesEnabled(): boolean {
   return booleanEnv("EXTERNAL_LANGUAGE_SERVICES_ENABLED", false);
 }
 
@@ -171,10 +168,7 @@ export function externalLanguageServiceDescriptor(
     // declarations, not sandbox enforcement, so the adapter cannot claim a
     // weaker posture through configuration.
     projectLoading: { mayInvokeBuildTools: true, mayLoadPlugins: true },
-    serverRequests: {
-      workDoneProgressCreate: "null",
-      workspaceConfiguration: "null_per_item"
-    },
+    serverRequests: standardServerRequests,
     environmentKeys: [...baseLanguageServiceEnvironmentKeys, ...adapter.envGrants],
     // The safe registry read reports that a complete definition exists. The
     // executable is admitted only on an authenticated open, so this projection

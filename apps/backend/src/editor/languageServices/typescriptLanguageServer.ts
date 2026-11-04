@@ -1,6 +1,6 @@
 import { bundledRegularFile } from "./bundledExecutable";
 import { baseLanguageServiceEnvironmentKeys } from "./environment";
-import type { LanguageServiceDescriptor, ResolvedLanguageServiceExecutable } from "./types";
+import { standardServerRequests, type LanguageServiceDescriptor, type ResolvedLanguageServiceExecutable } from "./types";
 
 async function resolveTypeScriptLanguageServer(): Promise<ResolvedLanguageServiceExecutable> {
   const [languageServer, tsserver] = await Promise.all([
@@ -31,10 +31,7 @@ export const typeScriptLanguageServerDescriptor: LanguageServiceDescriptor = {
   ],
   standaloneWorkspaceRoot: true,
   projectLoading: { mayInvokeBuildTools: false, mayLoadPlugins: true },
-  serverRequests: {
-    workDoneProgressCreate: "null",
-    workspaceConfiguration: "null_per_item"
-  },
+  serverRequests: standardServerRequests,
   environmentKeys: baseLanguageServiceEnvironmentKeys,
   configured: () => true,
   resolveExecutable: resolveTypeScriptLanguageServer

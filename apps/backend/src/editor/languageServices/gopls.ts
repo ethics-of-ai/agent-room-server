@@ -1,6 +1,6 @@
 import { baseLanguageServiceEnvironmentKeys } from "./environment";
 import { configuredExecutableDescriptorFields } from "./executable";
-import type { LanguageServiceDescriptor } from "./types";
+import { standardServerRequests, type LanguageServiceDescriptor } from "./types";
 
 const environmentKeys = [
   ...baseLanguageServiceEnvironmentKeys,
@@ -29,10 +29,7 @@ export const goplsDescriptor: LanguageServiceDescriptor = {
   standaloneWorkspaceRoot: true,
   initializationOptions: { semanticTokens: true },
   projectLoading: { mayInvokeBuildTools: true, mayLoadPlugins: false },
-  serverRequests: {
-    workDoneProgressCreate: "null",
-    workspaceConfiguration: "null_per_item"
-  },
+  serverRequests: standardServerRequests,
   environmentKeys,
   ...configuredExecutableDescriptorFields(
     (config) => config.goplsExecutable,

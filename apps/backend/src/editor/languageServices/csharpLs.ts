@@ -1,6 +1,6 @@
 import { baseLanguageServiceEnvironmentKeys } from "./environment";
 import { configuredExecutableDescriptorFields } from "./executable";
-import type { LanguageServiceDescriptor } from "./types";
+import { standardServerRequests, type LanguageServiceDescriptor } from "./types";
 
 const environmentKeys = [
   ...baseLanguageServiceEnvironmentKeys,
@@ -27,10 +27,7 @@ export const csharpLsDescriptor: LanguageServiceDescriptor = {
   // csharp-ls loads projects; AgentRoom does not synthesize one for a loose file.
   standaloneWorkspaceRoot: false,
   projectLoading: { mayInvokeBuildTools: true, mayLoadPlugins: true },
-  serverRequests: {
-    workDoneProgressCreate: "null",
-    workspaceConfiguration: "null_per_item"
-  },
+  serverRequests: standardServerRequests,
   environmentKeys,
   ...configuredExecutableDescriptorFields(
     (config) => config.csharpLsExecutable,

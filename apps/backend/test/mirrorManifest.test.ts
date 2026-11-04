@@ -118,11 +118,18 @@ describe.skipIf(!mirrorPresent)("public mirror manifest", () => {
       "docs/engineering/VISIONOS_LANGUAGE_INTELLIGENCE.md",
       "docs/engineering/VISIONOS_LANGUAGE_DEPENDENCY_UPDATES.md",
       "docs/engineering/VISIONOS_PROFILE_SELECTION.md",
-      // The grammar importer writes into the visionOS tree the mirror denies,
-      // and its test scaffolds that tree; both stay with the private checkout.
+      // The grammar and theme importers write into the visionOS tree the mirror
+      // denies, and their tests scaffold that tree; all stay with the private checkout.
       "apps/backend/scripts/import-editor-grammars.mjs",
       "apps/backend/scripts/editor-grammar-sources.json",
       "apps/backend/test/importEditorGrammars.test.ts",
+      "apps/backend/scripts/import-editor-themes.mjs",
+      "apps/backend/scripts/editor-theme-sources.json",
+      "apps/backend/scripts/catalog-import-shared.mjs",
+      "apps/backend/test/catalogImportShared.test.ts",
+      "apps/backend/scripts/editor-theme-convert.mjs",
+      "apps/backend/scripts/vsix-zip.mjs",
+      "apps/backend/test/importEditorThemes.test.ts",
       "docs/reference/apple-wwdc2023-spatial-video-manifest.json",
       "docs/README.md",
       "AGENTS.md",

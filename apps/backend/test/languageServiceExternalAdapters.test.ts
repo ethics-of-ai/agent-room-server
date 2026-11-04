@@ -30,7 +30,6 @@ function config(root: string): ServiceConfig {
     port: 8787,
     workspaceRoot: root,
     stateDir: join(root, "state"),
-    editorCatalogDir: join(root, "catalog"),
     requireAuth: false,
     gitCommandTimeoutMs: 30_000,
     codexArgs: [],

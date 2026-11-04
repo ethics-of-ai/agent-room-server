@@ -10,7 +10,6 @@ struct BackendLaunchConfiguration: Equatable {
         "AGENTROOM_HOME",
         "WORKSPACE_ROOT",
         "STATE_DIR",
-        "EDITOR_CATALOG_DIR",
         "PORT",
         "HOST",
         "SOURCE_REPO_PATH",
@@ -56,11 +55,6 @@ struct BackendLaunchConfiguration: Equatable {
         if !settings.usesDefaultStatePath {
             environment["STATE_DIR"] = settings.statePath
         }
-        // The operator-managed editor catalog override dir. Injected
-        // explicitly so the macOS import target and the backend read path are one
-        // source of truth (the backend default resolves the same AGENTROOM_HOME
-        // path, but being explicit makes the contract testable).
-        environment["EDITOR_CATALOG_DIR"] = settings.editorCatalogPath
         // Tier-3 launch values, injected only under the environment names the
         // bundled bootstrap descriptors declare (docs/engineering/RUNNERS.md).
         // Assembly here is

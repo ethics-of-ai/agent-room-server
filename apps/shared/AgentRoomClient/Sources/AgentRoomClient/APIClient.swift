@@ -672,21 +672,6 @@ public struct APIClient {
         )
     }
 
-    /// Operator-facing catalog status for the macOS catalog pane:
-    /// whether the catalog is enabled, which directory it is served from, and the
-    /// live version + language count.
-    public func fetchEditorCatalogStatus() async throws -> EditorCatalogStatus {
-        try await request(["api", "editor", "catalog", "status"])
-    }
-
-    /// Re-read the operator override (then bundled) catalog and swap in the new
-    /// snapshot. When the version changes the backend broadcasts
-    /// `editor_catalog_changed` so paired visionOS editors re-hydrate live.
-    @discardableResult
-    public func reloadEditorCatalog() async throws -> EditorCatalogReloadResult {
-        try await request(["api", "editor", "catalog", "reload"], method: "POST")
-    }
-
     public func fetchRaw(_ path: String) async throws -> String {
         let data = try await requestData(path.split(separator: "/").map(String.init))
         return String(data: data, encoding: .utf8) ?? "<non-UTF8 response>"

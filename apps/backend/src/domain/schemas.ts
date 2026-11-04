@@ -96,7 +96,6 @@ export const serviceConfigSchema = z.object({
   port: z.number().int().positive(),
   workspaceRoot: z.string().min(1),
   stateDir: z.string().min(1),
-  editorCatalogDir: z.string().min(1),
   requireAuth: z.boolean(),
   authToken: z.string().optional(),
   gitCommandTimeoutMs: z.number().int().positive(),

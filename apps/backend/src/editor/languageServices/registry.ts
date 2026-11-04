@@ -1,14 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { ServiceConfig } from "../../domain/models";
 import { csharpLsDescriptor } from "./csharpLs";
 import { eclipseJdtLsDescriptor } from "./eclipseJdtLs";
-import {
-  baseLanguageServiceEnvironmentKeys,
-  isGrantableLanguageServiceEnvironmentName
-} from "./environment";
-import { LanguageServiceError } from "./errors";
-import { admittedLanguageServiceExecutable } from "./executable";
+import { isGrantableLanguageServiceEnvironmentName } from "./environment";
 import {
   externalLanguageServiceDescriptors,
   readExternalLanguageServiceAdapterConfigs
@@ -17,62 +10,9 @@ import { goplsDescriptor } from "./gopls";
 import { kotlinLspDescriptor } from "./kotlinLsp";
 import { pyrightLanguageServerDescriptor } from "./pyrightLanguageServer";
 import { rustAnalyzerDescriptor } from "./rustAnalyzer";
+import { sourceKitLspDescriptor } from "./sourceKitLsp";
 import { typeScriptLanguageServerDescriptor } from "./typescriptLanguageServer";
-import type {
-  LanguageServiceDescriptor,
-  LanguageServiceRegistryProjection,
-  ResolvedLanguageServiceExecutable
-} from "./types";
-
-const execFileAsync = promisify(execFile);
-
-const sourceKitEnvironmentKeys = [
-  ...baseLanguageServiceEnvironmentKeys,
-  "DEVELOPER_DIR",
-  "SDKROOT",
-  "TOOLCHAINS"
-] as const;
-
-async function resolveSourceKit(config: ServiceConfig): Promise<ResolvedLanguageServiceExecutable> {
-  if (config.sourcekitLspExecutable) {
-    return {
-      command: await admittedLanguageServiceExecutable(config.sourcekitLspExecutable, "SourceKit-LSP"),
-      args: []
-    };
-  }
-  try {
-    const { stdout } = await execFileAsync("xcrun", ["--find", "sourcekit-lsp"], {
-      encoding: "utf8",
-      timeout: 5_000,
-      maxBuffer: 16 * 1024
-    });
-    const command = stdout.trim();
-    if (!command.startsWith("/")) throw new Error("xcrun returned no absolute path");
-    return { command: await admittedLanguageServiceExecutable(command, "SourceKit-LSP"), args: [] };
-  } catch {
-    throw new LanguageServiceError("service_unavailable", "SourceKit-LSP is unavailable");
-  }
-}
-
-export const sourceKitLspDescriptor: LanguageServiceDescriptor = {
-  id: "sourcekit_lsp",
-  displayName: "SourceKit-LSP",
-  testedVersion: "Xcode 26.6; Apple Swift 6.3.3",
-  positionEncoding: "utf-16",
-  languageIds: ["swift", "c", "cpp", "objective-c"],
-  featureKinds: ["completion", "hover", "definition", "document_symbols", "semantic_tokens"],
-  projectMarkers: [
-    { kind: "suffix", value: ".xcworkspace", priority: 120, entryType: "directory" },
-    { kind: "suffix", value: ".xcodeproj", priority: 110, entryType: "directory" },
-    { kind: "exact", value: "Package.swift", priority: 100, entryType: "file" }
-  ],
-  standaloneWorkspaceRoot: true,
-  projectLoading: { mayInvokeBuildTools: true, mayLoadPlugins: true },
-  serverRequests: { workDoneProgressCreate: "null" },
-  environmentKeys: sourceKitEnvironmentKeys,
-  configured: (config) => Boolean(config.sourcekitLspExecutable) || process.platform === "darwin",
-  resolveExecutable: resolveSourceKit
-};
+import type { LanguageServiceDescriptor, LanguageServiceRegistryProjection } from "./types";
 
 export const builtInLanguageServiceDescriptors: readonly LanguageServiceDescriptor[] = [
   sourceKitLspDescriptor,
@@ -101,7 +41,7 @@ export class LanguageServiceRegistry {
 
   constructor(
     private readonly config: ServiceConfig,
-    private readonly descriptors: readonly LanguageServiceDescriptor[] = builtInLanguageServiceDescriptors
+    private readonly descriptors: readonly LanguageServiceDescriptor[]
   ) {
     const ids = new Set<string>();
     for (const descriptor of descriptors) {
@@ -136,14 +76,6 @@ export class LanguageServiceRegistry {
     });
   }
 }
-
-export { pyrightLanguageServerDescriptor } from "./pyrightLanguageServer";
-export { typeScriptLanguageServerDescriptor } from "./typescriptLanguageServer";
-export { rustAnalyzerDescriptor } from "./rustAnalyzer";
-export { goplsDescriptor } from "./gopls";
-export { eclipseJdtLsDescriptor } from "./eclipseJdtLs";
-export { kotlinLspDescriptor } from "./kotlinLsp";
-export { csharpLsDescriptor } from "./csharpLs";
 
 export function languageServiceEnvironment(
   descriptor: LanguageServiceDescriptor,

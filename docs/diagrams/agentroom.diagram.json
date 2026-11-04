@@ -37,7 +37,7 @@
     { "id": "audit-log", "label": "Durable audit", "role": "datastore", "group": "api-edge" },
     { "id": "artifact-store", "label": "Live artifacts", "role": "cache", "group": "api-edge" },
 
-    { "id": "catalog-manager", "label": "EditorCatalogManager", "role": "service", "group": "scene-engine" },
+    { "id": "catalog-manager", "label": "EditorCatalogStore", "role": "service", "group": "scene-engine" },
     { "id": "catalog-assets", "label": "Grammars, themes, WASM", "role": "datastore", "group": "scene-engine" },
 
     { "id": "terminal-service", "label": "TerminalSessionService", "role": "service", "group": "scene-engine" },

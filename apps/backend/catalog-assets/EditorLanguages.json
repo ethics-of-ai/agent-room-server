@@ -30,7 +30,9 @@
         "d.cts"
       ],
       "shebangInterpreters": [
-        "deno"
+        "deno",
+        "bun",
+        "ts-node"
       ],
       "modelineIds": [
         "typescript"
@@ -51,7 +53,8 @@
       ],
       "aliases": [
         "tsx",
-        "TypeScript JSX"
+        "TypeScript JSX",
+        "TypeScript React"
       ]
     },
     {
@@ -63,7 +66,8 @@
         "jsx",
         "mjs",
         "cjs",
-        "es6"
+        "es6",
+        "pac"
       ],
       "shebangInterpreters": [
         "node",
@@ -75,7 +79,13 @@
       ],
       "aliases": [
         "js",
-        "jsx"
+        "jsx",
+        "JavaScript JSX",
+        "JavaScript React"
+      ],
+      "filenames": [
+        "jakefile",
+        "Jakefile"
       ]
     },
     {
@@ -85,14 +95,58 @@
       "extensions": [
         "json",
         "jsonc",
-        "json5"
+        "json5",
+        "code-profile",
+        "webmanifest",
+        "har",
+        "jsonld",
+        "geojson",
+        "ipynb",
+        "tsbuildinfo",
+        "code-workspace",
+        "jsonl",
+        "ndjson"
       ],
       "modelineIds": [
         "json",
         "jsonc"
       ],
       "aliases": [
-        "json5"
+        "json5",
+        "JSON with Comments",
+        "JSON Lines"
+      ],
+      "compoundSuffixes": [
+        "js.map",
+        "css.map",
+        "ts.map",
+        "eslintrc.json",
+        "toolset.jsonc"
+      ],
+      "filenames": [
+        "composer.lock",
+        ".watchmanconfig",
+        "language-configuration.json",
+        "icon-theme.json",
+        "color-theme.json",
+        "bun.lock",
+        ".ember-cli",
+        ".bowerrc",
+        ".jscsrc",
+        ".jslintrc",
+        ".vuerc",
+        ".eslintrc",
+        ".jsfmtrc",
+        ".jshintrc",
+        ".swcrc",
+        ".hintrc",
+        ".babelrc"
+      ],
+      "filenameGlobs": [
+        "tsconfig.*.json",
+        "jsconfig.*.json",
+        "tsconfig-*.json",
+        "jsconfig-*.json"
       ]
     },
     {
@@ -103,7 +157,16 @@
         "md",
         "markdown",
         "mdown",
-        "mkd"
+        "mkd",
+        "copilotmd",
+        "mkdn",
+        "mdwn",
+        "markdn",
+        "mdtxt",
+        "mdtext",
+        "litcoffee",
+        "ronn",
+        "workbook"
       ],
       "modelineIds": [
         "markdown"
@@ -126,13 +189,31 @@
       "syntaxSource": "textmate",
       "extensions": [
         "yml",
-        "yaml"
+        "yaml",
+        "eyaml",
+        "eyml",
+        "cff",
+        "yaml-tmlanguage",
+        "yaml-tmpreferences",
+        "yaml-tmtheme",
+        "winget"
       ],
       "modelineIds": [
         "yaml"
       ],
       "aliases": [
-        "yml"
+        "yml",
+        "Compose"
+      ],
+      "filenameGlobs": [
+        "compose.*.yml",
+        "compose.*.yaml",
+        "*docker*compose*.yml",
+        "*docker*compose*.yaml"
+      ],
+      "filenames": [
+        "compose.yml",
+        "compose.yaml"
       ]
     },
     {
@@ -142,10 +223,24 @@
       "extensions": [
         "html",
         "htm",
-        "xhtml"
+        "xhtml",
+        "shtml",
+        "xht",
+        "mdoc",
+        "jsp",
+        "asp",
+        "aspx",
+        "jshtm",
+        "volt",
+        "ejs",
+        "rhtml"
       ],
       "modelineIds": [
         "html"
+      ],
+      "aliases": [
+        "htm",
+        "xhtml"
       ]
     },
     {
@@ -173,7 +268,7 @@
     {
       "id": "scss",
       "displayName": "SCSS",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "scss"
       ],
@@ -184,7 +279,7 @@
     {
       "id": "less",
       "displayName": "Less",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "less"
       ],
@@ -200,42 +295,85 @@
         "sh",
         "bash",
         "zsh",
-        "ksh"
+        "ksh",
+        "ebuild",
+        "eclass",
+        "zsh-theme",
+        "fish",
+        "csh"
       ],
       "filenames": [
         ".bashrc",
         ".zshrc",
         ".bash_profile",
         ".zprofile",
-        ".profile"
-      ],
-      "filenameGlobs": [
-        ".env.*"
+        ".profile",
+        "APKBUILD",
+        "PKGBUILD",
+        ".envrc",
+        ".hushlogin",
+        "zshrc",
+        "zshenv",
+        "zlogin",
+        "zprofile",
+        "zlogout",
+        "bashrc_Apple_Terminal",
+        "zshrc_Apple_Terminal",
+        ".bash_aliases",
+        ".bash_login",
+        ".bash_logout",
+        ".xprofile",
+        ".xsession",
+        ".xsessionrc",
+        ".Xsession",
+        ".zlogin",
+        ".zlogout",
+        ".zshenv",
+        ".cshrc",
+        ".tcshrc",
+        ".yashrc",
+        ".yash_profile"
       ],
       "shebangInterpreters": [
         "sh",
         "bash",
         "zsh",
         "ksh",
-        "fish"
+        "fish",
+        "dash",
+        "ash"
       ],
       "modelineIds": [
         "sh",
         "bash",
-        "zsh"
+        "zsh",
+        "shell"
       ],
       "aliases": [
-        "shellscript"
+        "shellscript",
+        "Shell Script",
+        "bash",
+        "fish",
+        "sh",
+        "zsh",
+        "ksh",
+        "csh"
       ]
     },
     {
       "id": "python",
       "displayName": "Python",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "py",
         "pyw",
-        "pyi"
+        "pyi",
+        "rpy",
+        "cpy",
+        "gyp",
+        "gypi",
+        "ipy",
+        "pyt"
       ],
       "shebangInterpreters": [
         "python",
@@ -248,82 +386,178 @@
       ],
       "aliases": [
         "py"
+      ],
+      "filenames": [
+        "SConstruct",
+        "SConscript"
       ]
     },
     {
       "id": "ruby",
       "displayName": "Ruby",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "rb",
-        "gemspec"
+        "gemspec",
+        "rbx",
+        "rjs",
+        "rake",
+        "ru",
+        "erb",
+        "podspec",
+        "rbi"
       ],
       "filenames": [
         "Gemfile",
-        "Rakefile"
+        "Rakefile",
+        "rakefile",
+        "gemfile",
+        "guardfile",
+        "Guardfile",
+        "podfile",
+        "Podfile",
+        "capfile",
+        "Capfile",
+        "cheffile",
+        "Cheffile",
+        "hobofile",
+        "Hobofile",
+        "vagrantfile",
+        "Vagrantfile",
+        "appraisals",
+        "Appraisals",
+        "rantfile",
+        "Rantfile",
+        "berksfile",
+        "Berksfile",
+        "berksfile.lock",
+        "Berksfile.lock",
+        "thorfile",
+        "Thorfile",
+        "puppetfile",
+        "Puppetfile",
+        "dangerfile",
+        "Dangerfile",
+        "brewfile",
+        "Brewfile",
+        "fastfile",
+        "Fastfile",
+        "appfile",
+        "Appfile",
+        "deliverfile",
+        "Deliverfile",
+        "matchfile",
+        "Matchfile",
+        "scanfile",
+        "Scanfile",
+        "snapfile",
+        "Snapfile",
+        "gymfile",
+        "Gymfile"
       ],
       "shebangInterpreters": [
         "ruby"
       ],
       "modelineIds": [
         "ruby"
+      ],
+      "aliases": [
+        "rb"
       ]
     },
     {
       "id": "go",
       "displayName": "Go",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
+        "go"
+      ],
+      "modelineIds": [
         "go"
       ]
     },
     {
       "id": "rust",
       "displayName": "Rust",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "rs",
         "rlib"
+      ],
+      "modelineIds": [
+        "rust"
       ]
     },
     {
       "id": "c",
       "displayName": "C",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "c",
-        "h"
+        "h",
+        "i"
+      ],
+      "modelineIds": [
+        "c"
       ]
     },
     {
       "id": "cpp",
       "displayName": "C++",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "cpp",
         "cc",
         "cxx",
         "hpp",
         "hh",
-        "hxx"
+        "hxx",
+        "cppm",
+        "ccm",
+        "cxxm",
+        "c++",
+        "c++m",
+        "h++",
+        "ii",
+        "ino",
+        "inl",
+        "ipp",
+        "ixx",
+        "tpp",
+        "txx"
+      ],
+      "compoundSuffixes": [
+        "hpp.in",
+        "h.in"
+      ],
+      "modelineIds": [
+        "cpp"
+      ],
+      "aliases": [
+        "C++"
       ]
     },
     {
       "id": "objective-c",
       "displayName": "Objective-C",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
-        "m",
-        "mm"
+        "m"
+      ],
+      "modelineIds": [
+        "objective-c"
       ]
     },
     {
       "id": "java",
       "displayName": "Java",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "java",
         "jav"
+      ],
+      "modelineIds": [
+        "java"
       ]
     },
     {
@@ -338,21 +572,29 @@
     {
       "id": "csharp",
       "displayName": "C#",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "cs",
-        "csx"
+        "csx",
+        "cake"
+      ],
+      "modelineIds": [
+        "csharp"
+      ],
+      "aliases": [
+        "C#"
       ]
     },
     {
       "id": "php",
       "displayName": "PHP",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "php",
         "php4",
         "php5",
-        "phtml"
+        "phtml",
+        "ctp"
       ],
       "compoundSuffixes": [
         "blade.php"
@@ -367,10 +609,13 @@
     {
       "id": "perl",
       "displayName": "Perl",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "pl",
-        "pm"
+        "pm",
+        "pod",
+        "t",
+        "psgi"
       ],
       "shebangInterpreters": [
         "perl"
@@ -382,7 +627,7 @@
     {
       "id": "lua",
       "displayName": "Lua",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "lua"
       ],
@@ -396,16 +641,25 @@
     {
       "id": "r",
       "displayName": "R",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
+        "r",
+        "rhistory",
+        "rprofile",
+        "rt"
+      ],
+      "modelineIds": [
         "r"
       ]
     },
     {
       "id": "dart",
       "displayName": "Dart",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
+        "dart"
+      ],
+      "modelineIds": [
         "dart"
       ]
     },
@@ -422,12 +676,17 @@
     {
       "id": "clojure",
       "displayName": "Clojure",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "clj",
         "cljs",
         "cljc",
-        "edn"
+        "edn",
+        "cljx",
+        "clojure"
+      ],
+      "modelineIds": [
+        "clojure"
       ]
     },
     {
@@ -442,35 +701,66 @@
     {
       "id": "fsharp",
       "displayName": "F#",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "fs",
         "fsi",
-        "fsx"
+        "fsx",
+        "fsscript"
+      ],
+      "modelineIds": [
+        "fsharp"
+      ],
+      "aliases": [
+        "F#"
       ]
     },
     {
       "id": "julia",
       "displayName": "Julia",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "jl"
+      ],
+      "shebangInterpreters": [
+        "julia"
+      ],
+      "modelineIds": [
+        "julia"
       ]
     },
     {
       "id": "vb",
       "displayName": "Visual Basic",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
+        "vb",
+        "brs",
+        "vbs",
+        "bas",
+        "vba"
+      ],
+      "modelineIds": [
         "vb"
+      ],
+      "aliases": [
+        "Visual Basic"
       ]
     },
     {
       "id": "sql",
       "displayName": "SQL",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
+        "sql",
+        "dsql"
+      ],
+      "modelineIds": [
         "sql"
+      ],
+      "aliases": [
+        "MS SQL",
+        "T-SQL"
       ]
     },
     {
@@ -503,66 +793,166 @@
     {
       "id": "xml",
       "displayName": "XML",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "xml",
         "xsd",
-        "xsl",
-        "xslt",
         "svg",
         "xaml",
         "csproj",
-        "plist"
+        "plist",
+        "ascx",
+        "atom",
+        "axml",
+        "axaml",
+        "bpmn",
+        "cpt",
+        "csl",
+        "dita",
+        "ditamap",
+        "dtd",
+        "ent",
+        "dtml",
+        "fsproj",
+        "fxml",
+        "iml",
+        "isml",
+        "jmx",
+        "launch",
+        "menu",
+        "mxml",
+        "nuspec",
+        "opml",
+        "owl",
+        "proj",
+        "props",
+        "pt",
+        "publishsettings",
+        "pubxml",
+        "rbxlx",
+        "rbxmx",
+        "rdf",
+        "rng",
+        "rss",
+        "shproj",
+        "slnx",
+        "storyboard",
+        "targets",
+        "tld",
+        "tmx",
+        "vbproj",
+        "vcxproj",
+        "wixproj",
+        "wsdl",
+        "wxi",
+        "wxl",
+        "wxs",
+        "xbl",
+        "xib",
+        "xlf",
+        "xliff",
+        "xpdl",
+        "xul",
+        "xoml"
+      ],
+      "compoundSuffixes": [
+        "csproj.user",
+        "pubxml.user",
+        "vbproj.user",
+        "vcxproj.filters"
+      ],
+      "modelineIds": [
+        "xml"
       ]
     },
     {
       "id": "ini",
       "displayName": "INI / TOML",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "ini",
         "properties",
         "toml",
         "cfg",
-        "conf"
+        "conf",
+        "repo"
       ],
       "filenames": [
         ".gitconfig",
         ".gitattributes",
-        ".editorconfig"
+        ".editorconfig",
+        "gitconfig",
+        ".directory",
+        ".gitmodules",
+        ".npmrc"
+      ],
+      "modelineIds": [
+        "ini"
+      ],
+      "aliases": [
+        "Properties"
       ]
     },
     {
       "id": "bat",
       "displayName": "Windows Batch",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "bat",
         "cmd"
+      ],
+      "modelineIds": [
+        "bat"
+      ],
+      "aliases": [
+        "Batch"
       ]
     },
     {
       "id": "powershell",
       "displayName": "PowerShell",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "ps1",
         "psm1",
-        "psd1"
+        "psd1",
+        "pssc",
+        "psrc"
+      ],
+      "shebangInterpreters": [
+        "pwsh"
+      ],
+      "modelineIds": [
+        "powershell"
+      ],
+      "aliases": [
+        "ps",
+        "ps1",
+        "pwsh"
       ]
     },
     {
       "id": "dockerfile",
       "displayName": "Dockerfile",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
-        "dockerfile"
+        "dockerfile",
+        "containerfile"
       ],
       "filenames": [
-        "Dockerfile"
+        "Dockerfile",
+        "Containerfile"
       ],
       "filenameGlobs": [
-        "Dockerfile.*"
+        "Dockerfile.*",
+        "Containerfile.*"
+      ],
+      "modelineIds": [
+        "dockerfile"
+      ],
+      "aliases": [
+        "Docker",
+        "Containerfile"
       ]
     },
     {
@@ -608,8 +998,16 @@
     {
       "id": "coffeescript",
       "displayName": "CoffeeScript",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
+        "coffee",
+        "cson",
+        "iced"
+      ],
+      "modelineIds": [
+        "coffeescript"
+      ],
+      "aliases": [
         "coffee"
       ]
     },
@@ -651,10 +1049,14 @@
     {
       "id": "handlebars",
       "displayName": "Handlebars",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "handlebars",
-        "hbs"
+        "hbs",
+        "hjs"
+      ],
+      "modelineIds": [
+        "handlebars"
       ]
     },
     {
@@ -720,10 +1122,16 @@
     {
       "id": "pug",
       "displayName": "Pug",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "pug",
         "jade"
+      ],
+      "modelineIds": [
+        "pug"
+      ],
+      "aliases": [
+        "Jade"
       ]
     },
     {
@@ -737,9 +1145,13 @@
     {
       "id": "razor",
       "displayName": "Razor",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
-        "cshtml"
+        "cshtml",
+        "razor"
+      ],
+      "modelineIds": [
+        "razor"
       ]
     },
     {
@@ -753,9 +1165,12 @@
     {
       "id": "restructuredtext",
       "displayName": "reStructuredText",
-      "syntaxSource": "monaco",
+      "syntaxSource": "textmate",
       "extensions": [
         "rst"
+      ],
+      "modelineIds": [
+        "restructuredtext"
       ]
     },
     {
@@ -834,6 +1249,254 @@
       "syntaxSource": "monaco",
       "extensions": [
         "wgsl"
+      ]
+    },
+    {
+      "id": "bibtex",
+      "displayName": "BibTeX",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "bib"
+      ],
+      "modelineIds": [
+        "bibtex"
+      ]
+    },
+    {
+      "id": "diff",
+      "displayName": "Diff",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "diff",
+        "patch",
+        "rej"
+      ],
+      "modelineIds": [
+        "diff"
+      ]
+    },
+    {
+      "id": "dotenv",
+      "displayName": "Dotenv",
+      "syntaxSource": "textmate",
+      "filenames": [
+        ".env",
+        ".flaskenv",
+        "user-dirs.dirs"
+      ],
+      "filenameGlobs": [
+        ".env.*"
+      ],
+      "modelineIds": [
+        "dotenv"
+      ]
+    },
+    {
+      "id": "git-commit",
+      "displayName": "Git Commit Message",
+      "syntaxSource": "textmate",
+      "filenames": [
+        "COMMIT_EDITMSG",
+        "MERGE_MSG"
+      ],
+      "modelineIds": [
+        "git-commit"
+      ],
+      "aliases": [
+        "Git Commit Message"
+      ]
+    },
+    {
+      "id": "git-rebase",
+      "displayName": "Git Rebase Message",
+      "syntaxSource": "textmate",
+      "filenames": [
+        "git-rebase-todo"
+      ],
+      "modelineIds": [
+        "git-rebase"
+      ],
+      "aliases": [
+        "Git Rebase Message"
+      ]
+    },
+    {
+      "id": "groovy",
+      "displayName": "Groovy",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "groovy",
+        "gvy",
+        "gradle",
+        "jenkinsfile",
+        "nf"
+      ],
+      "filenames": [
+        "Jenkinsfile"
+      ],
+      "filenameGlobs": [
+        "Jenkinsfile*"
+      ],
+      "shebangInterpreters": [
+        "groovy"
+      ],
+      "modelineIds": [
+        "groovy"
+      ]
+    },
+    {
+      "id": "hlsl",
+      "displayName": "HLSL",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "hlsl",
+        "hlsli",
+        "fx",
+        "fxh",
+        "vsh",
+        "psh",
+        "cginc",
+        "compute"
+      ],
+      "modelineIds": [
+        "hlsl"
+      ]
+    },
+    {
+      "id": "ignore",
+      "displayName": "Ignore",
+      "syntaxSource": "textmate",
+      "filenames": [
+        ".vscodeignore",
+        ".gitignore_global",
+        ".gitignore",
+        ".git-blame-ignore-revs",
+        ".npmignore",
+        ".copilotignore"
+      ],
+      "filenameGlobs": [],
+      "modelineIds": [
+        "ignore"
+      ]
+    },
+    {
+      "id": "latex",
+      "displayName": "LaTeX",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "tex",
+        "ltx",
+        "ctx"
+      ],
+      "modelineIds": [
+        "latex"
+      ]
+    },
+    {
+      "id": "tex",
+      "displayName": "TeX",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "sty",
+        "bbx",
+        "cbx"
+      ],
+      "modelineIds": [
+        "tex"
+      ]
+    },
+    {
+      "id": "log",
+      "displayName": "Log",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "log"
+      ],
+      "modelineIds": [
+        "log"
+      ]
+    },
+    {
+      "id": "makefile",
+      "displayName": "Makefile",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "mak",
+        "mk"
+      ],
+      "filenames": [
+        "Makefile",
+        "makefile",
+        "GNUmakefile",
+        "OCamlMakefile"
+      ],
+      "shebangInterpreters": [
+        "make"
+      ],
+      "modelineIds": [
+        "makefile"
+      ]
+    },
+    {
+      "id": "objective-cpp",
+      "displayName": "Objective-C++",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "mm"
+      ],
+      "modelineIds": [
+        "objective-cpp"
+      ],
+      "aliases": [
+        "Objective-C++"
+      ]
+    },
+    {
+      "id": "raku",
+      "displayName": "Raku",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "raku",
+        "rakumod",
+        "rakutest",
+        "rakudoc",
+        "nqp",
+        "p6",
+        "pl6",
+        "pm6"
+      ],
+      "shebangInterpreters": [
+        "perl6",
+        "raku"
+      ],
+      "modelineIds": [
+        "raku"
+      ],
+      "aliases": [
+        "Perl6"
+      ]
+    },
+    {
+      "id": "shaderlab",
+      "displayName": "ShaderLab",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "shader"
+      ],
+      "modelineIds": [
+        "shaderlab"
+      ]
+    },
+    {
+      "id": "xsl",
+      "displayName": "XSL",
+      "syntaxSource": "textmate",
+      "extensions": [
+        "xsl",
+        "xslt"
+      ],
+      "modelineIds": [
+        "xsl"
       ]
     }
   ]

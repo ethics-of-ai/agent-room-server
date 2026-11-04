@@ -147,8 +147,40 @@ with the complete
 and
 [`vscode-textmate` license](apps/backend/catalog-assets/vs-textmate/vscode-textmate.LICENSE.md)
 beside it. `vscode-oniguruma` is MIT and retains the BSD terms of the Oniguruma
-project it builds on. The AgentRoom themes are part of this repository and use
-its MIT license. See also
+project it builds on.
+
+The AgentRoom themes are part of this repository and use its MIT license. The
+other editor color themes are converted from these VS Code themes, all under
+MIT:
+
+- the built-in themes from `microsoft/vscode`
+  ([`vscode.txt`](apps/backend/catalog-assets/themes/LICENSES/vscode.txt));
+- Darcula from `rokoroku/vscode-theme-darcula`
+  ([`darcula.txt`](apps/backend/catalog-assets/themes/LICENSES/darcula.txt));
+- IntelliJ Light from `avin/real-intellij-light`
+  ([`intellij-light.txt`](apps/backend/catalog-assets/themes/LICENSES/intellij-light.txt));
+- One Dark Pro from `Binaryify/OneDark-Pro`
+  ([`one-dark-pro.txt`](apps/backend/catalog-assets/themes/LICENSES/one-dark-pro.txt));
+- Dracula from `dracula/visual-studio-code`
+  ([`dracula.txt`](apps/backend/catalog-assets/themes/LICENSES/dracula.txt));
+- the GitHub themes from `primer/github-vscode-theme`
+  ([`github.txt`](apps/backend/catalog-assets/themes/LICENSES/github.txt));
+- Nord from `nordtheme/visual-studio-code`
+  ([`nord.txt`](apps/backend/catalog-assets/themes/LICENSES/nord.txt));
+- Gruvbox from `jdinhify/vscode-theme-gruvbox`
+  ([`gruvbox.txt`](apps/backend/catalog-assets/themes/LICENSES/gruvbox.txt));
+- Catppuccin from `catppuccin/vscode`
+  ([`catppuccin.txt`](apps/backend/catalog-assets/themes/LICENSES/catppuccin.txt));
+- Tokyo Night from `enkia/tokyo-night-vscode-theme`
+  ([`tokyo-night.txt`](apps/backend/catalog-assets/themes/LICENSES/tokyo-night.txt));
+- Night Owl from `sdras/night-owl-vscode-theme`
+  ([`night-owl.txt`](apps/backend/catalog-assets/themes/LICENSES/night-owl.txt)); and
+- Ayu from `ayu-theme/vscode-ayu`
+  ([`ayu.txt`](apps/backend/catalog-assets/themes/LICENSES/ayu.txt)).
+
+The exact refs, package versions and checksums are in
+[`apps/backend/catalog-assets/themes/PROVENANCE.md`](apps/backend/catalog-assets/themes/PROVENANCE.md).
+See also
 [`apps/backend/catalog-assets/README.md`](apps/backend/catalog-assets/README.md).
 
 ## Everything else

@@ -515,15 +515,15 @@ offers no sketch tools now, such as Codex on the `exec` protocol, has no
 
 These routes let the visionOS editor source its syntax-highlighting assets
 (VS Code-grade TextMate grammars, themes, language configurations, and the
-Oniguruma WASM) from the backend so new or updated languages ship without an app
-update. The assets are **app/global catalog data, not workspace files**; these
-routes never touch a registered workspace or the workspace file API. The reads
-(`GET /api/editor/catalog`, `/asset`, and `/status`) require the bearer token
-when `AUTH_TOKEN` is configured; the operator `POST /api/editor/catalog/reload`
-is mutating and is bearer-gated by the global preHandler. All are gated by
-`LANGUAGE_CATALOG_ENABLED` (default on); when disabled, or when the served asset
-directory is absent, the read routes return `404` and clients fall back to their
-bundled editor assets.
+Oniguruma WASM) from the backend, so new or updated languages ship in a Mac
+release without a visionOS update. The assets are **app/global catalog data, not workspace files**; these
+routes never touch a registered workspace or the workspace file API. Both reads
+(`GET /api/editor/catalog` and `/asset`) require the bearer token when
+`AUTH_TOKEN` is configured. Both are gated by `LANGUAGE_CATALOG_ENABLED` (default
+on); when disabled, or when the bundled catalog was not accepted, they return
+`404` and clients fall back to their bundled editor assets. The backend loads its
+bundled `catalog-assets` once at startup, and visionOS hydrates the catalog each
+time it connects.
 
 `GET /api/editor/catalog` returns a versioned manifest. Small assets (the
 language map, themes, scope themes, and per-language configurations) are inlined;
@@ -548,7 +548,8 @@ that have no language of their own: dependencies (`text.html.basic`, the version
 YAML grammars) and injections. A client defines every grammar in both lists before
 activating a language, so an `include` and an injection both resolve on the page.
 An `include` no grammar supplies is not an error; text under that scope tokenizes
-as its enclosing scope, and the status route counts those scopes.
+as its enclosing scope, and the backend logs how many such scopes the catalog
+has when it loads.
 
 ```json
 {
@@ -620,58 +621,16 @@ catalog is unavailable. The visionOS client verifies each returned blob's
 snapshot under the documented catalog bounds and pins the accepted generation's
 bytes in memory, so later disk changes cannot make a manifest disagree with a blob.
 Both theme maps must define `AgentRoom-Light` and `AgentRoom-Dark`, the names every
-client resolves; a catalog missing either is rejected whole.
-
-`GET /api/editor/catalog/status` reports which catalog is live for the macOS
-Languages pane (Phase C.5). It returns no asset bytes — only whether the catalog
-is `enabled`, the `source` of the live snapshot (`override` for the operator
-`EDITOR_CATALOG_DIR`, `bundled` for the shipped `catalog-assets`, or `none`),
-schema versions, total detected languages, syntax-provider and grammar counts,
-how many embedded scopes the live grammars include that no grammar supplies
-(`unresolvedScopeCount`; text under those scopes stays on its enclosing scope),
-and a bounded validation code/location:
-
-```json
-{
-  "enabled": true,
-  "source": "override",
-  "version": "<sha256-hex>",
-  "schemaVersion": 2,
-  "languageMapVersion": 3,
-  "languageCount": 76,
-  "syntaxProviders": { "monaco": 64, "textmate": 12, "plaintext": 0 },
-  "primaryGrammarCount": 12,
-  "scopeGrammarCount": 14,
-  "unresolvedScopeCount": 73,
-  "validation": { "state": "accepted", "code": null, "location": null }
-}
-```
-
-`POST /api/editor/catalog/reload` re-resolves the catalog from disk (the operator
-`EDITOR_CATALOG_DIR` when it holds a manifest, else the bundled `catalog-assets`,
-else none) and atomically swaps in the new snapshot. A malformed runtime candidate
-is rejected and the last accepted snapshot remains live; an invalid startup
-override uses the bundled snapshot. It is a mutating route, so it
-requires the bearer token when `AUTH_TOKEN` is configured. When the aggregate
-`version` actually changes, the backend broadcasts an `editor_catalog_changed`
-event over `WS /api/events` so connected visionOS editors re-hydrate live; an
-idempotent reload that changes nothing emits no event. The response reports the
-outcome and repeats the status route's counts and validation fields (abbreviated
-here):
-
-```json
-{
-  "reloaded": true,
-  "accepted": true,
-  "source": "override",
-  "version": "<sha256-hex>",
-  "changed": true,
-  "validation": { "state": "accepted", "code": null, "location": null }
-}
-```
-
-`accepted: false` means the candidate was rejected, `changed` is false, and the
-reported source/version still identify the previous live generation.
+client resolves; a catalog missing either is rejected whole. A map holds at most 64
+themes, and each key is a theme id of letters, digits and hyphens, because the
+editor passes it to Monaco's `defineTheme`, which refuses any other name. A
+TextMate theme's optional `name` is its display label, such as `Catppuccin Frappé`.
+A base theme rule whose `token` is the empty string styles default text, as Monaco
+defines it. A base theme's optional `semanticHighlighting` is `true` when language-server
+semantic tokens may recolor it. Clients treat an absent flag as `false`, as VS
+Code reads a theme. Rules whose `token` starts with `semantic.` style semantic
+tokens; the rest style Monarch tokens. Clients offer a theme only when it is in
+both maps.
 
 ## Editor Language Services
 
@@ -4013,7 +3972,6 @@ authenticated, workspace-scoped protocols. The server sends an initial
 - `workspace_entry_copied`
 - `workspace_git_operation`
 - `config_reloaded`
-- `editor_catalog_changed`
 - `terminal_session_started`
 - `terminal_session_closed`
 
@@ -4274,10 +4232,6 @@ every subscriber. `GET /api/config` stays the one place that reports values, wit
 tier 3 excluded from it by construction. Clients refresh that read on receipt to
 pick up the new `pendingValue` state, whether the edit came from this client, the
 Mac app, or another headset.
-`editor_catalog_changed` fires when an operator reload changes the served editor
-language catalog (Phase C.5). It carries only `version` and `languageCount` —
-never asset bytes — and visionOS re-hydrates the catalog on receipt, verifying
-each fetched blob's `sha256` before use (see the Editor Language Catalog routes).
 `terminal_session_started` / `terminal_session_closed` fire when an interactive
 terminal (PTY) session opens and closes (see the Terminal route). They carry only
 `sessionId`, `workspaceId`/`workspacePath`, and (on close) `exitCode` and
