@@ -37,6 +37,7 @@ import { initializeServiceStorage } from "./config/serviceStorage";
 import { LocalWorkspaceRegistry } from "./workspace/LocalWorkspaceRegistry";
 import { WorkspaceExplorer } from "./workspace/WorkspaceExplorer";
 import { WorkspaceHeadWatcher } from "./workspace/git/headWatcher";
+import { WorkspaceTreeWatcher } from "./workspace/explorer/treeWatcher";
 import { AgentSessionService } from "./agent/AgentSessionService";
 import { AgentAttachmentStore } from "./agent/AgentAttachmentStore";
 import { AgentTurnContextAssembler } from "./agent/AgentTurnContextAssembler";
@@ -127,6 +128,18 @@ export async function buildServer(input: BuildServerInput): Promise<BuiltServer>
   await headWatcher.start();
   app.addHook("onClose", async () => {
     await headWatcher.close();
+  });
+  // Reports file changes made outside AgentRoom's own mutation routes, such as
+  // a terminal command or another editor, so client file trees never go stale.
+  const treeWatcher = new WorkspaceTreeWatcher({
+    registry: localWorkspaceRegistry,
+    eventBus,
+    invalidateFileIndex: (workspaceId) => workspaceExplorer.invalidateFileIndex(workspaceId),
+    onError: (error) => app.log.warn({ err: error }, "Workspace tree watcher work failed")
+  });
+  await treeWatcher.start();
+  app.addHook("onClose", async () => {
+    await treeWatcher.close();
   });
   const languageServiceRegistry = new LanguageServiceRegistry(
     input.config,

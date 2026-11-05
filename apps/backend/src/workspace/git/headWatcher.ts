@@ -1,40 +1,43 @@
 import { watch } from "node:fs";
-import { stat } from "node:fs/promises";
 import { basename } from "node:path";
 import type { EventBus } from "../../events/EventBus";
 import type { WorkspaceBranchChangedPayload } from "../../events/eventTypes";
 import { publishWorkspaceBranchChanged } from "../../events/workspaceBranchChanged";
+import { publishWorkspaceFilesChanged } from "../../events/workspaceFilesChanged";
 import type { LocalWorkspaceRegistry } from "../LocalWorkspaceRegistry";
-
-/** The slice of `fs.FSWatcher` the watcher uses, so tests can drive events by hand. */
-export interface HeadWatchHandle {
-  close(): void;
-  on(event: "error", listener: (error: unknown) => void): unknown;
-}
-
-export type HeadWatchFunction = (
-  directory: string,
-  listener: (eventType: string, filename: string | null) => void
-) => HeadWatchHandle;
+import {
+  BackgroundWork,
+  BurstSchedule,
+  directoryIdentity,
+  WatchFailureReporter,
+  workspaceIdOf,
+  type DirectoryWatchFunction,
+  type DirectoryWatchHandle
+} from "../watchSupport";
 
 export interface WorkspaceHeadWatcherDeps {
   registry: Pick<
     LocalWorkspaceRegistry,
-    "listWithoutGitRefresh" | "gitCheckoutDir" | "gitCurrentBranch" | "refreshWorkspaceGit"
+    | "listWithoutGitRefresh"
+    | "findByIdWithoutGitRefresh"
+    | "gitCheckoutDir"
+    | "gitCurrentBranch"
+    | "refreshWorkspaceGit"
   >;
-  eventBus: Pick<EventBus, "publish" | "subscribe">;
+  eventBus: Pick<EventBus, "publish" | "publishLive" | "subscribe">;
   /** Drops the workspace's cached file index, as the branch-switch route does. */
   invalidateFileIndex(workspaceId: string): void;
-  watch?: HeadWatchFunction;
+  watch?: DirectoryWatchFunction;
   /**
    * The git dir's device and inode, or undefined when it is gone. The reconcile
    * pass drops a watch whose git dir vanished or was replaced, as by a re-clone.
    */
   directoryIdentity?: (path: string) => Promise<string | undefined>;
-  /** Reports a failure no caller waits on, such as an event subscriber throwing. */
+  /** Reports a failure no caller waits on: a watch that would not open or broke, or a subscriber throwing. */
   onError?: (error: unknown) => void;
   debounceMs?: number;
   minPublishIntervalMs?: number;
+  maxWaitMs?: number;
   reconcileIntervalMs?: number;
 }
 
@@ -44,41 +47,42 @@ interface HeadGroup {
   /** `directoryIdentity` of the git dir when the watch opened. */
   identity: string;
   workspaces: Set<string>;
-  handle: HeadWatchHandle;
+  handle: DirectoryWatchHandle;
   /** Last branch seen or announced; null is a detached HEAD, undefined is not read yet. */
   branch: string | null | undefined;
-  timer?: NodeJS.Timeout;
-  lastPublishAt: number;
+  /** Bursts of HEAD writes, each ending in one branch read. */
+  branchBurst: BurstSchedule;
+  /** Bursts of index and ref writes, each ending in one `workspace_files_changed` per workspace. */
+  statusBurst: BurstSchedule;
   reading: boolean;
   recheck: boolean;
 }
 
-const defaultWatch: HeadWatchFunction = (directory, listener) =>
+/**
+ * Git dir entries whose write changes what `git status` reports without
+ * touching the worktree: `index` for staging, `HEAD.lock` for every commit and
+ * reset (Git locks HEAD to update its reflog even when HEAD keeps its branch),
+ * `ORIG_HEAD` for a reset, and `HEAD` for a switch. Lock files other than
+ * `HEAD.lock` are left out: a `git status` run with optional locks takes
+ * `index.lock` without changing the index. Measured on macOS 2026-11-04 with
+ * Node 26 and Git 2.54; the backend's own reads run with
+ * `GIT_OPTIONAL_LOCKS=0` and write none of these.
+ */
+const statusEntryNames = new Set(["index", "HEAD", "HEAD.lock", "ORIG_HEAD"]);
+
+const defaultWatch: DirectoryWatchFunction = (directory, listener) =>
   watch(directory, { persistent: false }, (eventType, filename) => listener(eventType, filename));
-
-async function defaultDirectoryIdentity(path: string): Promise<string | undefined> {
-  try {
-    const info = await stat(path);
-    return info.isDirectory() ? `${info.dev}:${info.ino}` : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function workspaceIdOf(payload: unknown): string | undefined {
-  const workspaceId = (payload as { workspaceId?: unknown } | undefined)?.workspaceId;
-  return typeof workspaceId === "string" ? workspaceId : undefined;
-}
 
 /**
  * Publishes `workspace_branch_changed` with `origin: "observed"` when a
- * registered checkout's HEAD moves to another branch, whoever moved it.
+ * registered checkout's HEAD moves to another branch, whoever moved it, and
+ * `workspace_files_changed` when a stage, commit, or reset outside AgentRoom
+ * changes what Git status reports (see `statusEntryNames`).
  *
  * It watches each distinct git dir, not the HEAD file: Git replaces HEAD by
  * renaming `HEAD.lock` over it, which kills a file watch after one event. Only
- * events named exactly `HEAD` count. Every commit takes `HEAD.lock` without
- * rewriting HEAD, and the backend's own status reads churn `index`, so a
- * looser filter would fire constantly. A HEAD write does not mean the branch
+ * events named exactly `HEAD` read the branch, because every commit takes
+ * `HEAD.lock` without rewriting HEAD. A HEAD write does not mean the branch
  * changed (a no-op switch, a detached commit, a rebase that ends where it
  * began), so each burst ends in one `git branch --show-current` and publishes
  * only on a real change. Measured on macOS 2026-10-17 with Node 26 and
@@ -90,25 +94,32 @@ export class WorkspaceHeadWatcher {
   private readonly groupOf = new Map<string, string>();
   /** Registered workspaces without a watch: not a repository yet, or their git dir vanished. */
   private readonly unwatched = new Set<string>();
+  /** Workspaces whose watch dropped, so index and ref writes before it reopens went unseen. */
+  private readonly interrupted = new Set<string>();
   /** Workspaces that should be watched; an attach that finishes after a removal checks this. */
   private readonly registered = new Set<string>();
-  private readonly watchDirectory: HeadWatchFunction;
+  private readonly watchDirectory: DirectoryWatchFunction;
   private readonly directoryIdentity: (path: string) => Promise<string | undefined>;
   private readonly debounceMs: number;
   private readonly minPublishIntervalMs: number;
+  private readonly maxWaitMs: number;
   private readonly reconcileIntervalMs: number;
   /** Reads still running; close waits for them so no Git command outlives shutdown. */
-  private readonly inFlight = new Set<Promise<void>>();
+  private readonly work: BackgroundWork;
+  private readonly failures: WatchFailureReporter;
   private unsubscribe?: () => void;
   private reconcileTimer?: NodeJS.Timeout;
   private closed = false;
 
   constructor(private readonly deps: WorkspaceHeadWatcherDeps) {
     this.watchDirectory = deps.watch ?? defaultWatch;
-    this.directoryIdentity = deps.directoryIdentity ?? defaultDirectoryIdentity;
+    this.directoryIdentity = deps.directoryIdentity ?? directoryIdentity;
     this.debounceMs = deps.debounceMs ?? 300;
     this.minPublishIntervalMs = deps.minPublishIntervalMs ?? 1000;
+    this.maxWaitMs = deps.maxWaitMs ?? 1000;
     this.reconcileIntervalMs = deps.reconcileIntervalMs ?? 60_000;
+    this.work = new BackgroundWork(deps.onError);
+    this.failures = new WatchFailureReporter(deps.onError);
   }
 
   async start(): Promise<void> {
@@ -117,7 +128,7 @@ export class WorkspaceHeadWatcher {
       if (!workspaceId) return;
       switch (event.type) {
         case "workspace_registered":
-          this.track(this.attach(workspaceId));
+          this.work.track(this.attach(workspaceId));
           return;
         case "workspace_removed":
           this.detach(workspaceId);
@@ -135,7 +146,7 @@ export class WorkspaceHeadWatcher {
     });
     const workspaces = await this.deps.registry.listWithoutGitRefresh();
     await Promise.all(workspaces.map((workspace) => this.attach(workspace.id)));
-    this.reconcileTimer = setInterval(() => this.track(this.reconcile()), this.reconcileIntervalMs);
+    this.reconcileTimer = setInterval(() => this.work.track(this.reconcile()), this.reconcileIntervalMs);
     this.reconcileTimer.unref?.();
   }
 
@@ -148,16 +159,10 @@ export class WorkspaceHeadWatcher {
     this.groups.clear();
     this.groupOf.clear();
     this.unwatched.clear();
+    this.interrupted.clear();
     this.registered.clear();
-    await Promise.allSettled([...this.inFlight]);
-  }
-
-  /** Runs background work that no caller awaits, so its failure is reported, never unhandled. */
-  private track(work: Promise<void>): void {
-    const settled = work
-      .catch((error: unknown) => this.deps.onError?.(error))
-      .finally(() => this.inFlight.delete(settled));
-    this.inFlight.add(settled);
+    this.failures.clear();
+    await this.work.settle();
   }
 
   /** Retries unwatched workspaces and drops watches whose git dir is gone or replaced. */
@@ -193,12 +198,15 @@ export class WorkspaceHeadWatcher {
     group.workspaces.add(workspaceId);
     this.groupOf.set(workspaceId, gitDir);
     this.unwatched.delete(workspaceId);
+    // Index or ref writes may have landed while no watch was open.
+    if (this.interrupted.delete(workspaceId)) group.statusBurst.schedule();
     if (group.branch === undefined) await this.readBaseline(group, workspaceId);
   }
 
   private detach(workspaceId: string): void {
     this.registered.delete(workspaceId);
     this.unwatched.delete(workspaceId);
+    this.interrupted.delete(workspaceId);
     const group = this.groupFor(workspaceId);
     this.groupOf.delete(workspaceId);
     if (!group) return;
@@ -223,25 +231,33 @@ export class WorkspaceHeadWatcher {
           this.dropGroup(group);
           return;
         }
-        if (filename === null || filename === "HEAD") this.schedule(group);
+        if (filename === null || filename === "HEAD") group.branchBurst.schedule();
+        if (filename === null || statusEntryNames.has(filename)) group.statusBurst.schedule();
       });
-      group = {
+      const timing = { debounceMs: this.debounceMs, minIntervalMs: this.minPublishIntervalMs, maxWaitMs: this.maxWaitMs };
+      const opened: HeadGroup = {
         gitDir,
         identity,
         workspaces: new Set(),
         handle,
         branch: undefined,
-        lastPublishAt: 0,
+        branchBurst: new BurstSchedule(timing, () => this.work.track(this.check(opened))),
+        statusBurst: new BurstSchedule(timing, () => this.work.track(this.publishStatusChange(opened))),
         reading: false,
         recheck: false
       };
-      handle.on("error", () => {
-        if (group && this.groups.get(gitDir) === group) this.dropGroup(group);
+      group = opened;
+      handle.on("error", (error) => {
+        if (this.groups.get(gitDir) !== opened) return;
+        this.failures.failed(gitDir, error);
+        this.dropGroup(opened);
       });
-    } catch {
+    } catch (error) {
+      this.failures.failed(gitDir, error);
       return undefined;
     }
     this.groups.set(gitDir, group);
+    this.failures.recovered(gitDir);
     return group;
   }
 
@@ -252,18 +268,6 @@ export class WorkspaceHeadWatcher {
     } catch {
       // Left unread; the next HEAD event records it without publishing.
     }
-  }
-
-  private schedule(group: HeadGroup): void {
-    if (this.closed) return;
-    if (group.timer) clearTimeout(group.timer);
-    const sinceLastPublish = Date.now() - group.lastPublishAt;
-    const delay = Math.max(this.debounceMs, this.minPublishIntervalMs - sinceLastPublish);
-    group.timer = setTimeout(() => {
-      group.timer = undefined;
-      this.track(this.check(group));
-    }, delay);
-    group.timer.unref?.();
   }
 
   private async check(group: HeadGroup): Promise<void> {
@@ -279,7 +283,7 @@ export class WorkspaceHeadWatcher {
       group.reading = false;
       if (group.recheck) {
         group.recheck = false;
-        this.schedule(group);
+        if (!this.closed) group.branchBurst.schedule();
       }
     }
   }
@@ -304,7 +308,7 @@ export class WorkspaceHeadWatcher {
     if (previous === next) return;
     group.branch = next;
     if (previous === undefined) return;
-    group.lastPublishAt = Date.now();
+    group.branchBurst.markFired();
 
     for (const workspaceId of [...group.workspaces]) {
       let path: string;
@@ -325,12 +329,25 @@ export class WorkspaceHeadWatcher {
     }
   }
 
-  /** Stops watching a git dir that is gone, keeping its workspaces queued for the reconcile pass. */
+  /** Tells each workspace in the checkout to re-read Git status after an index or ref write. */
+  private async publishStatusChange(group: HeadGroup): Promise<void> {
+    if (this.closed || this.groups.get(group.gitDir) !== group) return;
+    group.statusBurst.markFired();
+    for (const workspaceId of [...group.workspaces]) {
+      const workspace = await this.deps.registry.findByIdWithoutGitRefresh(workspaceId);
+      if (!workspace || this.closed || this.groupFor(workspaceId) !== group) continue;
+      publishWorkspaceFilesChanged(this.deps.eventBus, workspace);
+    }
+  }
+
+  /** Stops watching a git dir that is gone or broken, keeping its workspaces queued for the reconcile pass. */
   private dropGroup(group: HeadGroup): void {
     this.removeGroup(group);
     for (const workspaceId of group.workspaces) {
       this.groupOf.delete(workspaceId);
-      if (this.registered.has(workspaceId)) this.unwatched.add(workspaceId);
+      if (!this.registered.has(workspaceId)) continue;
+      this.unwatched.add(workspaceId);
+      this.interrupted.add(workspaceId);
     }
   }
 
@@ -340,8 +357,8 @@ export class WorkspaceHeadWatcher {
   }
 
   private closeGroup(group: HeadGroup): void {
-    if (group.timer) clearTimeout(group.timer);
-    group.timer = undefined;
+    group.branchBurst.cancel();
+    group.statusBurst.cancel();
     try {
       group.handle.close();
     } catch {

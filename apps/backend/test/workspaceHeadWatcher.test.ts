@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { buildServer } from "../src/server";
@@ -9,9 +10,9 @@ import { FileAuditLogStore } from "../src/state/FileAuditLogStore";
 import { LocalWorkspaceRegistry } from "../src/workspace/LocalWorkspaceRegistry";
 import {
   WorkspaceHeadWatcher,
-  type HeadWatchFunction,
   type WorkspaceHeadWatcherDeps
 } from "../src/workspace/git/headWatcher";
+import type { DirectoryWatchFunction } from "../src/workspace/watchSupport";
 import { config, createGitWorkspace, git } from "./support/agentSessionHarness";
 
 interface FakeCheckout {
@@ -40,6 +41,8 @@ function fakeHarness(checkouts: Record<string, FakeCheckout>) {
   const registry: WorkspaceHeadWatcherDeps["registry"] = {
     listWithoutGitRefresh: async () =>
       Object.entries(checkouts).map(([id, checkout]) => ({ id, path: checkout.path }) as LocalWorkspace),
+    findByIdWithoutGitRefresh: async (id) =>
+      checkouts[id] ? ({ id, path: checkouts[id].path } as LocalWorkspace) : undefined,
     gitCheckoutDir: async (id) => checkouts[id]?.gitDir,
     gitCurrentBranch: async (id) => {
       reads.push(id);
@@ -47,7 +50,7 @@ function fakeHarness(checkouts: Record<string, FakeCheckout>) {
     },
     refreshWorkspaceGit: async (id) => ({ id, path: checkouts[id].path }) as LocalWorkspace
   };
-  const watch: HeadWatchFunction = (directory, listener) => {
+  const watch: DirectoryWatchFunction = (directory, listener) => {
     const entry: FakeWatch = { directory, listener, closed: false };
     watches.push(entry);
     return {
@@ -80,7 +83,23 @@ function fakeHarness(checkouts: Record<string, FakeCheckout>) {
   };
   const observed = () =>
     events.filter((event) => event.type === "workspace_branch_changed" && (event.payload as { origin?: string }).origin === "observed");
-  return { checkouts, registry, watches, reads, invalidated, identities, errors, eventBus, events, watcher, openWatch, fire, observed };
+  const filesChanged = () => events.filter((event) => event.type === "workspace_files_changed");
+  return {
+    checkouts,
+    registry,
+    watches,
+    reads,
+    invalidated,
+    identities,
+    errors,
+    eventBus,
+    events,
+    watcher,
+    openWatch,
+    fire,
+    observed,
+    filesChanged
+  };
 }
 
 const settle = () => sleep(40);
@@ -115,7 +134,7 @@ describe("WorkspaceHeadWatcher", () => {
     await h.watcher.close();
   });
 
-  it("ignores every git dir entry except HEAD", async () => {
+  it("reads the branch only for a HEAD write", async () => {
     const h = fakeHarness({ repo: { path: "/repo", gitDir: "/repo/.git", branch: "main" } });
     await h.watcher.start();
     const baselineReads = h.reads.length;
@@ -128,6 +147,38 @@ describe("WorkspaceHeadWatcher", () => {
 
     expect(h.reads).toHaveLength(baselineReads);
     expect(h.observed()).toEqual([]);
+    await h.watcher.close();
+  });
+
+  it("publishes one files change per workspace in the checkout for index and ref writes", async () => {
+    const h = fakeHarness({
+      root: { path: "/repo", gitDir: "/repo/.git", branch: "main" },
+      nested: { path: "/repo/apps", gitDir: "/repo/.git", branch: "main" }
+    });
+    await h.watcher.start();
+
+    // A `git add`, then a commit, as measured: index, then HEAD.lock.
+    for (const name of ["index.lock", "index", "index", "HEAD.lock", "ORIG_HEAD"]) h.fire("/repo/.git", name);
+    await settle();
+
+    expect(h.filesChanged().map((event) => event.payload)).toEqual([
+      { workspaceId: "root", workspacePath: "/repo" },
+      { workspaceId: "nested", workspacePath: "/repo/apps" }
+    ]);
+    expect(h.eventBus.getRecentEvents().some((event) => event.type === "workspace_files_changed")).toBe(false);
+    await h.watcher.close();
+  });
+
+  it("publishes no files change for lock files a status read takes, or for fetches", async () => {
+    const h = fakeHarness({ repo: { path: "/repo", gitDir: "/repo/.git", branch: "main" } });
+    await h.watcher.start();
+
+    for (const name of ["index.lock", "FETCH_HEAD", "packed-refs.lock", "AUTO_MERGE.lock", "COMMIT_EDITMSG"]) {
+      h.fire("/repo/.git", name);
+    }
+    await settle();
+
+    expect(h.filesChanged()).toEqual([]);
     await h.watcher.close();
   });
 
@@ -251,13 +302,19 @@ describe("WorkspaceHeadWatcher", () => {
     await h.watcher.close();
   });
 
-  it("drops a watch on error", async () => {
+  it("reports a broken watch and publishes a files change once it is rewatched", async () => {
     const h = fakeHarness({ repo: { path: "/repo", gitDir: "/repo/.git", branch: "main" } });
     await h.watcher.start();
 
     h.openWatch("/repo/.git")?.error?.(new Error("EPERM"));
 
     expect(h.openWatch("/repo/.git")).toBeUndefined();
+    expect(h.errors.map((error) => (error as Error).message)).toEqual(["EPERM"]);
+
+    await h.watcher.reconcile();
+    expect(h.openWatch("/repo/.git")).toBeDefined();
+    await settle();
+    expect(h.filesChanged()).toHaveLength(1);
     await h.watcher.close();
   });
 
@@ -347,7 +404,8 @@ describe("WorkspaceHeadWatcher on a real repository", () => {
     const watcher = new WorkspaceHeadWatcher({ registry, eventBus, invalidateFileIndex: () => {} });
     await watcher.start();
     const observed = () => events.filter((event) => event.type === "workspace_branch_changed");
-    return { workspacePath, workspace, registry, watcher, observed };
+    const filesChanged = () => events.filter((event) => event.type === "workspace_files_changed");
+    return { workspacePath, workspace, registry, watcher, observed, filesChanged };
   }
 
   it("publishes a git switch made outside AgentRoom", async () => {
@@ -378,6 +436,23 @@ describe("WorkspaceHeadWatcher on a real repository", () => {
       await sleep(700);
 
       expect(h.observed()).toEqual([]);
+    } finally {
+      await h.watcher.close();
+    }
+  });
+
+  it("publishes a files change for a git add outside AgentRoom, and none for its own status reads", async () => {
+    const h = await realHarness();
+    try {
+      await writeFile(join(h.workspacePath, "staged.txt"), "staged\n");
+      // AgentRoom's reads run with GIT_OPTIONAL_LOCKS=0 and write nothing.
+      await h.registry.refreshWorkspaceGit(h.workspace.id);
+      await sleep(700);
+      expect(h.filesChanged()).toEqual([]);
+
+      await git(h.workspacePath, "add", "staged.txt");
+      await until(() => h.filesChanged().length > 0);
+      expect(h.filesChanged()[0].payload).toEqual({ workspaceId: h.workspace.id, workspacePath: h.workspace.path });
     } finally {
       await h.watcher.close();
     }

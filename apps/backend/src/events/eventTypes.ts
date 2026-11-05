@@ -31,6 +31,7 @@ export type AgentRoomEventType =
   | "workspace_entry_renamed"
   | "workspace_entry_moved"
   | "workspace_entry_copied"
+  | "workspace_files_changed"
   | "workspace_git_operation"
   | "config_reloaded"
   | "sketch_document_changed"
@@ -118,6 +119,14 @@ export interface WorkspaceBranchChangedPayload {
   branch?: string;
   detached?: true;
   origin?: "observed";
+}
+
+// `workspace_files_changed` is an invalidation: something a tree read or a Git
+// status read could show changed in the workspace. It names no path, so clients
+// re-read the tree and Git status through the authenticated routes.
+export interface WorkspaceFilesChangedPayload {
+  workspaceId: string;
+  workspacePath: string;
 }
 
 export interface AgentSessionPayload {

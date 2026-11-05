@@ -3970,6 +3970,7 @@ authenticated, workspace-scoped protocols. The server sends an initial
 - `workspace_entry_renamed`
 - `workspace_entry_moved`
 - `workspace_entry_copied`
+- `workspace_files_changed`
 - `workspace_git_operation`
 - `config_reloaded`
 - `terminal_session_started`
@@ -4224,6 +4225,26 @@ already shows the new branch. Clients treat every `workspace_branch_changed` as
 an invalidation and re-read the workspace. Which of these events reach durable
 audit is a trust decision; see
 [Git operations](../safety/TRUST_AND_SAFETY.md#git-operations).
+`workspace_files_changed` fires when something a tree read or a Git status read
+could show changes inside a registered workspace, whoever changed it: a
+terminal command, another editor on the Mac, an agent's own tools, or the
+bounded mutation routes above. Two backend watchers publish it. The tree
+watcher reports worktree changes. The HEAD watcher reports a stage, commit, or
+reset, which change Git status without touching the worktree. It carries
+`workspaceId` and `workspacePath` only, never a path, a count, or content.
+Which changes count is a trust decision; see
+[Workspace files](../safety/TRUST_AND_SAFETY.md#workspace-files). A burst
+publishes once, after about 300 ms of quiet, at most once a second per
+workspace, and no later than about a second after its first change, so a
+steady stream such as a log written every few hundred milliseconds still
+publishes about once a second. A watch that reopens after an error or a
+replaced root publishes once, because changes made while it was closed went
+unseen. When a burst created, deleted, or renamed an entry, or followed a
+reopened watch, the backend drops the workspace's cached file index before it
+publishes. The event is live only: it skips the recent-event replay and the
+status snapshot, because a reconnecting client re-reads the tree anyway, and
+it never reaches durable audit. Clients treat it as an invalidation and
+re-read the tree and Git status.
 `config_reloaded` fires when `PATCH /api/config` changes at least one managed
 setting. It carries `changedKeys` (key **names** only), `requiresRestart: true`,
 and an `audit` block repeating those names for the durable log — **never**

@@ -578,6 +578,21 @@ protected names, sockets, devices, unsupported types, more than 20,000 entries,
 or more than 1 GiB of regular-file data fail before deletion. It is symlink-safe
 but not a transactional snapshot against concurrent regular-file changes.
 
+The backend watches every registered workspace root so that file changes
+made outside AgentRoom reach clients. It holds one non-persistent recursive
+directory watch per registered workspace, bounded by the registered set. The
+watch reads change notifications only, never file content, and discards any
+change whose relative path has a segment the tree read hides, so secret names,
+`.git`, generated directories, and staging names never publish. Git status
+changes that leave the worktree alone come from the HEAD watch described under
+[Git operations](#git-operations). The resulting `workspace_files_changed`
+event names the workspace only, never a path, and never reaches durable audit,
+because AgentRoom did not make the change. Its timing and delivery are in
+[API.md](../api/API.md#broadcast-websocket). A watch closes when its workspace
+is unregistered, when it errors, or when the 60-second pass finds its root gone
+or replaced. The same pass retries workspaces without a watch. A watch that
+fails to open or breaks is logged once, and again only after it has reopened.
+
 ### File index, search, preview, media, and skills
 
 The file index and literal content search share one filtered enumeration. Git
@@ -681,11 +696,17 @@ non-recursive directory watch per distinct git dir, which every workspace
 registered inside one checkout shares. The git dir comes from a fixed
 `git rev-parse --absolute-git-dir` read, and for a
 linked worktree or submodule it sits outside the registered workspace. The
-watch reads change notifications only, never file content, and acts only on an
-entry named exactly `HEAD`. Each burst of changes ends in one fixed
+watch reads change notifications only, never file content. An entry named
+exactly `HEAD` starts a branch check: each burst ends in one fixed
 `git branch --show-current` read and, when the branch moved, the fixed snapshot
 read every workspace refresh already runs. The resulting event carries the
-branch name only. Observed changes are not written to durable audit, because
+branch name only. An entry named `index`, `HEAD`, `HEAD.lock`, or `ORIG_HEAD`
+publishes a path-free `workspace_files_changed` for each workspace in the
+checkout, so a stage, commit, or reset made in a terminal refreshes Git status.
+The watch counts no other lock file, because a `git status` run with optional
+locks takes `index.lock` without changing the index. The backend's own Git
+reads run with `GIT_OPTIONAL_LOCKS=0` and write none of these entries, so they
+publish nothing. Observed changes are not written to durable audit, because
 AgentRoom did not make them. The number of
 watches is bounded by the registered repositories. A watch closes when its last
 workspace is unregistered or its git dir disappears. A 60-second pass also

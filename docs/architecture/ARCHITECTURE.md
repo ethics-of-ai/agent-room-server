@@ -24,7 +24,9 @@ Codex | Claude Code | DeepSeek | Cursor | admitted ACP agents
 | Config and managed settings | `apps/backend/src/config`, `apps/backend/src/routes/configRoutes.ts` |
 | External contracts | `apps/backend/src/domain` |
 | Workspace files, search, and Git | `apps/backend/src/workspace`, `apps/backend/src/routes/workspaceRoutes.ts` |
-| Branch changes made outside AgentRoom | `apps/backend/src/workspace/git/headWatcher.ts` |
+| Branch and Git status changes made outside AgentRoom | `apps/backend/src/workspace/git/headWatcher.ts` |
+| File changes made outside AgentRoom | `apps/backend/src/workspace/explorer/treeWatcher.ts` |
+| Shared watch lifecycle and burst timing | `apps/backend/src/workspace/watchSupport.ts` |
 | Sessions and turns | `apps/backend/src/agent/AgentSessionService.ts`, `apps/backend/src/routes/agentSessionRoutes.ts` |
 | Durable sessions and audit | `apps/backend/src/state` |
 | Runner admission and execution | `apps/backend/src/runner/registry.ts`, `apps/backend/src/runner` |
